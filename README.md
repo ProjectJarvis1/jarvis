@@ -177,8 +177,8 @@ Jarvis/
 글라스 없이도 폰 카메라 모드로 시작할 수 있습니다. 첫 Python 의존성 설치와 임베딩·얼굴 모델 다운로드에는 시간과 디스크 공간이 필요합니다.
 
 ```bash
-git clone https://github.com/blockchainMania/Jarvis.git
-cd Jarvis
+git clone https://github.com/ProjectJarvis1/jarvis.git
+cd jarvis
 ```
 
 ### 2. 백엔드 환경변수 설정

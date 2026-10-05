@@ -37,12 +37,3 @@ pip install -r requirements.txt
 cp .env.example .env
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
-
-## 공개 저장소 보안 규칙
-
-- `.env`, OAuth client secret, API key, access/refresh token은 커밋하지 않습니다.
-- `app/google-services.json`은 Firebase 콘솔에서 내려받아 로컬에만 둡니다.
-- Docker 기본 비밀번호와 `dev-secret-change-me`는 개발 테스트 전용이며 외부에
-  공개된 서버에서 사용하지 않습니다.
-- 운영 환경에서는 TLS, 강한 API 키, 키 교체, 데이터베이스 백업과 접근 제어를
-  별도로 설정해야 합니다.
