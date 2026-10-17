@@ -114,7 +114,7 @@ fun MemoryScreen(
     val currentTitle = when {
         selectedMemory != null -> "기억 상세"
         selectedMeeting != null -> "회의 상세"
-        else -> "Jarvis Records"
+        else -> "기록"
     }
 
     BackHandler(enabled = selectedMemory != null || selectedMeeting != null) {
@@ -128,7 +128,7 @@ fun MemoryScreen(
         modifier = modifier.fillMaxSize(),
         topBar = {
             TopAppBar(
-                title = { Text(currentTitle) },
+                title = { Text(currentTitle, style = MaterialTheme.typography.headlineMedium) },
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -139,7 +139,7 @@ fun MemoryScreen(
                             }
                         }
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "이전 화면")
                     }
                 },
                 actions = {
@@ -181,7 +181,7 @@ fun MemoryScreen(
                                     }
                                 }
                             ) {
-                                Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                                Icon(Icons.Default.Refresh, contentDescription = "새로고침")
                             }
                         }
                     }
@@ -207,7 +207,7 @@ fun MemoryScreen(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(padding)
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 24.dp),
                 ) {
                     SummaryHeader(
                         memoryCount = memoryUiState.memories.size,
@@ -369,52 +369,12 @@ private fun SummaryHeader(
     memoryCount: Int,
     meetingCount: Int,
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    imageVector = Icons.Default.CollectionsBookmark,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Text(
-                    text = "기억과 회의 기록",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                CountTile(label = "기억", value = memoryCount.toString(), modifier = Modifier.weight(1f))
-                CountTile(label = "회의", value = meetingCount.toString(), modifier = Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun CountTile(
-    label: String,
-    value: String,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
-        tonalElevation = 2.dp,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
-    ) {
-        Column(
-            modifier = Modifier.padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Text(text = label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(text = value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+    Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("다시 꺼내고 싶은 순간들", style = MaterialTheme.typography.titleLarge)
+        Text("기억과 회의를 한곳에서 찾아보세요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            JarvisTag("불러온 기억 $memoryCount")
+            JarvisTag("불러온 회의 $meetingCount")
         }
     }
 }
@@ -433,7 +393,10 @@ private fun SearchBar(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text("기억 검색") },
+            label = { Text("어떤 기억을 찾을까요?") },
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch() }),
+            shape = MaterialTheme.shapes.medium,
             placeholder = { Text("예: 투자자 명함, 회의실 문서") },
             singleLine = true,
             modifier = Modifier.weight(1f),
@@ -480,15 +443,18 @@ private fun MemoryCard(
 ) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.large,
+        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = androidx.compose.material3.CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             MemoryThumbnail(filename = memory.imageFilename)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                AssistChip(onClick = {}, label = { Text(memory.memoryTypeLabel()) })
-                AssistChip(onClick = {}, label = { Text(memory.capturedAtDisplay) })
+                JarvisTag(memory.memoryTypeLabel())
+                JarvisTag(memory.capturedAtDisplay)
             }
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -524,7 +490,7 @@ private fun MemoryCard(
             if (memory.labels.isNotEmpty()) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     memory.labels.take(4).forEach { label ->
-                        AssistChip(onClick = {}, label = { Text(label) })
+                        JarvisTag(label)
                     }
                 }
             }
@@ -538,7 +504,7 @@ private fun MemoryDetail(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
@@ -633,7 +599,7 @@ private fun MemoryRecallHeader(memory: MemoryItem) {
             )
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 memory.labels.take(6).forEach { label ->
-                    AssistChip(onClick = {}, label = { Text(label) })
+                    JarvisTag(label)
                 }
             }
         }
@@ -679,9 +645,12 @@ private fun MeetingCard(
 ) {
     ElevatedCard(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
+        shape = MaterialTheme.shapes.large,
+        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = androidx.compose.material3.CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
     ) {
         Column(
-            modifier = Modifier.padding(14.dp),
+            modifier = Modifier.padding(20.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
@@ -740,7 +709,7 @@ private fun MeetingDetail(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxSize().padding(horizontal = 16.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {

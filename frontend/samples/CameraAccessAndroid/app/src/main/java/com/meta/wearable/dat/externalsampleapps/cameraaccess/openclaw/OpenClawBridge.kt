@@ -7,6 +7,14 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 // in a follow-up if you want.
 
 import android.util.Log
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.AppContextProvider
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.DurableRequests
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.PendingNetworkException
+import java.io.File
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+
+
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.awaitTaskResponse
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import java.time.ZoneId
@@ -28,6 +36,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
+private class RequestIdentity(val value: String?) : AbstractCoroutineContextElement(Key) {
+    companion object Key : CoroutineContext.Key<RequestIdentity>
+}
+
 class OpenClawBridge {
     companion object {
         private const val TAG = "JarvisBridge"
@@ -47,6 +59,9 @@ class OpenClawBridge {
         .readTimeout(60, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .build()
+
+    val durableRequests by lazy { DurableRequests(File(AppContextProvider.require().filesDir, "outbox"), client) }
+    private val writeTools = setOf("save_person", "save_meeting", "save_memory", "save_life_memory", "save_need", "prepare_record_change", "apply_record_change", "undo_record_change")
 
     private val pingClient = OkHttpClient.Builder()
         .readTimeout(5, TimeUnit.SECONDS)
@@ -97,24 +112,41 @@ class OpenClawBridge {
         args: Map<String, Any?>,
         visualFrame: VisualMemoryFrameStore.VisualFrame? = null,
         beforeWrite: suspend () -> Unit = {},
+        requestKey: String? = null,
     ): ToolResult =
-        withContext(Dispatchers.IO) {
+        withContext(Dispatchers.IO + RequestIdentity(if (toolName in writeTools) requestKey else null)) {
             _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
             val result: ToolResult = try {
                 currentCoroutineContext().ensureActive()
                 // Mark before dispatch, not when the tool is merely queued.
-                if (toolName in setOf("save_person", "save_meeting", "save_memory", "save_life_memory", "save_need")) {
+                if (toolName in writeTools) {
                     if (toolName == "save_life_memory" && visualFrame == null) {
                         return@withContext ToolResult.Failure("저장할 사진이 없습니다. 먼저 사진 작업 결과를 확인해주세요.")
                     }
                     beforeWrite()
                 }
                 when (toolName) {
-                    "save_person" -> post(
-                        "/people",
-                        pick(args, "name", "aliases", "org", "role",
-                                   "first_met_at", "last_met_at", "notes_summary")
-                    )
+                    "prepare_record_change" -> post("/assistant/changes", pick(args, "kind", "record_id", "changes", "action", "expected_version"))
+                    "apply_record_change", "undo_record_change" -> {
+                        val id = java.util.UUID.fromString(args["change_id"].toString())
+                        post("/assistant/changes/$id/${if (toolName == "apply_record_change") "apply" else "undo"}", JSONObject())
+                    }
+                    "get_meeting_followups" -> {
+                        val id = java.util.UUID.fromString(args["meeting_id"].toString())
+                        get("/assistant/meetings/$id/followups")
+                    }
+                    "identify_person" -> {
+                        requireNotNull(visualFrame) { "확인한 사진을 먼저 지정해주세요." }
+                        post("/people/identify", pick(args, "top_k").put("image_base64", visualFrame.base64))
+                    }
+                    "save_person" -> {
+                        val body = pick(args, "name", "aliases", "org", "role", "first_met_at", "last_met_at", "notes_summary")
+                        if (args["include_face"] == true) {
+                            requireNotNull(visualFrame) { "얼굴을 등록할 사진이 없습니다." }
+                            body.put("image_base64", visualFrame.base64)
+                        }
+                        post("/people", body)
+                    }
                     "search_people" -> post(
                         "/people/search",
                         pick(args, "query", "top_k")
@@ -184,6 +216,8 @@ class OpenClawBridge {
                     }
                     else -> ToolResult.Failure("Unknown tool: $toolName")
                 }
+            } catch (e: PendingNetworkException) {
+                throw e
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -218,6 +252,11 @@ class OpenClawBridge {
     }
 
     private suspend fun post(path: String, body: JSONObject): ToolResult {
+        currentCoroutineContext()[RequestIdentity]?.value?.let { key ->
+            val response = durableRequests.send(key, baseUrl(), GeminiConfig.jarvisApiKey, path, body.toString())
+            return if (response.code in 200..299) ToolResult.Success(response.body)
+                else ToolResult.Failure("HTTP ${response.code}: ${response.body.take(200)}")
+        }
         val request = Request.Builder()
             .url("${baseUrl()}$path")
             .post(body.toString().toRequestBody(jsonMediaType))

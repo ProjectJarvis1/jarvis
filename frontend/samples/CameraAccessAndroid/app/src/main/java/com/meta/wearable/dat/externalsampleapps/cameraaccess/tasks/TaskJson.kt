@@ -25,6 +25,7 @@ fun TaskRecord.toJson(includeResult: Boolean = false): JSONObject = JSONObject()
     }
 }
 fun TaskManager.contextJson(): JSONObject = JSONObject().apply {
+    put("references", JSONArray(ConversationReferences.from(snapshot()).takeLast(8).map { it.json().put("excerpt", it.excerpt.take(700)) }))
     put("focus_task_id", focusTaskId)
     put("storage_error", storageError)
     put("tasks", JSONArray(snapshot().takeLast(12).map { it.toJson() }))

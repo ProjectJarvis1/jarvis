@@ -52,6 +52,11 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -99,6 +104,9 @@ class StreamViewModel(
   var geminiViewModel: GeminiSessionViewModel? = null
   var webrtcViewModel: WebRTCSessionViewModel? = null
   private var phoneCameraManager: PhoneCameraManager? = null
+  private data class PhoneFrame(val bitmap: Bitmap, val receivedNanos: Long, val capturedAtMs: Long)
+  private val phoneFrames = MutableStateFlow<PhoneFrame?>(null)
+  private var stillCapture: Deferred<Bitmap?>? = null
 
   fun startStream() {
     userRequestedStop = false
@@ -190,7 +198,9 @@ class StreamViewModel(
     phoneCameraManager = manager
     VisualMemoryFrameStore.freshStillProvider = ::captureFreshVisualFrame
 
+    phoneFrames.value = null
     manager.onFrameCaptured = { bitmap ->
+      phoneFrames.value = PhoneFrame(bitmap, System.nanoTime(), System.currentTimeMillis())
       _uiState.update { it.copy(videoFrame = bitmap, errorMessage = null) }
       // Forward to Gemini (throttled inside the VM)
       geminiViewModel?.sendVideoFrameIfThrottled(bitmap)
@@ -396,22 +406,36 @@ class StreamViewModel(
   private suspend fun captureFreshVisualFrame(): VisualMemoryFrameStore.VisualFrame? {
     return when (_uiState.value.streamingMode) {
       StreamingMode.PHONE -> {
-        _uiState.value.videoFrame?.let {
-          _uiState.update { state -> state.copy(capturedPhoto = it) }
-          VisualMemoryFrameStore.bitmapToVisualFrame(it, "phone_camera_still")
+        val frame = withTimeoutOrNull(2_000L) {
+          phoneFrames.filterNotNull().first { System.nanoTime() - it.receivedNanos <= 1_200_000_000L }
+        } ?: return null
+        _uiState.update { it.copy(capturedPhoto = frame.bitmap) }
+        withContext(Dispatchers.Default) {
+          VisualMemoryFrameStore.bitmapToVisualFrame(frame.bitmap, "phone_camera_still", frame.capturedAtMs)
         }
       }
       StreamingMode.GLASSES -> {
         try {
-          // DAT video delivery trails the real scene. Capture only after the spoken request has
-          // completed and allow the glasses camera pipeline to catch up before taking the still.
-          delay(2000L)
-          val photoData = photoCaptureMutex.withLock {
-            currentCoroutineContext().ensureActive()
-            withContext(NonCancellable) { streamSession?.capturePhoto()?.getOrNull() }
-          } ?: return null
+          val session = streamSession ?: return null
+          if (stillCapture?.isActive == true) {
+            _uiState.update { it.copy(errorMessage = "이전 촬영을 마무리하고 있어요. 계속되면 카메라를 다시 연결해주세요.") }
+            return null
+          }
+          // The hardware call owns its lifetime; cancelling a user task only stops awaiting it.
+          // Late hardware results never update the screen or a superseded business task.
+          val capture = viewModelScope.async(Dispatchers.IO) {
+            val data = photoCaptureMutex.withLock {
+              withContext(NonCancellable) { session.capturePhoto().getOrNull() }
+            } ?: return@async null
+            photoDataToBitmap(data)
+          }
+          stillCapture = capture
+          val bitmap = withTimeoutOrNull(8_000L) { capture.await() }
           currentCoroutineContext().ensureActive()
-          val bitmap = withContext(Dispatchers.Default) { photoDataToBitmap(photoData) }
+          if (bitmap == null || streamSession !== session) {
+            _uiState.update { it.copy(errorMessage = "사진을 받지 못했어요. 카메라 연결을 확인해주세요.") }
+            return null
+          }
           _uiState.update { state -> state.copy(capturedPhoto = bitmap) }
           VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "glasses_capture_photo")
         } catch (e: CancellationException) {

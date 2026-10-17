@@ -64,3 +64,8 @@ def health():
         "embedding_model": settings.embedding_model,
         "embedding_dim": settings.embedding_dim,
     }
+
+from .idempotency import IdempotencyMiddleware
+from .routers import assistant
+app.include_router(assistant.router)
+app.add_middleware(IdempotencyMiddleware)

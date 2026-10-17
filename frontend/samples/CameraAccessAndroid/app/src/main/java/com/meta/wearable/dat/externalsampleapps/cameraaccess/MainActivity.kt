@@ -105,10 +105,12 @@ class MainActivity : ComponentActivity() {
     }
 
     setContent {
+      com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.JarvisTheme {
       CameraAccessScaffold(
           viewModel = viewModel,
           onRequestWearablesPermission = ::requestWearablesPermission,
       )
+      }
     }
   }
 

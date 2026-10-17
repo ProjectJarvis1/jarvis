@@ -77,15 +77,14 @@ object VisualMemoryFrameStore {
         )
     }
 
-    fun bitmapToVisualFrame(bitmap: Bitmap, source: String): VisualFrame {
+    fun bitmapToVisualFrame(bitmap: Bitmap, source: String, capturedAtMs: Long = System.currentTimeMillis()): VisualFrame {
         val output = ByteArrayOutputStream()
         bitmap.compress(Bitmap.CompressFormat.JPEG, STILL_JPEG_QUALITY, output)
         val jpeg = output.toByteArray()
-        val capturedAtMs = System.currentTimeMillis()
         return VisualFrame(
             base64 = Base64.encodeToString(jpeg, Base64.NO_WRAP),
             capturedAtMs = capturedAtMs,
-            ageMs = 0L,
+            ageMs = (System.currentTimeMillis() - capturedAtMs).coerceAtLeast(0L),
             source = source,
             width = bitmap.width,
             height = bitmap.height,

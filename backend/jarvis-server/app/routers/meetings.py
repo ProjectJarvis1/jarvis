@@ -13,6 +13,7 @@ from ..auth import require_api_key
 from ..config import settings
 from ..db import get_conn
 from ..embeddings import embed_text
+from ..meeting_projection import meeting_memory_text as _meeting_memory_text, sync_meeting_memory
 from ..meeting_ai import summarize_transcript, transcribe_audio
 from ..schemas import MeetingCreate, MeetingOut, MeetingSearchRequest, MeetingUpdate
 
@@ -47,26 +48,6 @@ def _validate_person_ids(cur, person_ids: List[UUID]) -> None:
         )
 
 
-def _meeting_memory_text(
-    title: Optional[str],
-    summary: Optional[str],
-    transcript: Optional[str],
-    location: Optional[str],
-    decisions: Optional[List[str]] = None,
-    action_items: Optional[List[str]] = None,
-) -> str:
-    return "\n".join(
-        part
-        for part in [
-            f"미팅: {title}" if title else "미팅 기록",
-            f"요약: {summary}" if summary else None,
-            f"장소: {location}" if location else None,
-            f"결정사항: {', '.join(decisions or [])}" if decisions else None,
-            f"할일: {', '.join(action_items or [])}" if action_items else None,
-            f"원문: {transcript}" if transcript else None,
-        ]
-        if part
-    )
 
 
 @router.get("", response_model=List[MeetingOut])
@@ -222,6 +203,7 @@ async def create_meeting_from_recording(
         "markdown_summary": summary_data.get("markdown_summary", ""),
         "decisions": summary_data.get("decisions", []),
         "action_items": summary_data.get("action_items", []),
+        "followups": summary_data.get("followups", []),
         "people": summary_data.get("people", []),
         "companies": summary_data.get("companies", []),
         "keywords": summary_data.get("keywords", []),
@@ -356,31 +338,7 @@ def update_meeting(meeting_id: UUID, body: MeetingUpdate) -> MeetingOut:
             )
             updated = cur.fetchone()
 
-            memory_text = _meeting_memory_text(
-                title,
-                summary,
-                raw_transcript,
-                location,
-                decisions=decisions,
-                action_items=action_items,
-            )
-            cur.execute(
-                """
-                UPDATE memories
-                SET captured_at = %s,
-                    text = %s,
-                    embedding = %s,
-                    metadata = metadata || %s
-                WHERE related_meeting_id = %s
-                """,
-                (
-                    started_at,
-                    memory_text,
-                    embed_text(memory_text),
-                    Jsonb({"origin_meeting_id": str(meeting_id)}),
-                    meeting_id,
-                ),
-            )
+            sync_meeting_memory(cur, updated)
         conn.commit()
     return _row_to_meeting(updated)
 

@@ -19,6 +19,44 @@ class TaskManagerTest {
         try { scope.block() } finally { scope.cancel() }
     }
 
+    @Test fun editedDraftRejectsOldApprovalAndExecutesOnlyOnce() = test {
+        var writes = 0
+        val manager = TaskManager(this, MemoryStore(), { task, execution ->
+            if (!task.reviewed) TaskOutcome(waitingForUser = true)
+            else { execution.beforeExternalEffect(); writes++; TaskOutcome(result = task.argsJson) }
+        })
+        manager.initialize()
+        val task = manager.submit("save_memory", "old", "저장")
+        manager.until(task.id, TaskState.WAITING_USER)
+        manager.editDraft(task.id, 1, "corrected")
+        try { manager.approve(task.id, 1); fail("stale approval") } catch (_: IllegalArgumentException) { }
+        manager.approve(task.id, 2)
+        assertEquals(1, writes)
+        assertEquals("corrected", manager.get(task.id)!!.result)
+        try { manager.approve(task.id, 2); fail("duplicate approval") } catch (_: IllegalArgumentException) { }
+        assertEquals(1, writes)
+    }
+
+    @Test fun pendingNetworkSurvivesRestartAndCancelledRevisionCannotRecover() = test {
+        val store = MemoryStore()
+        val manager = TaskManager(this, store, { _, execution ->
+            execution.beforeExternalEffect(); TaskOutcome(waitingForNetwork = true)
+        })
+        manager.initialize()
+        val task = manager.submit("save_memory", "{}", "offline")
+        manager.until(task.id, TaskState.WAITING_NETWORK)
+        manager.persist()
+        val restored = TaskManager(this, store, { _, _ -> error("Do not execute again") })
+        restored.initialize()
+        val key = "${task.id}:1"
+        assertTrue(restored.canRecover(key))
+        restored.control(task.id, 1, "cancel")
+        assertFalse(restored.canRecover(key))
+        restored.recover(key, 200, "late")
+        assertNull(restored.get(task.id)!!.result)
+        assertEquals(TaskState.OUTCOME_UNKNOWN, restored.get(task.id)!!.state)
+    }
+
     @Test fun independentSearchFinishesWhileCameraIsBusyAndResultsStaySeparate() = test {
         val camera = CompletableDeferred<Unit>()
         val manager = TaskManager(this, MemoryStore(), { task, _ ->

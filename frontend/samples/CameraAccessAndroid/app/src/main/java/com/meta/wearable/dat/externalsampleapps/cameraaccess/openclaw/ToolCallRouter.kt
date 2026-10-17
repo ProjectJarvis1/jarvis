@@ -15,6 +15,7 @@ class ToolCallRouter(
     private val onResponse: (JSONObject) -> Unit,
     private val onFinished: () -> Unit,
     private val onResultDelivered: (TaskRecord) -> Unit = {},
+    private val loadFullResult: suspend (TaskRecord) -> String? = { it.result },
 ) {
     companion object {
         fun buildImmediateResponse(call: GeminiFunctionCall, result: ToolResult): JSONObject =
@@ -57,6 +58,10 @@ class ToolCallRouter(
     }
 
     private suspend fun route(call: GeminiFunctionCall): ToolResult {
+        if (call.name == "resolve_reference") {
+            return ToolResult.Success(ConversationReferences.resolve(tasks.snapshot(), call.args["kind"]?.toString() ?: "any",
+                call.args["query"]?.toString().orEmpty(), (call.args["ordinal"] as? Number)?.toInt()).toString())
+        }
         if (call.name == "list_tasks") {
             val query = call.args["query"]?.toString().orEmpty().trim()
             val matches = tasks.snapshot().filter { query.isBlank() || it.title.contains(query, true) || it.tool.contains(query, true) }
@@ -67,7 +72,17 @@ class ToolCallRouter(
             tasks.focus(task.id)
             if (task.state == TaskState.COMPLETED && task.tool == "capture_current_view") presentArtifact(task)
             if (task.state in setOf(TaskState.COMPLETED, TaskState.FAILED)) onResultDelivered(task)
-            return ToolResult.Success(task.toJson(true).put("task_context", tasks.contextJson()).toString())
+            val response = task.toJson(true).put("task_context", tasks.contextJson())
+            if (task.resultTruncated) {
+                val raw = loadFullResult(task).orEmpty()
+                val offset = ((call.args["result_offset"] as? Number)?.toInt() ?: 0).coerceIn(0, raw.length)
+                val limit = ((call.args["result_limit"] as? Number)?.toInt() ?: 4000).coerceIn(1, 8000)
+                val end = minOf(raw.length, offset + limit)
+                response.put("result_page", JSONObject().put("text", raw.substring(offset, end))
+                    .put("offset", offset).put("total_chars", raw.length)
+                    .put("next_offset", if (end < raw.length) end else JSONObject.NULL))
+            }
+            return ToolResult.Success(response.toString())
         }
         if (call.name == "record_task_result") {
             val task = requireTask(call)

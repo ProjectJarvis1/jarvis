@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.CameraAccess" parent="android:Theme.Material.NoActionBar">
+        <item name="android:colorBackground">#101317</item>
+        <item name="android:windowBackground">#101317</item>
+        <item name="android:windowSplashScreenBackground">#101317</item>
+        <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+    </style>
+</resources>

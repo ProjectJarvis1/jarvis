@@ -1,169 +1,80 @@
-/*
- * Copyright (c) Meta Platforms, Inc. and affiliates.
- * All rights reserved.
- *
- * This source code is licensed under the license found in the
- * LICENSE file in the root directory of this source tree.
- */
-
-// CameraAccessScaffold - DAT Application Navigation Orchestrator
-//
-// This scaffold demonstrates a typical DAT application navigation pattern based on device
-// registration and streaming states from the DAT API.
-//
-// DAT State-Based Navigation:
-// - HomeScreen: When NOT registered (uiState.isRegistered = false) Shows initial registration UI
-//   calling Wearables.startRegistration()
-// - NonStreamScreen: When registered (uiState.isRegistered = true) but not streaming Shows device
-//   selection, permission checking, and pre-streaming setup
-// - StreamScreen: When actively streaming (uiState.isStreaming = true) Shows live video from
-//   StreamSession.videoStream and photo capture UI
-//
-// The scaffold also provides a debug menu (in DEBUG builds) that gives access to
-// MockDeviceKitScreen for testing DAT functionality without physical devices.
-
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.BugReport
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Snackbar
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CameraAccessScaffold(
-    viewModel: WearablesViewModel,
-    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus,
-    modifier: Modifier = Modifier,
-) {
-  val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-  val snackbarHostState = remember { SnackbarHostState() }
-  val bottomSheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-  // Observe camera permission errors and show snackbar
-  LaunchedEffect(uiState.recentError) {
-    uiState.recentError?.let { errorMessage ->
-      snackbarHostState.showSnackbar(errorMessage)
-      viewModel.clearCameraPermissionError()
+fun CameraAccessScaffold(viewModel: WearablesViewModel,
+    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus, modifier: Modifier = Modifier,
+    geminiViewModel: GeminiSessionViewModel = viewModel()) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val activity = androidx.activity.compose.LocalActivity.current
+    val tasks by geminiViewModel.taskRecords.collectAsStateWithLifecycle()
+    var taskPage by rememberSaveable { mutableStateOf(false) }
+    val snackbar = remember { SnackbarHostState() }
+    val tab = when { state.isSettingsVisible -> 3; state.isMemoryVisible -> 2; taskPage -> 1; else -> 0 }
+    LaunchedEffect(state.recentError) {
+        state.recentError?.let { snackbar.showSnackbar(it); viewModel.clearCameraPermissionError() }
     }
-  }
-
-  Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-    BackHandler(enabled = uiState.isMemoryVisible) {
-      viewModel.hideMemory()
+    BackHandler(enabled = state.isMemoryVisible || state.isSettingsVisible || taskPage) {
+        viewModel.hideMemory(); viewModel.hideSettings(); taskPage = false
     }
-    BackHandler(enabled = uiState.isSettingsVisible) {
-      viewModel.hideSettings()
-    }
-
-    Box(modifier = Modifier.fillMaxSize()) {
-      when {
-        uiState.isStreaming ->
-            StreamScreen(
-                wearablesViewModel = viewModel,
-                isPhoneMode = uiState.isPhoneMode,
-            )
-        uiState.isRegistered ->
-            NonStreamScreen(
-                viewModel = viewModel,
-                onRequestWearablesPermission = onRequestWearablesPermission,
-            )
-        else ->
-            HomeScreen(
-                viewModel = viewModel,
-            )
-      }
-
-      if (uiState.isMemoryVisible) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-          MemoryScreen(
-              onBack = { viewModel.hideMemory() },
-          )
-        }
-      }
-
-      if (uiState.isSettingsVisible) {
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-          SettingsScreen(
-              onBack = { viewModel.hideSettings() },
-          )
-        }
-      }
-
-      SnackbarHost(
-          hostState = snackbarHostState,
-          modifier =
-              Modifier.align(Alignment.BottomCenter)
-                  .navigationBarsPadding()
-                  .padding(horizontal = 16.dp, vertical = 32.dp),
-          snackbar = { data ->
-            Snackbar(
-                shape = RoundedCornerShape(24.dp),
-                containerColor = MaterialTheme.colorScheme.errorContainer,
-                contentColor = MaterialTheme.colorScheme.onErrorContainer,
-            ) {
-              Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(
-                    imageVector = Icons.Default.Error,
-                    contentDescription = "Camera Access error",
-                    tint = MaterialTheme.colorScheme.error,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(data.visuals.message)
-              }
+    Scaffold(modifier.fillMaxSize(), containerColor = MaterialTheme.colorScheme.background,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        snackbarHost = { SnackbarHost(snackbar) },
+        bottomBar = {
+            if (!state.isStreaming) NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                val labels = listOf("홈", "작업", "기록", "설정")
+                val icons = listOf(Icons.Default.Home, Icons.Default.TaskAlt, Icons.Default.AutoStories, Icons.Default.Tune)
+                labels.forEachIndexed { index, label ->
+                    NavigationBarItem(selected = tab == index, onClick = {
+                        viewModel.hideMemory(); viewModel.hideSettings(); taskPage = index == 1
+                        if (index == 2) viewModel.showMemory()
+                        if (index == 3) viewModel.showSettings()
+                    }, icon = {
+                        BadgedBox(badge = { if (index == 1 && tasks.any { it.state == com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState.WAITING_USER }) Badge() }) {
+                            Icon(icons[index], null)
+                        }
+                    }, label = { Text(label) })
+                }
             }
-          },
-      )
-
-      if (BuildConfig.DEBUG) {
-        FloatingActionButton(
-            onClick = { viewModel.showDebugMenu() },
-            modifier = Modifier.align(Alignment.CenterEnd),
-        ) {
-          Icon(Icons.Default.BugReport, contentDescription = "Debug Menu")
+        }) { padding ->
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            // Keep the session composed while records/settings cover it: switching pages does not stop work.
+            when {
+                state.isStreaming -> StreamScreen(viewModel, isPhoneMode = state.isPhoneMode, isForeground = !state.isMemoryVisible && !state.isSettingsVisible, geminiViewModel = geminiViewModel)
+                !state.isMemoryVisible && !state.isSettingsVisible && !taskPage -> {
+                    if (state.isRegistered) NonStreamScreen(viewModel, onRequestWearablesPermission)
+                    else HomeScreen(viewModel)
+                }
+            }
+            if (taskPage && !state.isStreaming) TaskBoardScreen(geminiViewModel)
+            if (state.isMemoryVisible) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                MemoryScreen(onBack = viewModel::hideMemory)
+            }
+            if (state.isSettingsVisible) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+                SettingsScreen(onBack = viewModel::hideSettings,
+                    onDebug = if (BuildConfig.DEBUG) viewModel::showDebugMenu else null,
+                    onDisconnect = if (state.isRegistered && activity != null) { { viewModel.startUnregistration(activity) } } else null)
+            }
+            if (state.isDebugMenuVisible && BuildConfig.DEBUG) ModalBottomSheet(onDismissRequest = viewModel::hideDebugMenu) {
+                MockDeviceKitScreen(Modifier.fillMaxHeight(.9f))
+            }
         }
-
-        if (uiState.isDebugMenuVisible) {
-          ModalBottomSheet(
-              onDismissRequest = { viewModel.hideDebugMenu() },
-              sheetState = bottomSheetState,
-              modifier = Modifier.fillMaxSize(),
-          ) {
-            MockDeviceKitScreen(modifier = Modifier.fillMaxSize())
-          }
-        }
-      }
     }
-  }
 }

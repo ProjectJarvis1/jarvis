@@ -14,6 +14,13 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material3.*
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -82,10 +89,12 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.Wearables
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
 import kotlinx.coroutines.delay
 
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun StreamScreen(
     wearablesViewModel: WearablesViewModel,
     isPhoneMode: Boolean = false,
+    isForeground: Boolean = true,
     modifier: Modifier = Modifier,
     streamViewModel: StreamViewModel =
         viewModel(
@@ -154,9 +163,20 @@ fun StreamScreen(
         wearablesViewModel.navigateToDeviceSelection()
     }
 
-    BackHandler {
-        leaveStream()
+    var confirmLeave by remember { mutableStateOf(false) }
+    fun requestLeave() {
+        if (meetingRecordingUiState.isRecording) confirmLeave = true else leaveStream()
     }
+    BackHandler(enabled = isForeground) { requestLeave() }
+    if (confirmLeave) AlertDialog(onDismissRequest = { confirmLeave = false },
+        title = { Text("진행 중인 회의가 있어요") },
+        text = { Text("회의를 정리한 뒤 종료할 수 있어요. 녹음을 버리고 나가면 이 회의는 저장되지 않아요.") },
+        confirmButton = { TextButton(onClick = { confirmLeave = false; meetingRecordingViewModel.stopAndProcess() }) { Text("회의 정리하기") } },
+        dismissButton = { Row {
+            TextButton(onClick = { confirmLeave = false }) { Text("계속 녹음") }
+            TextButton(onClick = { confirmLeave = false; leaveStream() }) { Text("버리고 종료", color = MaterialTheme.colorScheme.error) }
+        } })
+
 
     // Wire Gemini VM to Stream VM for frame forwarding
     LaunchedEffect(geminiViewModel) {
@@ -324,71 +344,19 @@ fun StreamScreen(
         ),
     )
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color(0xFFF4F7FB)),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp)
-                .statusBarsPadding()
-                .padding(top = 12.dp, bottom = 12.dp),
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                StatusPanel(
-                    title = statusTitle,
-                    body = statusBody,
-                    chips = statusChips,
-                    modifier = Modifier.weight(1f),
-                )
-                IconButton(
-                    onClick = { wearablesViewModel.showMemory() },
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.CollectionsBookmark,
-                        contentDescription = "Records",
-                        tint = Color(0xFF1B263B),
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            val capturedPhoto = streamUiState.capturedPhoto
-            if (meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing) {
-                MeetingModePanel(
-                    isRecording = meetingRecordingUiState.isRecording,
-                    isProcessing = meetingRecordingUiState.isProcessing,
-                    startedAtMs = meetingRecordingUiState.recordingStartedAtMs,
-                    onStopRecording = {
-                        meetingRecordingViewModel.stopAndProcess()
-                        Toast.makeText(context, "회의 녹음을 종료하고 정리합니다.", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.weight(1f),
-                )
-            } else if (capturedPhoto != null) {
-                PreviewPanel(
-                    title = "최근 캡처",
-                    bitmap = capturedPhoto,
-                    modifier = Modifier.weight(1f),
-                )
-            } else {
-                EmptyVisualPanel(
-                    isLoading = streamUiState.streamSessionState == StreamSessionState.STARTING,
-                    modeLabel = if (streamUiState.streamingMode == StreamingMode.PHONE) "Phone Camera" else "Glasses Camera",
-                    modifier = Modifier.weight(1f),
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
+    var workspace by rememberSaveable { mutableStateOf(0) }
+    Scaffold(modifier = modifier.fillMaxSize(), containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            TopAppBar(title = { Column {
+                Text("자비스와 함께", style = MaterialTheme.typography.titleLarge)
+                Text(if (isPhoneMode) "휴대폰 카메라" else "글라스 카메라", style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } }, navigationIcon = { IconButton(onClick = ::requestLeave) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "홈으로") } },
+                actions = { IconButton(onClick = wearablesViewModel::showMemory) { Icon(Icons.Default.CollectionsBookmark, "기록 열기") } })
+        }, bottomBar = {
             ControlsRow(
                 onStopStream = {
-                    leaveStream()
+                    requestLeave()
                 },
                 onToggleAI = {
                     if (geminiUiState.isGeminiActive) {
@@ -432,35 +400,80 @@ fun StreamScreen(
                     .fillMaxWidth()
                     .navigationBarsPadding(),
             )
-        }
-
-        // Overlays + controls
-        Box(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)) {
-            // Top overlays (below status bar)
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .statusBarsPadding()
-                    .padding(top = 88.dp),
-            ) {
-                // Gemini overlay
-                if (geminiUiState.isGeminiActive) {
-                    GeminiOverlay(uiState = geminiUiState)
+        }) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            TabRow(selectedTabIndex = workspace, containerColor = MaterialTheme.colorScheme.background) {
+                listOf("대화", "작업").forEachIndexed { index, label ->
+                    Tab(selected = workspace == index, onClick = { workspace = index }, text = { Text(label) })
                 }
-
-                geminiUiState.pendingContactAction?.let { action ->
-                    Spacer(modifier = Modifier.height(8.dp))
-                    ContactActionConfirmCard(
-                        action = action,
-                        onConfirm = { geminiViewModel.confirmPendingContactAction() },
-                        onCancel = { geminiViewModel.cancelPendingContactAction() },
-                    )
+            }
+            if (workspace == 1) TaskBoardScreen(geminiViewModel)
+            else LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                item {
+                    JarvisCard {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+                                Icon(Icons.Default.GraphicEq, null, Modifier.padding(16.dp).size(32.dp), tint = MaterialTheme.colorScheme.primary)
+                            }
+                            Column(Modifier.weight(1f)) {
+                                Text(if (geminiUiState.isModelSpeaking) "자비스가 답하고 있어요" else statusTitle,
+                                    style = MaterialTheme.typography.titleLarge)
+                                Text(statusBody, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            statusChips.take(3).forEach { chip ->
+                                Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
+                                    Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Box(Modifier.size(7.dp).clip(CircleShape).background(chip.color))
+                                        Text(chip.label, style = MaterialTheme.typography.labelMedium)
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-
-                // WebRTC overlay
-                if (webrtcUiState.isActive) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    WebRTCOverlay(uiState = webrtcUiState)
+                if (meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing) item {
+                    MeetingModePanel(meetingRecordingUiState.isRecording, meetingRecordingUiState.isProcessing,
+                        meetingRecordingUiState.recordingStartedAtMs, { meetingRecordingViewModel.stopAndProcess() },
+                        Modifier.fillMaxWidth().height(340.dp))
+                }
+                geminiUiState.pendingContactAction?.let { action -> item {
+                    ContactActionConfirmCard(action, geminiViewModel::confirmPendingContactAction, geminiViewModel::cancelPendingContactAction)
+                } }
+                if (geminiUiState.userTranscript.isNotBlank()) item {
+                    JarvisCard {
+                        Text("나", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
+                        Text(geminiUiState.userTranscript, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+                if (geminiUiState.aiTranscript.isNotBlank()) item {
+                    JarvisCard {
+                        Text("자비스", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
+                        Text(geminiUiState.aiTranscript, style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+                item {
+                    val frame = streamUiState.capturedPhoto ?: streamUiState.videoFrame
+                    JarvisCard {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically) {
+                            Text(if (streamUiState.capturedPhoto != null) "최근 촬영한 장면" else "카메라 미리보기", style = MaterialTheme.typography.titleMedium)
+                            TaskBoardButton(geminiViewModel)
+                        }
+                        if (frame != null) Image(frame.asImageBitmap(), "카메라 장면", Modifier.fillMaxWidth().height(200.dp).clip(MaterialTheme.shapes.medium), contentScale = ContentScale.Crop)
+                        else Text("카메라를 준비하고 있어요. 연결되면 여기에 표시돼요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        if (geminiUiState.taskSummary.isNotBlank()) Text(geminiUiState.taskSummary,
+                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+                if (webrtcUiState.isActive) item { WebRTCOverlay(uiState = webrtcUiState) }
+                if (!geminiUiState.isGeminiActive && !meetingRecordingUiState.isRecording) item {
+                    Text("아래 대화 시작을 누르거나 ‘자비스’라고 불러보세요.",
+                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp))
                 }
             }
         }
@@ -481,127 +494,10 @@ fun StreamScreen(
     }
 }
 
-@Composable
-private fun StatusPanel(
-    title: String,
-    body: String,
-    chips: List<StatusChipInfo>,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        color = Color.White,
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-        ) {
-            Text(
-                text = title,
-                color = Color(0xFF10233F),
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = body,
-                color = Color(0xFF52627A),
-            )
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                chips.take(4).forEach { chip ->
-                    StatusChip(
-                        info = chip,
-                        modifier = Modifier.weight(1f),
-                    )
-                }
-            }
-        }
-    }
-}
-
 private data class StatusChipInfo(
     val label: String,
     val color: Color,
 )
-
-@Composable
-private fun StatusChip(
-    info: StatusChipInfo,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier,
-        color = Color(0xFFF1F5FA),
-        shape = RoundedCornerShape(999.dp),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(info.color),
-            )
-            Spacer(modifier = Modifier.size(5.dp))
-            Text(
-                text = info.label,
-                color = Color(0xFF334155),
-                fontWeight = FontWeight.Medium,
-                maxLines = 1,
-                fontSize = 10.sp,
-            )
-        }
-    }
-}
-
-@Composable
-private fun EmptyVisualPanel(
-    isLoading: Boolean,
-    modeLabel: String,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color(0xFFEAF1FB),
-        shape = RoundedCornerShape(20.dp),
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Spacer(modifier = Modifier.weight(1f))
-            if (isLoading) {
-                CircularProgressIndicator(color = AppColor.DeepBlue)
-                Spacer(modifier = Modifier.height(16.dp))
-            }
-            Text(
-                text = "실시간 영상을 계속 표시하지 않고, 시각 질문 시 최신 캡처만 보여줍니다.",
-                color = Color(0xFF10233F),
-                textAlign = TextAlign.Center,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            HorizontalDivider(color = Color(0xFFD4DEEC))
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                text = modeLabel,
-                color = Color(0xFF6B7A90),
-                fontWeight = FontWeight.Medium,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-        }
-    }
-}
 
 @Composable
 private fun ContactActionConfirmCard(
@@ -747,45 +643,6 @@ private fun MeetingModePanel(
                     Text("회의 녹음 종료")
                 }
             }
-        }
-    }
-}
-
-@Composable
-private fun PreviewPanel(
-    title: String,
-    bitmap: android.graphics.Bitmap,
-    modifier: Modifier = Modifier,
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color.White,
-        shape = RoundedCornerShape(20.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-        ) {
-            Text(
-                text = title,
-                color = Color(0xFF10233F),
-                fontWeight = FontWeight.SemiBold,
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Image(
-                bitmap = bitmap.asImageBitmap(),
-                contentDescription = "Latest captured visual",
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFEAF1FB))
-                    .aspectRatio(3f / 4f),
-                contentScale = ContentScale.Crop,
-            )
         }
     }
 }

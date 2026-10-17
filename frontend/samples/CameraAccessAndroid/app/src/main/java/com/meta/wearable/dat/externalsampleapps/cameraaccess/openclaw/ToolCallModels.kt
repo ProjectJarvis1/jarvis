@@ -101,6 +101,7 @@ private fun String.userFacingToolLabel(): String = when (this) {
     "create_calendar_event" -> "일정 등록"
     "save_meeting" -> "회의 저장"
     "save_person" -> "사람 저장"
+    "identify_person" -> "사진 속 사람 확인"
     "save_need" -> "니즈 저장"
     "get_proposal_context" -> "제안 정보 정리"
     else -> "요청 처리"
@@ -129,6 +130,7 @@ object ToolDeclarations {
         .put(createContact())
         .put(createCalendarEvent())
         .put(savePerson())
+        .put(decl("identify_person", "확인한 사진 속 사람을 DB 얼굴과 비교합니다. 먼저 capture_current_view로 촬영하고 source_task_id/source_revision을 지정하세요. 백엔드의 판정이 불확실하면 이름을 확정하지 마세요.", JSONObject().put("top_k", intProp("후보 수, 기본 3")), listOf("source_task_id", "source_revision")))
         .put(saveMeeting())
         .put(saveMemory())
         .put(saveLifeMemory())
@@ -136,10 +138,29 @@ object ToolDeclarations {
         .put(saveNeed())
         .put(getProposalContext())
         .apply {
+            put(decl("resolve_reference", "'아까 그 사람/사진/회의', '두 번째 사진', '그거'의 대상을 보관된 결과에서 찾습니다. 여러 후보면 반드시 사용자에게 확인하고 추측하지 마세요.",
+                JSONObject().put("kind", enumProp("대상 종류", listOf("any", "photo", "person", "memory", "meeting")))
+                    .put("query", strProp("대상을 특정할 이름이나 내용. 없으면 생략"))
+                    .put("ordinal", intProp("사용자가 명시한 순번, 1부터 시작. 임의로 넣지 마세요")), listOf("kind")))
+            put(decl("prepare_record_change", "저장 기록 수정/기억 삭제의 변경 전후 미리보기를 만듭니다. 먼저 검색 또는 resolve_reference로 정확한 ID를 확인하세요. 아직 적용하지 않습니다.",
+                JSONObject().put("kind", enumProp("기록 종류", listOf("memory", "person", "meeting")))
+                    .put("record_id", strProp("조회한 실제 기록 UUID"))
+                    .put("action", enumProp("동작", listOf("update", "delete")))
+                    .put("changes", JSONObject().put("type", "object").put("properties", JSONObject().apply {
+                        listOf("text", "name", "org", "role", "phone", "email", "notes_summary", "title", "summary", "location").forEach { put(it, strProp("수정할 값. 해당 종류에 존재하는 필드만 지정")) }
+                    })), listOf("kind", "record_id", "changes")))
+            for (name in listOf("apply_record_change", "undo_record_change")) {
+                put(decl(name, "기록 변경 적용/되돌리기 확인 요청. 실제 반영은 사용자가 작업 화면에서 승인한 뒤 실행됩니다.",
+                    JSONObject().put("change_id", strProp("미리보기 또는 적용 결과의 변경 UUID")), listOf("change_id")))
+            }
+            put(decl("get_meeting_followups", "저장된 회의의 할 일, 담당자, 기한, 원문 근거 조회. 기한이 불명확하면 물어보고 일정은 사용자 확인 후 생성하세요.",
+                JSONObject().put("meeting_id", strProp("조회한 회의 UUID")), listOf("meeting_id")))
             put(decl("list_tasks", "앱에 보관된 이전/현재 작업 목록. '아까 하던 것', 진행 상황, 이전 결과를 찾을 때 DB 검색보다 먼저 사용하세요.",
                 JSONObject().put("query", strProp("제목 또는 도구 이름 필터. 모호하면 생략하고 최근 목록 조회")), emptyList()))
             put(decl("get_task_result", "작업 상태와 보관한 결과를 조회. 완료된 사진은 해당 사진을 대화에 첨부합니다. 진행 중이면 반복 호출하지 말고 기다리거나 다른 요청을 처리하세요.",
                 JSONObject().put("task_id", strProp("앱이 발급한 작업 ID"))
+                    .put("result_offset", intProp("큰 결과의 원문 페이지 시작 위치. 기본 0, 다음 페이지는 next_offset 사용"))
+                    .put("result_limit", intProp("원문 페이지 문자 수. 기본 4000, 최대 8000"))
                     .put("expected_revision", intProp("최근 조회한 작업 버전")), listOf("task_id", "expected_revision")))
             put(decl("record_task_result", "사진 분석 등 Gemini가 확인한 작업 해석을 로컬 작업 기록에 보관합니다. 실제 도구 성공/실패 상태는 변경하지 않습니다. 나중에 사용자가 이전 결과를 물으면 이 해석을 재사용할 수 있습니다.",
                 JSONObject().put("task_id", strProp("해석한 작업 ID"))
@@ -217,7 +238,7 @@ object ToolDeclarations {
         put("description", description)
         put("parameters", JSONObject().apply {
             put("type", "object")
-            if (name !in setOf("list_tasks", "get_task_result", "update_task", "record_task_result")) {
+            if (name !in setOf("list_tasks", "get_task_result", "update_task", "record_task_result", "resolve_reference")) {
                 properties.put("task_title", strProp("사용자 목적을 나타내는 짧은 한국어 제목"))
                 properties.put("task_id", strProp("이미 접수한 동일 작업을 다시 조회할 때만 지정. 새 요청이면 생략"))
                 properties.put("expected_revision", intProp("task_id를 지정할 때 해당 작업 버전"))
@@ -261,6 +282,7 @@ object ToolDeclarations {
         name = "save_person",
         description = "사용자가 새 사람을 메모리에 저장하라고 할 때. 예: '이 사람 저장해줘', '방금 만난 박부장 등록'.",
         properties = JSONObject()
+            .put("include_face", JSONObject().put("type", "boolean").put("description", "사용자가 얼굴 등록을 요청한 경우만 true. 확인한 사진의 source_task_id/source_revision 필수"))
             .put("name", strProp("사람 이름 (한국어/영어)"))
             .put("aliases", arrStrProp("별칭/닉네임 목록 (선택)"))
             .put("org", strProp("소속 회사/조직 (선택)"))

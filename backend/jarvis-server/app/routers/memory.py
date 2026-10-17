@@ -509,9 +509,12 @@ def delete_memory(memory_id: str):
 
 
 def _search_memory_rows(body: MemorySearchRequest) -> list:
-    qvec = embed_text(body.query)
+    query = body.query.strip()
+    if not query or not query.replace("%", "").replace("_", "").strip():
+        raise HTTPException(422, "구체적인 검색어를 입력해주세요.")
+    qvec = embed_text(query)
     limit = max(1, min(body.top_k, 20))
-    like = f"%{body.query}%"
+    like = "%" + query.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%"
 
     filters: list[str] = []
     filter_params: list = []
@@ -546,24 +549,24 @@ def _search_memory_rows(body: MemorySearchRequest) -> list:
         WHERE 1 = 1
           {filter_sql}
           AND (
-              m.text ILIKE %s
-              OR m.metadata->>'user_note' ILIKE %s
-              OR m.metadata->>'ai_interpretation' ILIKE %s
-              OR m.metadata->>'people_text' ILIKE %s
+              m.text ILIKE %s ESCAPE '!'
+              OR m.metadata->>'user_note' ILIKE %s ESCAPE '!'
+              OR m.metadata->>'ai_interpretation' ILIKE %s ESCAPE '!'
+              OR m.metadata->>'people_text' ILIKE %s ESCAPE '!'
               OR EXISTS (
                   SELECT 1
                   FROM jsonb_array_elements_text(COALESCE(m.metadata->'labels', '[]'::jsonb)) AS label
-                  WHERE label ILIKE %s
+                  WHERE label ILIKE %s ESCAPE '!'
               )
-              OR e.label ILIKE %s
-              OR e.entity_type ILIKE %s
-              OR mt.title ILIKE %s
-              OR mt.summary ILIKE %s
-              OR mt.raw_transcript ILIKE %s
+              OR e.label ILIKE %s ESCAPE '!'
+              OR e.entity_type ILIKE %s ESCAPE '!'
+              OR mt.title ILIKE %s ESCAPE '!'
+              OR mt.summary ILIKE %s ESCAPE '!'
+              OR mt.raw_transcript ILIKE %s ESCAPE '!'
               OR EXISTS (
                   SELECT 1
                   FROM needs n
-                  WHERE n.text ILIKE %s
+                  WHERE n.text ILIKE %s ESCAPE '!'
                     AND (
                         n.meeting_id = m.related_meeting_id
                         OR n.person_id = ANY(COALESCE(m.related_person_ids, ARRAY[]::uuid[]))
@@ -637,57 +640,41 @@ def universal_search(body: MemorySearchRequest) -> List[UniversalSearchResult]:
     candidates_by_person_id: dict = {}
     with get_conn() as conn:
         with conn.cursor() as cur:
+            # Fetch a bounded set of related records once, independent of result count.
+            person_ids_all = list({pid for row in rows for pid in (row["related_person_ids"] or [])})
+            meeting_ids_all = list({row["related_meeting_id"] for row in rows if row["related_meeting_id"]})
+            cur.execute("SELECT * FROM people WHERE id = ANY(%s::uuid[])", (person_ids_all,))
+            people_by_id = {person["id"]: person for person in cur.fetchall()}
+            cur.execute("SELECT * FROM meetings WHERE id = ANY(%s::uuid[])", (meeting_ids_all,))
+            meetings_by_id = {meeting["id"]: meeting for meeting in cur.fetchall()}
+            # LATERAL preserves the per-memory limit without loading every need in the database.
+            cur.execute("""SELECT selected.id AS memory_id, n.* FROM memories selected
+                CROSS JOIN LATERAL (
+                    SELECT id, person_id, meeting_id, text, category, confidence, metadata, created_at
+                    FROM needs WHERE person_id = ANY(selected.related_person_ids)
+                       OR meeting_id = selected.related_meeting_id
+                    ORDER BY created_at DESC LIMIT 20
+                ) n
+                WHERE selected.id = ANY(%s::uuid[])""",
+                ([row["id"] for row in rows if float(row["_score"]) >= _NEEDS_MIN_SCORE],))
+            needs_by_memory = {}
+            for need in cur.fetchall():
+                memory_id = need.pop("memory_id")
+                needs_by_memory.setdefault(memory_id, []).append(need)
+            cur.execute("""SELECT me.memory_id, e.id, e.entity_type, e.label, e.aliases, e.metadata,
+                                  me.relation, me.confidence
+                           FROM memory_entities me JOIN entities e ON e.id = me.entity_id
+                           WHERE me.memory_id = ANY(%s::uuid[])
+                           ORDER BY me.confidence DESC, e.label""", ([row["id"] for row in rows],))
+            entities_by_memory = {}
+            for entity in cur.fetchall():
+                memory_id = entity.pop("memory_id")
+                entities_by_memory.setdefault(memory_id, []).append(entity)
             for row in rows:
-                person_ids = row["related_person_ids"] or []
-                meeting_id = row["related_meeting_id"]
-                people = []
-                needs = []
-                if person_ids:
-                    cur.execute(
-                        "SELECT * FROM people WHERE id = ANY(%s::uuid[])",
-                        (person_ids,),
-                    )
-                    people = cur.fetchall()
-                # Person needs and meeting needs are unioned rather than chosen between. The old
-                # either/or meant a memory that happened to carry a meeting id returned only that
-                # one meeting's needs, hiding everything else known about the same person -- so
-                # "김윤섭이 뭘 원한다고 했지?" answered from a single meeting instead of all of them.
-                # Also runs when only a meeting is linked; needs used to be skipped entirely then.
-                if (person_ids or meeting_id) and float(row["_score"]) >= _NEEDS_MIN_SCORE:
-                    cur.execute(
-                        """
-                        SELECT id, person_id, meeting_id, text, category,
-                               confidence, metadata, created_at
-                        FROM needs
-                        WHERE person_id = ANY(%s::uuid[])
-                           OR (%s::uuid IS NOT NULL AND meeting_id = %s::uuid)
-                        ORDER BY created_at DESC
-                        LIMIT 20
-                        """,
-                        (person_ids, meeting_id, meeting_id),
-                    )
-                    needs = cur.fetchall()
-
-                meeting = None
-                if row["related_meeting_id"]:
-                    cur.execute(
-                        "SELECT * FROM meetings WHERE id = %s",
-                        (row["related_meeting_id"],),
-                    )
-                    meeting = cur.fetchone()
-
-                cur.execute(
-                    """
-                    SELECT e.id, e.entity_type, e.label, e.aliases, e.metadata,
-                           me.relation, me.confidence
-                    FROM memory_entities me
-                    JOIN entities e ON e.id = me.entity_id
-                    WHERE me.memory_id = %s
-                    ORDER BY me.confidence DESC, e.label
-                    """,
-                    (row["id"],),
-                )
-                entities = cur.fetchall()
+                people = [people_by_id[pid] for pid in (row["related_person_ids"] or []) if pid in people_by_id]
+                needs = needs_by_memory.get(row["id"], [])
+                meeting = meetings_by_id.get(row["related_meeting_id"])
+                entities = entities_by_memory.get(row["id"], [])
 
                 memory_score = float(row["_score"])
                 memory_text = str(row["text"] or "")

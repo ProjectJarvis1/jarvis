@@ -9,7 +9,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** Model chooses intent; this registry owns execution and result lifetime. No Android dependencies. */
-enum class TaskState { QUEUED, RUNNING, WAITING_USER, HELD, COMPLETED, FAILED, CANCELLED, OUTCOME_UNKNOWN }
+enum class TaskState { QUEUED, RUNNING, WAITING_NETWORK, WAITING_USER, HELD, COMPLETED, FAILED, CANCELLED, OUTCOME_UNKNOWN }
 data class TaskRecord(
     val id: String,
     val revision: Int = 1,
@@ -26,17 +26,24 @@ data class TaskRecord(
     val sourceRevision: Int? = null,
     val interpretation: String? = null,
     val resultTruncated: Boolean = false,
+    val resultFile: String? = null,
+    val reviewed: Boolean = false,
 )
-data class TaskOutcome(val result: String? = null, val error: String? = null, val waitingForUser: Boolean = false)
+data class TaskOutcome(val result: String? = null, val error: String? = null, val waitingForUser: Boolean = false, val waitingForNetwork: Boolean = false)
 data class TaskPolicy(val background: Boolean, val resource: String? = null, val write: Boolean = false, val timeoutMs: Long = 60_000)
 
 object TaskPolicies {
     private val policies = mapOf(
         "capture_current_view" to TaskPolicy(true, "camera", timeoutMs = 20_000),
         "universal_search" to TaskPolicy(true), "search_memory" to TaskPolicy(true),
+        "identify_person" to TaskPolicy(true),
         "search_people" to TaskPolicy(true), "search_meetings" to TaskPolicy(true),
         "get_proposal_context" to TaskPolicy(true), "search_contacts" to TaskPolicy(true, timeoutMs = 10_000),
         "call_contact" to TaskPolicy(false), "text_contact" to TaskPolicy(false),
+        "prepare_record_change" to TaskPolicy(false, "database-write", true),
+        "apply_record_change" to TaskPolicy(false, "database-write", true),
+        "undo_record_change" to TaskPolicy(false, "database-write", true),
+        "get_meeting_followups" to TaskPolicy(true),
         "save_person" to TaskPolicy(false, "database-write", true),
         "save_meeting" to TaskPolicy(false, "database-write", true),
         "save_memory" to TaskPolicy(false, "database-write", true),
@@ -52,6 +59,7 @@ object TaskPolicies {
 
 interface TaskStore {
     suspend fun load(): List<TaskRecord>
+    suspend fun archiveResult(key: String, result: String): String? = null
     suspend fun save(tasks: List<TaskRecord>)
 }
 
@@ -92,7 +100,8 @@ class TaskManager(
         if (initialized) return@withLock
         val loaded = store.load()
         synchronized(lock) {
-            loaded.filter { it.state !in setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED) || now() - it.updatedAt < retentionMs }.takeLast(maxRecords).forEach { old ->
+            val protectedSources = loaded.filter { it.state !in setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED) }.mapNotNull { it.sourceTaskId }.toSet()
+            loaded.filter { it.id in protectedSources || it.state !in setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED) || now() - it.updatedAt < retentionMs }.takeLast(maxRecords).forEach { old ->
                 // A process restart cannot prove whether a dispatched write reached the server.
                 val state = when (old.state) {
                     TaskState.RUNNING, TaskState.QUEUED -> if (old.dispatched) TaskState.OUTCOME_UNKNOWN else TaskState.HELD
@@ -129,7 +138,7 @@ class TaskManager(
             require(source.revision == sourceRevision) { "선행 작업 버전이 변경되었습니다." }
             require(source.state == TaskState.COMPLETED) { "선행 작업 완료 후 다시 요청하세요: ${source.state}" }
         }
-        prune()
+        prune(sourceId)
         check(records.size < maxRecords) { "보관 가능한 작업 수를 초과했습니다. 이전 작업을 정리해주세요." }
         val timestamp = now()
         val task = TaskRecord(UUID.randomUUID().toString(), tool = tool, argsJson = argsJson,
@@ -194,14 +203,54 @@ class TaskManager(
         focusTaskId = null
     }
 
-    suspend fun claimWaiting(id: String, revision: Int): TaskRecord {
+    fun editDraft(id: String, revision: Int, argsJson: String) = synchronized(lock) {
+        val task = records[id] ?: error("작업이 없습니다.")
+        require(task.revision == revision && task.state == TaskState.WAITING_USER && !task.dispatched)
+        require(argsJson.length <= 16_000)
+        records[id] = task.copy(argsJson = argsJson, revision = revision + 1, updatedAt = now(), reviewed = false)
+        publish()
+    }
+
+    suspend fun approve(id: String, revision: Int) {
+        val task = claimWaiting(id, revision, markDispatched = false)
+        val approvalJob = currentCoroutineContext()[Job]
+        synchronized(lock) { if (approvalJob != null) jobs[id] = approvalJob }
+        val outcome = try {
+            val resource = TaskPolicies.forTool(task.tool).resource
+            if (resource == null) { Execution(id, revision).checkCurrent(); withTimeout(TaskPolicies.forTool(task.tool).timeoutMs) { execute(task, Execution(id, revision)) } }
+            else {
+                val mutex = synchronized(lock) { resources.getOrPut(resource) { Mutex() } }
+                mutex.withLock { Execution(id, revision).checkCurrent(); withTimeout(TaskPolicies.forTool(task.tool).timeoutMs) { execute(task, Execution(id, revision)) } }
+            }
+        }
+        catch (e: CancellationException) {
+            completeWaiting(id, revision, TaskOutcome(error = "실행 결과 확인이 필요합니다."))
+            throw e
+        } catch (e: Exception) { TaskOutcome(error = e.message ?: "실행 실패") }
+        finally { synchronized(lock) { if (jobs[id] === approvalJob) jobs.remove(id) } }
+        completeWaiting(id, revision, outcome)
+        persist()
+    }
+
+    suspend fun claimWaiting(id: String, revision: Int, markDispatched: Boolean = true): TaskRecord {
         synchronized(lock) {
             val task = records[id] ?: error("확인할 작업이 없습니다.")
             require(task.revision == revision && task.state == TaskState.WAITING_USER && !task.dispatched) { "확인 요청이 변경되었거나 이미 처리되었습니다." }
-            records[id] = task.copy(state = TaskState.RUNNING, dispatched = true, updatedAt = now())
+            records[id] = task.copy(state = TaskState.RUNNING, dispatched = markDispatched, reviewed = true, updatedAt = now())
+            focusTaskId = id
             publish()
         }
-        persist()
+        try { persist() } catch (e: Exception) {
+            synchronized(lock) {
+                val task = records[id]
+                if (task?.revision == revision && task.state == TaskState.RUNNING) {
+                    records[id] = task.copy(state = TaskState.WAITING_USER, dispatched = false, reviewed = false,
+                        error = "확인 기록 저장 실패. 아직 실행하지 않았습니다.")
+                    publish()
+                }
+            }
+            throw e
+        }
         return synchronized(lock) {
             val task = records.getValue(id)
             check(task.revision == revision && task.state == TaskState.RUNNING) { "확인 요청이 취소되었습니다." }
@@ -209,13 +258,19 @@ class TaskManager(
         }
     }
 
-    fun completeWaiting(id: String, revision: Int, outcome: TaskOutcome) = synchronized(lock) {
-        val task = records[id] ?: error("확인할 작업이 없습니다.")
-        require(task.revision == revision && task.state in setOf(TaskState.WAITING_USER, TaskState.RUNNING)) { "확인 요청이 변경되었거나 취소되었습니다." }
-        records[id] = task.copy(state = if (outcome.error == null) TaskState.COMPLETED else if (task.dispatched) TaskState.OUTCOME_UNKNOWN else TaskState.FAILED,
-            result = outcome.result, error = outcome.error, updatedAt = now())
+    suspend fun completeWaiting(id: String, revision: Int, outcome: TaskOutcome) {
+        val archived = archive(id, revision, outcome.result)
+        synchronized(lock) {
+        val task = records[id] ?: return@synchronized
+        if (task.revision != revision || task.state !in setOf(TaskState.WAITING_USER, TaskState.RUNNING)) return@synchronized
+        records[id] = task.copy(state = if (outcome.waitingForNetwork) TaskState.WAITING_NETWORK else if (outcome.error == null) TaskState.COMPLETED else if (task.dispatched) TaskState.OUTCOME_UNKNOWN else TaskState.FAILED,
+            result = TaskResults.preview(outcome.result), resultFile = archived, resultTruncated = (outcome.result?.length ?: 0) > TaskResults.INLINE_LIMIT, error = outcome.error?.take(2000), updatedAt = now())
         publish()
+        }
     }
+
+    private suspend fun archive(id: String, revision: Int, raw: String?): String? =
+        if (raw != null && raw.length > TaskResults.INLINE_LIMIT) store.archiveResult("$id-$revision", raw) else null
 
     inner class Execution internal constructor(private val id: String, private val revision: Int) {
         fun checkCurrent() = synchronized(lock) {
@@ -284,24 +339,52 @@ class TaskManager(
         job.start()
     }
 
-    private fun finish(start: TaskRecord, outcome: TaskOutcome) = synchronized(lock) {
+    private suspend fun finish(start: TaskRecord, outcome: TaskOutcome) {
+        val archived = archive(start.id, start.revision, outcome.result)
+        synchronized(lock) {
         val current = records[start.id] ?: return@synchronized
         if (current.revision != start.revision || current.state != TaskState.RUNNING) return@synchronized
         records[start.id] = current.copy(
             state = when {
+                outcome.waitingForNetwork -> TaskState.WAITING_NETWORK
                 outcome.error != null && current.dispatched -> TaskState.OUTCOME_UNKNOWN
                 outcome.error != null -> TaskState.FAILED
                 outcome.waitingForUser -> TaskState.WAITING_USER
                 else -> TaskState.COMPLETED
-            }, result = outcome.result?.take(64_000), resultTruncated = (outcome.result?.length ?: 0) > 64_000, error = outcome.error?.take(2000), updatedAt = now())
+            }, result = TaskResults.preview(outcome.result), resultFile = archived, resultTruncated = (outcome.result?.length ?: 0) > TaskResults.INLINE_LIMIT, error = outcome.error?.take(2000), updatedAt = now())
         publish()
+        }
     }
 
-    private fun prune() {
+    /** A receipt retry uses the original key/body, even after an uncertain transport result. */
+    fun canRecover(key: String): Boolean {
+        val task = get(key.substringBefore(':')) ?: return false
+        return task.revision.toString() == key.substringAfter(':') && task.dispatched &&
+            task.state in setOf(TaskState.WAITING_NETWORK, TaskState.OUTCOME_UNKNOWN)
+    }
+    suspend fun recover(key: String, code: Int, body: String) {
+        if (!canRecover(key)) return
+        val archived = if (code in 200..299) archive(key.substringBefore(':'), key.substringAfter(':').toInt(), body) else null
+        synchronized(lock) {
+            if (!canRecover(key)) return
+            val id = key.substringBefore(':')
+            val task = records.getValue(id)
+            records[id] = task.copy(state = if (code in 200..299) TaskState.COMPLETED else TaskState.FAILED,
+                result = if (code in 200..299) TaskResults.preview(body) else null,
+                resultFile = archived, resultTruncated = code in 200..299 && body.length > TaskResults.INLINE_LIMIT,
+                error = if (code in 200..299) null else "HTTP $code: ${body.take(500)}", updatedAt = now())
+            publish()
+        }
+        persist()
+    }
+
+    private fun prune(additionalSource: String? = null) {
+        val protected = records.values.filter { it.state !in setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED) }
+            .mapNotNull { it.sourceTaskId }.toSet() + listOfNotNull(additionalSource)
         val terminal = setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED)
-        records.values.toList().filter { it.state in terminal && now() - it.updatedAt >= retentionMs }.forEach { records.remove(it.id) }
+        records.values.toList().filter { it.id !in protected && it.state in terminal && now() - it.updatedAt >= retentionMs }.forEach { records.remove(it.id) }
         while (records.size >= maxRecords) {
-            val oldest = records.values.firstOrNull { it.state in terminal } ?: break
+            val oldest = records.values.firstOrNull { it.id !in protected && it.state in terminal } ?: break
             records.remove(oldest.id)
         }
     }

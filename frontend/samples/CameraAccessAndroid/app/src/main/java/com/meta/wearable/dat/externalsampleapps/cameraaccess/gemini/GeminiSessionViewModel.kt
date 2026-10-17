@@ -71,15 +71,21 @@ class GeminiSessionViewModel : ViewModel() {
 
     private val geminiService = GeminiLiveService()
     private val openClawBridge = OpenClawBridge()
+    private val recordClient = okhttp3.OkHttpClient.Builder()
+        .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
+        .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()
     private var toolCallRouter: ToolCallRouter? = null
     private val contactActionManager = ContactActionManager()
     private val calendarActionManager = CalendarActionManager()
     private val audioManager = AudioManager()
     private val eventClient = OpenClawEventClient()
-    private val taskArtifacts by lazy { TaskArtifacts(File(AppContextProvider.require().filesDir, "task-artifacts")) }
-    private val taskManager by lazy {
-        TaskManager(viewModelScope, FileTaskStore(File(AppContextProvider.require().filesDir, "tasks/history.json")), ::executeManagedTask)
-    }
+    private val taskArtifacts by lazy { TaskArtifacts(File(AppContextProvider.require().filesDir, "task-artifacts")) {
+        taskManager.snapshot().filter { it.state !in setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED) }
+            .mapNotNull { task -> task.sourceTaskId?.let { "$it-${task.sourceRevision}" } }.toSet()
+    } }
+    private val taskStore by lazy { FileTaskStore(File(AppContextProvider.require().filesDir, "tasks/history.json")) }
+    private val taskManager by lazy { TaskManager(viewModelScope, taskStore, ::executeManagedTask) }
+    suspend fun fullTaskResult(task: TaskRecord): String? = taskStore.fullResult(task)
     @Volatile private var lastInputAt = 0L
     private val announcedTasks = mutableSetOf<String>()
     @Volatile private var readyForCompletionNotice = false
@@ -109,6 +115,107 @@ class GeminiSessionViewModel : ViewModel() {
     val voiceCommands: SharedFlow<MeetingVoiceCommand> = _voiceCommands.asSharedFlow()
 
     var streamingMode: StreamingMode = StreamingMode.GLASSES
+
+    val taskRecords get() = taskManager.tasks
+    private val reviewTools = setOf("save_memory", "save_life_memory", "save_person", "save_meeting", "save_need",
+        "apply_record_change", "undo_record_change", "create_calendar_event")
+
+    init {
+        viewModelScope.launch {
+            try {
+                taskManager.initialize()
+                while (isActive) {
+                    try {
+                        withContext(Dispatchers.IO) {
+                            // Persist completion before deleting its transport receipt.
+                            taskManager.persist()
+                            openClawBridge.durableRequests.discardSuperseded { taskManager.get(it)?.revision }
+                            taskManager.snapshot().filter { it.state == TaskState.COMPLETED }.forEach {
+                                openClawBridge.durableRequests.acknowledge("${it.id}:${it.revision}")
+                            }
+                            openClawBridge.durableRequests.recover(GeminiConfig.jarvisApiBase.trimEnd('/'), GeminiConfig.jarvisApiKey,
+                                taskManager::canRecover, taskManager::recover)
+                        }
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        // Retain requests. The next foreground tick retries with the same key.
+                    }
+                    delay(15_000)
+                }
+            } catch (e: Exception) {
+                _uiState.value = _uiState.value.copy(errorMessage = "작업 기록을 불러오지 못했습니다: ${e.message}")
+            }
+        }
+    }
+
+    fun controlTask(id: String, revision: Int, action: String) {
+        viewModelScope.launch {
+            try {
+                if (action == "approve") {
+                    require(taskManager.get(id)?.tool in reviewTools) { "이 작업은 전용 확인 화면을 사용하세요." }
+                    taskManager.approve(id, revision)
+                } else {
+                    taskManager.control(id, revision, action)
+                    if (action in setOf("cancel", "hold")) openClawBridge.durableRequests.cancel("$id:$revision")
+                    taskManager.persist()
+                }
+            } catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.message) }
+        }
+    }
+
+    fun editTask(id: String, revision: Int, args: String) {
+        runCatching { taskManager.editDraft(id, revision, args) }
+            .onFailure { _uiState.value = _uiState.value.copy(errorMessage = it.message) }
+    }
+
+    fun proposeCalendar(title: String, start: String, evidence: String) {
+        runCatching {
+            taskManager.submit("create_calendar_event", JSONObject().put("title", title).put("start_at", start)
+                .put("description", evidence).toString(), "회의 후속 일정: $title")
+        }.onFailure { _uiState.value = _uiState.value.copy(errorMessage = it.message) }
+    }
+
+    fun requestRecordChange(reference: ConversationReference, changes: JSONObject, action: String = "update", expectedVersion: String? = null) {
+        runCatching { taskManager.submit("prepare_record_change", JSONObject().put("kind", reference.kind)
+            .put("record_id", reference.recordId).put("changes", changes).put("action", action).put("expected_version", expectedVersion).toString(), "기록 수정 미리보기") }
+            .onFailure { _uiState.value = _uiState.value.copy(errorMessage = it.message) }
+    }
+    suspend fun readRecord(reference: ConversationReference): JSONObject {
+        require(reference.kind in setOf("memory", "person", "meeting"))
+        val id = java.util.UUID.fromString(reference.recordId)
+        return readAssistant("/assistant/records/${reference.kind}/$id")
+    }
+    suspend fun readChange(changeId: String): JSONObject = readAssistant("/assistant/changes/${java.util.UUID.fromString(changeId)}")
+    private suspend fun readAssistant(path: String): JSONObject = withContext(Dispatchers.IO) {
+        val request = okhttp3.Request.Builder().url(GeminiConfig.jarvisApiBase.trimEnd('/') + path)
+            .header("X-API-Key", GeminiConfig.jarvisApiKey).build()
+        val response = recordClient.newCall(request).awaitTaskResponse()
+        check(response.code in 200..299) { "기록을 불러오지 못했습니다: HTTP ${response.code}" }
+        JSONObject(response.body)
+    }
+    fun proposeChange(changeId: String, undo: Boolean = false) {
+        runCatching { taskManager.submit(if (undo) "undo_record_change" else "apply_record_change",
+            JSONObject().put("change_id", changeId).toString(), if (undo) "기록 수정 되돌리기" else "기록 수정 적용") }
+            .onFailure { _uiState.value = _uiState.value.copy(errorMessage = it.message) }
+    }
+    fun requestFollowups(meetingId: String) {
+        runCatching { taskManager.submit("get_meeting_followups", JSONObject().put("meeting_id", meetingId).toString(), "회의 후속 업무") }
+            .onFailure { _uiState.value = _uiState.value.copy(errorMessage = it.message) }
+    }
+    suspend fun taskImage(task: TaskRecord): Bitmap? = withContext(Dispatchers.IO) {
+        taskArtifacts.get(task.id, task.revision)?.let { frame ->
+            val bytes = android.util.Base64.decode(frame.base64, android.util.Base64.DEFAULT)
+            android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+    }
+    suspend fun evidenceImage(path: String): Bitmap? = withContext(Dispatchers.IO) {
+        if (!path.startsWith("/memory/images/") || path.contains("..")) return@withContext null
+        val request = okhttp3.Request.Builder().url(GeminiConfig.jarvisApiBase.trimEnd('/') + path)
+            .header("X-API-Key", GeminiConfig.jarvisApiKey).build()
+        runCatching { recordClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) null else response.body?.byteStream()?.let(android.graphics.BitmapFactory::decodeStream)
+        } }.getOrNull()
+    }
 
     fun startSession(wakeWordInitiated: Boolean = false, initialText: String? = null) {
         if (_uiState.value.isGeminiActive) return
@@ -245,6 +352,7 @@ class GeminiSessionViewModel : ViewModel() {
                 onResponse = { geminiService.sendToolResponse(it) },
                 onFinished = ::onToolCallFinished,
                 onResultDelivered = { announcedTasks.add("${it.id}:${it.revision}") },
+                loadFullResult = taskStore::fullResult,
             )
 
             geminiService.onToolCall = toolCallHandler@{ toolCall ->
@@ -722,6 +830,9 @@ class GeminiSessionViewModel : ViewModel() {
 
     private suspend fun executeManagedTask(task: TaskRecord, execution: TaskManager.Execution): TaskOutcome {
         val args = parseTaskArgs(task.argsJson)
+        if (task.tool in reviewTools && !task.reviewed) {
+            return TaskOutcome(result = "작업 목록에서 내용을 확인·수정한 뒤 승인해주세요. 아직 실행하지 않았습니다.", waitingForUser = true)
+        }
         if (task.tool == "capture_current_view") {
             val frame = VisualMemoryFrameStore.captureFreshVisual()
                 ?: return TaskOutcome(error = "새 사진을 가져올 수 없습니다.")
@@ -736,7 +847,7 @@ class GeminiSessionViewModel : ViewModel() {
             if (task.tool == "search_contacts") withContext(Dispatchers.IO) { searchContacts(call) }
             else handleLocalToolCall(call, execution)
         } else {
-            val frame = if (task.tool == "save_life_memory") {
+            val frame = if (task.tool in setOf("save_life_memory", "identify_person") || (task.tool == "save_person" && args["include_face"] == true)) {
                 val source = task.sourceTaskId?.let(taskManager::get)
                     ?: return TaskOutcome(error = "확인한 사진 작업을 지정해주세요.")
                 if (source.tool != "capture_current_view" || source.revision != task.sourceRevision || source.state != TaskState.COMPLETED) {
@@ -746,7 +857,8 @@ class GeminiSessionViewModel : ViewModel() {
                     ?: return TaskOutcome(error = "보관한 사진이 만료되었습니다. 다시 촬영하고 확인해주세요.")
             } else null
             execution.checkCurrent()
-            openClawBridge.dispatch(task.tool, args, frame, execution::beforeExternalEffect)
+            try { openClawBridge.dispatch(task.tool, args, frame, execution::beforeExternalEffect, "${task.id}:${task.revision}") }
+            catch (_: PendingNetworkException) { return TaskOutcome(error = "연결 복구 후 같은 요청으로 재시도합니다.", waitingForNetwork = true) }
         }
         return result.asTaskOutcome(task.tool in setOf("call_contact", "text_contact"))
     }
@@ -781,7 +893,7 @@ class GeminiSessionViewModel : ViewModel() {
         if (tasks.isEmpty()) return ""
         val running = tasks.count { it.state in setOf(TaskState.QUEUED, TaskState.RUNNING) }
         val complete = tasks.count { it.state == TaskState.COMPLETED }
-        val waiting = tasks.count { it.state in setOf(TaskState.HELD, TaskState.WAITING_USER, TaskState.OUTCOME_UNKNOWN) }
+        val waiting = tasks.count { it.state in setOf(TaskState.HELD, TaskState.WAITING_USER, TaskState.WAITING_NETWORK, TaskState.OUTCOME_UNKNOWN) }
         return "진행 $running · 결과 보관 $complete · 확인/보류 $waiting" + if (taskManager.storageError != null) " · 기록 저장 오류" else ""
     }
 
@@ -789,7 +901,7 @@ class GeminiSessionViewModel : ViewModel() {
         if (!readyForCompletionNotice || !liveConversation || !_uiState.value.isGeminiActive || geminiService.connectionState.value != GeminiConnectionState.Ready) return
         if (geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0) return
         val task = taskManager.focusTaskId?.let(taskManager::get) ?: return
-        if (!TaskPolicies.forTool(task.tool).background || task.state !in setOf(TaskState.COMPLETED, TaskState.FAILED)) return
+        if ((!TaskPolicies.forTool(task.tool).background && !task.reviewed) || task.state !in setOf(TaskState.COMPLETED, TaskState.FAILED)) return
         val key = "${task.id}:${task.revision}"
         if (key in announcedTasks || System.currentTimeMillis() - maxOf(lastInputAt, task.updatedAt) < 1200L) return
         announcedTasks.add(key)

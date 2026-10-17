@@ -25,6 +25,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +45,8 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsMa
 fun SettingsScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    onDebug: (() -> Unit)? = null,
+    onDisconnect: (() -> Unit)? = null,
 ) {
     var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
@@ -52,6 +58,7 @@ fun SettingsScreen(
     var liveConversationEnabled by remember { mutableStateOf(SettingsManager.liveConversationEnabled) }
     var whisperSttEnabled by remember { mutableStateOf(SettingsManager.speechRecognizerProvider == "whisper") }
     var showResetDialog by remember { mutableStateOf(false) }
+    var showDisconnectDialog by remember { mutableStateOf(false) }
 
     fun save() {
         SettingsManager.geminiAPIKey = geminiAPIKey.trim()
@@ -77,9 +84,14 @@ fun SettingsScreen(
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
     }
 
+    // Tab navigation and system Back also persist edits, not only the toolbar Back button.
+    LaunchedEffect(geminiAPIKey, systemPrompt, jarvisApiBase, jarvisApiKey, webrtcSignalingURL,
+        videoStreamingEnabled, proactiveNotificationsEnabled, liveConversationEnabled, whisperSttEnabled) {
+        save()
+    }
     Column(modifier = modifier.fillMaxSize()) {
         TopAppBar(
-            title = { Text("Jarvis 설정") },
+            title = { Text("설정", style = MaterialTheme.typography.headlineMedium) },
             navigationIcon = {
                 IconButton(onClick = {
                     save()
@@ -94,49 +106,54 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
+                .padding(horizontal = 24.dp)
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            // Gemini section
-            SectionHeader("Gemini API")
+            JarvisCard {
+                Text("내게 맞게 조정하세요", style = MaterialTheme.typography.titleLarge)
+                Text("변경한 설정은 자동으로 저장돼요. 대화 설정은 다음 연결부터 적용돼요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            SectionHeader("AI 연결")
             MonoTextField(
                 value = geminiAPIKey,
                 onValueChange = { geminiAPIKey = it },
-                label = "API Key",
-                placeholder = "Enter Gemini API key",
+                label = "Gemini API 키",
+                placeholder = "API 키 입력",
+                secret = true,
             )
 
-            SectionHeader("System Prompt")
+            SectionHeader("자비스 응답 방식")
             OutlinedTextField(
                 value = systemPrompt,
                 onValueChange = { systemPrompt = it },
-                label = { Text("System prompt") },
+                label = { Text("응답 지침") },
                 modifier = Modifier.fillMaxWidth().height(200.dp),
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
             )
 
-            SectionHeader("Jarvis Memory Server")
+            SectionHeader("기억 서버 연결")
             MonoTextField(
                 value = jarvisApiBase,
                 onValueChange = { jarvisApiBase = it },
-                label = "API URL",
+                label = "서버 주소",
                 placeholder = "https://your-tunnel.trycloudflare.com",
                 keyboardType = KeyboardType.Uri,
             )
             MonoTextField(
                 value = jarvisApiKey,
                 onValueChange = { jarvisApiKey = it },
-                label = "API Key",
-                placeholder = "Jarvis server API key",
+                label = "서버 API 키",
+                placeholder = "API 키 입력",
+                secret = true,
             )
 
             // WebRTC section
-            SectionHeader("Live Share")
+            SectionHeader("화면 공유")
             MonoTextField(
                 value = webrtcSignalingURL,
                 onValueChange = { webrtcSignalingURL = it },
-                label = "Signaling URL",
+                label = "공유 서버 주소",
                 placeholder = "Auto: Jarvis API /live/ws",
                 keyboardType = KeyboardType.Uri,
             )
@@ -174,9 +191,9 @@ fun SettingsScreen(
                         )
                         Text(
                             if (whisperSttEnabled) {
-                                "Experimental offline mode. Slower, but useful for accuracy comparison."
+                                "기기에서 음성을 인식해요. 처리 속도는 기기에 따라 달라요."
                             } else {
-                                "Default stable mode. Faster startup and better for daily testing."
+                                "휴대폰의 한국어 음성 인식을 사용해요."
                             },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -190,13 +207,13 @@ fun SettingsScreen(
             }
 
             // Video
-            SectionHeader("Video")
+            SectionHeader("카메라")
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("연속 영상 전송", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         "일상 테스트에서는 꺼두세요. Jarvis는 필요한 순간의 이미지만 캡처합니다.",
@@ -217,7 +234,7 @@ fun SettingsScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("서버 알림 음성 안내", style = MaterialTheme.typography.bodyLarge)
                     Text(
                         "Jarvis 서버에서 온 알림을 글라스 스피커로 안내합니다.",
@@ -231,6 +248,9 @@ fun SettingsScreen(
                 )
             }
 
+            if (onDisconnect != null) TextButton(onClick = { showDisconnectDialog = true }) { Text("글라스 앱 등록 해제") }
+            if (onDebug != null) TextButton(onClick = onDebug) { Text("개발 도구") }
+
             // Reset
             TextButton(onClick = { showResetDialog = true }) {
                 Text("기본값으로 초기화", color = Color.Red)
@@ -239,6 +259,12 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
+
+    if (showDisconnectDialog && onDisconnect != null) AlertDialog(
+        onDismissRequest = { showDisconnectDialog = false }, title = { Text("글라스 앱 등록을 해제할까요?") },
+        text = { Text("다시 글라스를 사용하려면 앱을 등록해야 해요. 저장된 기억은 유지돼요.") },
+        confirmButton = { TextButton(onClick = { showDisconnectDialog = false; onDisconnect() }) { Text("등록 해제") } },
+        dismissButton = { TextButton(onClick = { showDisconnectDialog = false }) { Text("유지하기") } })
 
     if (showResetDialog) {
         AlertDialog(
@@ -279,6 +305,7 @@ private fun MonoTextField(
     label: String,
     placeholder: String,
     keyboardType: KeyboardType = KeyboardType.Text,
+    secret: Boolean = false,
 ) {
     OutlinedTextField(
         value = value,
@@ -288,6 +315,7 @@ private fun MonoTextField(
         modifier = Modifier.fillMaxWidth(),
         textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
         singleLine = true,
+        visualTransformation = if (secret) PasswordVisualTransformation() else VisualTransformation.None,
         keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
     )
 }
