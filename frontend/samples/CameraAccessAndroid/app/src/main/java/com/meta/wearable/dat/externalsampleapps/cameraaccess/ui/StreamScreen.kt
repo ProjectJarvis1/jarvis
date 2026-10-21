@@ -35,6 +35,8 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.wrapContentWidth
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -344,139 +346,118 @@ fun StreamScreen(
         ),
     )
 
-    var workspace by rememberSaveable { mutableStateOf(0) }
-    Scaffold(modifier = modifier.fillMaxSize(), containerColor = MaterialTheme.colorScheme.background,
-        topBar = {
-            TopAppBar(title = { Column {
-                Text("자비스와 함께", style = MaterialTheme.typography.titleLarge)
-                Text(if (isPhoneMode) "휴대폰 카메라" else "글라스 카메라", style = MaterialTheme.typography.labelMedium,
+    val problems = statusChips.take(3).filter { it.color == AppColor.Red }.map { it.label }
+    val listening = when {
+        meetingRecordingUiState.isRecording -> "회의를 기록하고 있어요"
+        geminiUiState.isModelSpeaking -> "자비스가 답하고 있어요"
+        geminiUiState.isGeminiActive -> "듣고 있어요"
+        else -> "버튼을 누르거나 ‘자비스’라고 불러보세요"
+    }
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                JarvisDot(if (meetingRecordingUiState.isRecording) AppColor.Red else MaterialTheme.colorScheme.onSurface)
+                Text(statusTitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("· " + if (isPhoneMode) "휴대폰 카메라" else "글라스 카메라", style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
-            } }, navigationIcon = { IconButton(onClick = ::requestLeave) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "홈으로") } },
-                actions = { IconButton(onClick = wearablesViewModel::showMemory) { Icon(Icons.Default.CollectionsBookmark, "기록 열기") } })
-        }, bottomBar = {
-            ControlsRow(
-                onStopStream = {
-                    requestLeave()
-                },
-                onToggleAI = {
+            }
+            IconButton(onClick = ::requestLeave, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Close, "대화 종료") }
+        }
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)) {
+            item {
+                val frame = streamUiState.capturedPhoto ?: streamUiState.videoFrame
+                Surface(Modifier.fillMaxWidth().height(250.dp), shape = RoundedCornerShape(24.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                    if (frame != null) Image(frame.asImageBitmap(), if (streamUiState.capturedPhoto != null) "최근 촬영한 장면" else "카메라 미리보기",
+                        Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                    else Box(contentAlignment = Alignment.Center) {
+                        Text("카메라를 준비하고 있어요", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (problems.isNotEmpty()) item {
+                Text(problems.joinToString(" · "), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
+            }
+            if (meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing) item {
+                MeetingModePanel(meetingRecordingUiState.isRecording, meetingRecordingUiState.isProcessing,
+                    meetingRecordingUiState.recordingStartedAtMs, { meetingRecordingViewModel.stopAndProcess() },
+                    Modifier.fillMaxWidth())
+            }
+            geminiUiState.pendingContactAction?.let { action -> item {
+                ContactActionConfirmCard(action, geminiViewModel::confirmPendingContactAction, geminiViewModel::cancelPendingContactAction)
+            } }
+            if (geminiUiState.userTranscript.isNotBlank()) item {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                    Surface(Modifier.fillMaxWidth(.8f).wrapContentWidth(Alignment.End), shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant) {
+                        Text(geminiUiState.userTranscript, Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                            style = MaterialTheme.typography.bodyLarge)
+                    }
+                }
+            }
+            if (geminiUiState.aiTranscript.isNotBlank()) item {
+                Text(geminiUiState.aiTranscript, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 27.sp))
+            }
+            val working = (geminiUiState.toolCallStatus as? ToolCallStatus.Executing)?.displayText ?: geminiUiState.taskSummary
+            if (working.isNotBlank()) item {
+                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                    Row(Modifier.heightIn(min = 40.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        JarvisDot()
+                        Text(working, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+            if (webrtcUiState.isActive) item { WebRTCOverlay(uiState = webrtcUiState) }
+        }
+        LiveControls(
+            listening = listening,
+            onToggleAI = {
+                if (geminiUiState.isGeminiActive) {
+                    geminiViewModel.stopSession()
+                } else {
+                    geminiViewModel.startSession()
+                }
+            },
+            isAIActive = geminiUiState.isGeminiActive,
+            aiEnabled = !meetingRecordingUiState.isRecording &&
+                !meetingRecordingUiState.isProcessing,
+            onToggleRecording = {
+                if (meetingRecordingUiState.isRecording) {
+                    meetingRecordingViewModel.stopAndProcess()
+                } else {
                     if (geminiUiState.isGeminiActive) {
                         geminiViewModel.stopSession()
-                    } else {
-                        geminiViewModel.startSession()
                     }
-                },
-                isAIActive = geminiUiState.isGeminiActive,
-                aiEnabled = !meetingRecordingUiState.isRecording &&
-                    !meetingRecordingUiState.isProcessing,
-                onToggleRecording = {
-                    if (meetingRecordingUiState.isRecording) {
-                        meetingRecordingViewModel.stopAndProcess()
-                    } else {
-                        if (geminiUiState.isGeminiActive) {
-                            geminiViewModel.stopSession()
-                        }
-                        meetingRecordingViewModel.startRecording()
-                    }
-                },
-                isRecording = meetingRecordingUiState.isRecording,
-                isRecordingProcessing = meetingRecordingUiState.isProcessing,
-                onToggleLive = {
-                    if (webrtcUiState.isActive) {
-                        webrtcViewModel.stopSession()
-                    } else {
-                        webrtcViewModel.startSession()
-                    }
-                },
-                isLiveActive = webrtcUiState.isActive,
-                onShareLive = {
-                    val intent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, "Jarvis live view: ${webrtcUiState.viewerUrl}")
-                    }
-                    context.startActivity(Intent.createChooser(intent, "Share live view"))
-                },
-                canShareLive = webrtcUiState.viewerUrl.isNotEmpty(),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .navigationBarsPadding(),
-            )
-        }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            TabRow(selectedTabIndex = workspace, containerColor = MaterialTheme.colorScheme.background) {
-                listOf("대화", "작업").forEachIndexed { index, label ->
-                    Tab(selected = workspace == index, onClick = { workspace = index }, text = { Text(label) })
+                    meetingRecordingViewModel.startRecording()
                 }
-            }
-            if (workspace == 1) TaskBoardScreen(geminiViewModel)
-            else LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                item {
-                    JarvisCard {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
-                                Icon(Icons.Default.GraphicEq, null, Modifier.padding(16.dp).size(32.dp), tint = MaterialTheme.colorScheme.primary)
-                            }
-                            Column(Modifier.weight(1f)) {
-                                Text(if (geminiUiState.isModelSpeaking) "자비스가 답하고 있어요" else statusTitle,
-                                    style = MaterialTheme.typography.titleLarge)
-                                Text(statusBody, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            statusChips.take(3).forEach { chip ->
-                                Surface(shape = MaterialTheme.shapes.small, color = MaterialTheme.colorScheme.surfaceVariant) {
-                                    Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Box(Modifier.size(7.dp).clip(CircleShape).background(chip.color))
-                                        Text(chip.label, style = MaterialTheme.typography.labelMedium)
-                                    }
-                                }
-                            }
-                        }
-                    }
+            },
+            isRecording = meetingRecordingUiState.isRecording,
+            isRecordingProcessing = meetingRecordingUiState.isProcessing,
+            onToggleLive = {
+                if (webrtcUiState.isActive) {
+                    webrtcViewModel.stopSession()
+                } else {
+                    webrtcViewModel.startSession()
                 }
-                if (meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing) item {
-                    MeetingModePanel(meetingRecordingUiState.isRecording, meetingRecordingUiState.isProcessing,
-                        meetingRecordingUiState.recordingStartedAtMs, { meetingRecordingViewModel.stopAndProcess() },
-                        Modifier.fillMaxWidth().height(340.dp))
+            },
+            isLiveActive = webrtcUiState.isActive,
+            onShareLive = {
+                val intent = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_TEXT, "Jarvis live view: ${webrtcUiState.viewerUrl}")
                 }
-                geminiUiState.pendingContactAction?.let { action -> item {
-                    ContactActionConfirmCard(action, geminiViewModel::confirmPendingContactAction, geminiViewModel::cancelPendingContactAction)
-                } }
-                if (geminiUiState.userTranscript.isNotBlank()) item {
-                    JarvisCard {
-                        Text("나", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
-                        Text(geminiUiState.userTranscript, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-                if (geminiUiState.aiTranscript.isNotBlank()) item {
-                    JarvisCard {
-                        Text("자비스", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.labelLarge)
-                        Text(geminiUiState.aiTranscript, style = MaterialTheme.typography.bodyLarge)
-                    }
-                }
-                item {
-                    val frame = streamUiState.capturedPhoto ?: streamUiState.videoFrame
-                    JarvisCard {
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically) {
-                            Text(if (streamUiState.capturedPhoto != null) "최근 촬영한 장면" else "카메라 미리보기", style = MaterialTheme.typography.titleMedium)
-                            TaskBoardButton(geminiViewModel)
-                        }
-                        if (frame != null) Image(frame.asImageBitmap(), "카메라 장면", Modifier.fillMaxWidth().height(200.dp).clip(MaterialTheme.shapes.medium), contentScale = ContentScale.Crop)
-                        else Text("카메라를 준비하고 있어요. 연결되면 여기에 표시돼요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        if (geminiUiState.taskSummary.isNotBlank()) Text(geminiUiState.taskSummary,
-                            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
-                if (webrtcUiState.isActive) item { WebRTCOverlay(uiState = webrtcUiState) }
-                if (!geminiUiState.isGeminiActive && !meetingRecordingUiState.isRecording) item {
-                    Text("아래 대화 시작을 누르거나 ‘자비스’라고 불러보세요.",
-                        style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 12.dp))
-                }
-            }
-        }
+                context.startActivity(Intent.createChooser(intent, "Share live view"))
+            },
+            canShareLive = webrtcUiState.viewerUrl.isNotEmpty(),
+            onRecords = wearablesViewModel::showMemory,
+            onStopStream = { requestLeave() },
+            tasks = { TaskBoardIconButton(geminiViewModel) },
+            modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
+        )
     }
 
     // Share photo dialog
@@ -509,36 +490,34 @@ private fun ContactActionConfirmCard(
     val isCall = action.type == PendingContactActionType.CALL
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = Color(0xFFF8FAFC),
+        color = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(18.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface),
     ) {
         Column(
             modifier = Modifier.padding(16.dp),
         ) {
             Text(
                 text = if (isCall) "전화 실행 전 확인" else "문자 전송 전 확인",
-                color = Color(0xFF10233F),
                 fontWeight = FontWeight.Bold,
                 fontSize = 16.sp,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = "대상: ${action.query}",
-                color = Color(0xFF334155),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = FontWeight.Medium,
             )
             if (!isCall) {
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
-                    color = Color.White,
+                    color = MaterialTheme.colorScheme.surfaceVariant,
                     shape = RoundedCornerShape(12.dp),
                 ) {
                     Text(
                         text = action.message.orEmpty(),
                         modifier = Modifier.padding(12.dp),
-                        color = Color(0xFF475569),
+                        color = MaterialTheme.colorScheme.onSurface,
                     )
                 }
             }
@@ -584,14 +563,13 @@ private fun MeetingModePanel(
 
     Surface(
         modifier = modifier.fillMaxWidth(),
-        color = if (isProcessing) Color(0xFFFFF7E8) else Color(0xFFFFEEF0),
-        shape = RoundedCornerShape(20.dp),
-        tonalElevation = 2.dp,
-        shadowElevation = 4.dp,
+        color = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
                 .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
@@ -599,28 +577,27 @@ private fun MeetingModePanel(
             Icon(
                 imageVector = if (isProcessing) Icons.Default.TaskAlt else Icons.Default.Mic,
                 contentDescription = null,
-                tint = if (isProcessing) Color(0xFF9A6A00) else AppColor.Red,
-                modifier = Modifier.size(56.dp),
+                tint = if (isProcessing) MaterialTheme.colorScheme.onSurface else AppColor.Red,
+                modifier = Modifier.size(40.dp),
             )
             Spacer(modifier = Modifier.height(18.dp))
             Text(
                 text = if (isProcessing) "회의록 정리 중" else "회의 녹음 중",
-                color = Color(0xFF10233F),
                 fontWeight = FontWeight.Bold,
-                fontSize = 24.sp,
+                fontSize = 20.sp,
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
                 text = if (isProcessing) "녹음 내용을 분석하고 있습니다." else elapsedText,
-                color = Color(0xFF52627A),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontWeight = if (isRecording) FontWeight.Bold else FontWeight.Medium,
                 fontSize = if (isRecording) 36.sp else 16.sp,
                 textAlign = TextAlign.Center,
             )
             Spacer(modifier = Modifier.height(18.dp))
             Surface(
-                color = Color.White.copy(alpha = 0.72f),
+                color = MaterialTheme.colorScheme.surfaceVariant,
                 shape = RoundedCornerShape(14.dp),
             ) {
                 Text(
@@ -630,7 +607,7 @@ private fun MeetingModePanel(
                         "회의 중 발화는 AI 명령으로 처리하지 않습니다.\n끝낼 때는 \"회의 녹음 종료\"라고 말하거나 아래 버튼을 누르세요."
                     },
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp),
-                    color = Color(0xFF334155),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
             }
@@ -638,7 +615,7 @@ private fun MeetingModePanel(
                 Spacer(modifier = Modifier.height(18.dp))
                 Button(
                     onClick = onStopRecording,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp),
                 ) {
                     Text("회의 녹음 종료")
                 }

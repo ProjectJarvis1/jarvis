@@ -18,7 +18,14 @@ object TaskResults {
             value is String -> value.take(512)
             else -> value
         }
-        val compact = runCatching { JSONObject.valueToString(compact(JSONTokener(raw).nextValue(), 0)) }.getOrNull()
+        // Android's org.json has no valueToString; serialize each JSON kind explicitly.
+        val compact = runCatching {
+            when (val value = compact(JSONTokener(raw).nextValue(), 0)) {
+                is String -> JSONObject.quote(value)
+                null -> "null"
+                else -> value.toString()
+            }
+        }.getOrNull()
         return compact?.takeIf { it.length <= INLINE_LIMIT }
             ?: JSONObject().put("summary", raw.take(4_000)).put("additional_content", true).toString()
     }

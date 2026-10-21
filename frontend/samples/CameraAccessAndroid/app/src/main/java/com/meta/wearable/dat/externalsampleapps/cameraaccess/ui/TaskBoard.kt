@@ -5,6 +5,8 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -45,9 +47,30 @@ fun TaskBoardButton(viewModel: GeminiSessionViewModel) {
     FilledTonalButton(onClick = { open = true }, modifier = Modifier.heightIn(min = 48.dp)) {
         Text(if (pending > 0) "확인할 작업 $pending" else "작업 ${tasks.size}")
     }
-    if (open) ModalBottomSheet(onDismissRequest = { open = false },
+    TaskBoardSheet(open, viewModel) { open = false }
+}
+
+/** Round task-board button for the live controls; a dot marks work waiting for the user. */
+@Composable
+fun TaskBoardIconButton(viewModel: GeminiSessionViewModel) {
+    val tasks by viewModel.taskRecords.collectAsStateWithLifecycle()
+    var open by remember { mutableStateOf(false) }
+    val pending = tasks.count { it.state == TaskState.WAITING_USER }
+    BadgedBox(badge = { if (pending > 0) Badge { Text("$pending") } }) {
+        OutlinedIconButton(onClick = { open = true }, modifier = Modifier.size(56.dp),
+            border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) {
+            Icon(androidx.compose.material.icons.Icons.Default.Checklist, if (pending > 0) "확인할 작업 $pending" else "작업 보기")
+        }
+    }
+    TaskBoardSheet(open, viewModel) { open = false }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TaskBoardSheet(open: Boolean, viewModel: GeminiSessionViewModel, onDismiss: () -> Unit) {
+    if (open) ModalBottomSheet(onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
-        TaskBoardScreen(viewModel, Modifier.fillMaxHeight(.92f), onClose = { open = false })
+        TaskBoardScreen(viewModel, Modifier.fillMaxHeight(.92f), onClose = onDismiss)
     }
 }
 
@@ -59,11 +82,12 @@ fun TaskBoardScreen(viewModel: GeminiSessionViewModel, modifier: Modifier = Modi
     var filter by remember { mutableStateOf("전체") }
     val current = tasks.firstOrNull { it.id == selected }
     androidx.activity.compose.BackHandler(enabled = current != null) { selected = null }
-    Column(modifier.fillMaxSize().statusBarsPadding().padding(horizontal = 24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween,
+    Column(modifier.fillMaxSize().statusBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp), horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             Column(Modifier.weight(1f).padding(top = 20.dp)) {
-                Text(if (current == null) "작업" else "작업 상세", style = MaterialTheme.typography.headlineLarge)
+                Text(if (current == null) "작업 · 기록" else if (current.state == TaskState.WAITING_USER) "내용 확인 · 실행 승인" else "작업 상세",
+                    style = if (current == null) MaterialTheme.typography.headlineMedium else MaterialTheme.typography.titleLarge)
                 if (current == null) Text("맡긴 일의 진행 상황을 확인하세요", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             if (current != null) TextButton(onClick = { selected = null }) { Text("목록") }
@@ -74,49 +98,67 @@ fun TaskBoardScreen(viewModel: GeminiSessionViewModel, modifier: Modifier = Modi
                 val loaded by produceState(current) { value = current.copy(result = viewModel.fullTaskResult(current)) }
                 loaded
             }
-            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 24.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)) { TaskDetail(full, viewModel) }
+            Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 24.dp).padding(bottom = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)) { TaskDetail(full, viewModel, onLater = { selected = null }) }
         } else {
-            val pending = tasks.count { it.state == TaskState.WAITING_USER }
-            if (pending > 0) Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.medium) {
-                Column(Modifier.fillMaxWidth().padding(20.dp)) {
-                    Text("확인할 내용이 ${pending}개 있어요", style = MaterialTheme.typography.titleMedium)
-                    Text("내용을 검토하면 저장과 수정을 진행할 수 있어요.", style = MaterialTheme.typography.bodyMedium)
-                }
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("전체", "확인 필요", "진행 중", "완료", "다시 확인").forEach { label ->
-                    FilterChip(selected = filter == label, onClick = { filter = label }, label = { Text(label) })
+            val filters = listOf("전체", "진행 중", "승인 대기", "완료", "다시 확인")
+            ScrollableTabRow(selectedTabIndex = filters.indexOf(filter).coerceAtLeast(0), edgePadding = 24.dp,
+                containerColor = MaterialTheme.colorScheme.background, divider = { HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant) }) {
+                filters.forEach { label ->
+                    val count = if (label == "승인 대기") tasks.count { it.state == TaskState.WAITING_USER } else 0
+                    Tab(selected = filter == label, onClick = { filter = label }, selectedContentColor = MaterialTheme.colorScheme.onSurface,
+                        unselectedContentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        text = { Text(if (count > 0) "$label $count" else label, style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = if (filter == label) androidx.compose.ui.text.font.FontWeight.Bold else null) })
                 }
             }
             val visible = tasks.asReversed().filter { when (filter) {
-                "확인 필요" -> it.state == TaskState.WAITING_USER
+                "승인 대기" -> it.state == TaskState.WAITING_USER
                 "진행 중" -> it.state in setOf(TaskState.QUEUED, TaskState.RUNNING, TaskState.WAITING_NETWORK)
                 "완료" -> it.state == TaskState.COMPLETED
                 "다시 확인" -> it.state in setOf(TaskState.FAILED, TaskState.HELD, TaskState.OUTCOME_UNKNOWN)
                 else -> true
             } }
-            if (visible.isEmpty()) {
+            if (visible.isEmpty()) Box(Modifier.padding(horizontal = 20.dp)) {
                 JarvisCard {
                     Text(if (tasks.isEmpty()) "부탁한 일을 여기에 모아둘게요" else "이 상태의 작업이 없어요", style = MaterialTheme.typography.titleMedium)
                     Text("자비스에게 촬영이나 검색을 요청하면 진행 상황과 결과를 확인할 수 있어요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
             androidx.compose.foundation.lazy.LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 24.dp)) {
-                items(visible.size, key = { visible[it].id }) { index ->
-                    val task = visible[index]
-                    Surface(onClick = { selected = task.id }, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
-                        Column(Modifier.fillMaxWidth().padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text(task.state.label(), color = if (task.state == TaskState.FAILED) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
-                                style = MaterialTheme.typography.labelLarge)
-                            Text(task.title, style = MaterialTheme.typography.titleMedium)
-                            Text(DateTimeFormatter.ofPattern("M월 d일 a h:mm").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(task.createdAt)),
-                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    }
-                }
+                contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 24.dp)) {
+                items(visible.size, key = { visible[it].id }) { index -> TaskCard(visible[index]) { selected = visible[index].id } }
             }
+        }
+    }
+}
+
+@Composable
+private fun TaskCard(task: TaskRecord, onOpen: () -> Unit) {
+    val needsUser = task.state == TaskState.WAITING_USER
+    val failed = task.state in setOf(TaskState.FAILED, TaskState.OUTCOME_UNKNOWN)
+    Surface(onClick = onOpen, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(if (needsUser) 1.5.dp else 1.dp,
+            if (needsUser) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(task.title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium)
+                Text(if (needsUser) "승인 필요" else task.state.label(), style = MaterialTheme.typography.bodySmall,
+                    color = when { needsUser -> MaterialTheme.colorScheme.onSurface; failed -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant })
+            }
+            if (task.state == TaskState.RUNNING) LinearProgressIndicator(Modifier.fillMaxWidth().height(4.dp),
+                color = MaterialTheme.colorScheme.onSurface, trackColor = MaterialTheme.colorScheme.surfaceVariant)
+            val note = task.interpretation?.takeIf { it.isNotBlank() } ?: when (task.state) {
+                TaskState.WAITING_USER -> "내용을 확인하고 저장을 승인해 주세요."
+                TaskState.WAITING_NETWORK -> "연결이 끊겨 보관해 두었어요. 다시 보내도 중복 저장되지 않아요."
+                else -> null
+            }
+            note?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2,
+                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) }
+            Text(DateTimeFormatter.ofPattern("M월 d일 a h:mm").withZone(ZoneId.systemDefault()).format(Instant.ofEpochMilli(task.createdAt)),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (needsUser) Text("검토하기 →", style = MaterialTheme.typography.labelLarge)
         }
     }
 }
@@ -128,7 +170,7 @@ private fun ResultImage(key: String, load: suspend () -> Bitmap?) {
 }
 
 @Composable
-private fun TaskDetail(task: TaskRecord, vm: GeminiSessionViewModel) {
+private fun TaskDetail(task: TaskRecord, vm: GeminiSessionViewModel, onLater: () -> Unit) {
     Text(task.title, style = MaterialTheme.typography.titleLarge)
     Text(task.state.label())
     task.error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
@@ -145,6 +187,8 @@ private fun TaskDetail(task: TaskRecord, vm: GeminiSessionViewModel) {
         }
     }
     if (task.state == TaskState.WAITING_USER && task.tool !in setOf("call_contact", "text_contact")) {
+        Text("승인하기 전에는 아무것도 저장되지 않아요. 내용을 고친 뒤 승인할 수 있어요.",
+            style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         var draft by remember(task.id, task.revision) { mutableStateOf(task.argsJson) }
         val obj = JSONObject(draft)
         if (task.tool == "save_person" && obj.optBoolean("include_face")) {
@@ -186,12 +230,18 @@ private fun TaskDetail(task: TaskRecord, vm: GeminiSessionViewModel) {
                 return
             }
         }
-        if (draft != task.argsJson) {
-            Button(onClick = { vm.editTask(task.id, task.revision, draft) }) { Text("초안 수정 반영") }
-            Text("수정 내용을 반영한 뒤 승인할 수 있습니다.")
-        } else {
-            Button(onClick = { vm.controlTask(task.id, task.revision, "approve") }) { Text("내용 확인 · 실행 승인") }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OutlinedButton(onClick = onLater, modifier = Modifier.weight(1f).heightIn(min = 52.dp)) { Text("나중에") }
+            if (draft != task.argsJson) {
+                Button(onClick = { vm.editTask(task.id, task.revision, draft) }, modifier = Modifier.weight(2f).heightIn(min = 52.dp)) { Text("수정 내용 반영") }
+            } else {
+                Button(onClick = { vm.controlTask(task.id, task.revision, "approve") }, modifier = Modifier.weight(2f).heightIn(min = 52.dp)) { Text("승인하고 저장") }
+            }
         }
+        if (draft != task.argsJson) Text("수정 내용을 반영한 뒤 승인할 수 있어요.", style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
+        if (task.tool == "apply_record_change") Text("저장한 뒤에도 「수정 되돌리기」로 이전 상태로 돌아갈 수 있어요.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (task.state != TaskState.COMPLETED) return
     val parsedJson = remember(task.result) { mutableStateOf<JSONObject?>(null) }
@@ -237,16 +287,26 @@ private fun TaskDetail(task: TaskRecord, vm: GeminiSessionViewModel) {
 
 @Composable
 private fun ChangePreview(json: JSONObject, reverse: Boolean = false) {
-    Text("변경 전", style = MaterialTheme.typography.titleSmall)
     val original = json.optJSONObject("before_data")?.optJSONObject("values")
     val afterData = json.optJSONObject("after_data")
     val changed = afterData?.optJSONObject("values")
     val before = if (reverse) changed else original
     val after = if (reverse) original else changed
-    before?.keys()?.asSequence()?.forEach { key -> Text("${fieldLabels[key] ?: key}: ${before.optString(key)}") }
-    Text("변경 후", style = MaterialTheme.typography.titleSmall)
-    if (afterData?.optString("action") == "delete") Text("기억 삭제 — 이 삭제는 되돌릴 수 없습니다.")
-    else after?.keys()?.asSequence()?.forEach { key -> Text("${fieldLabels[key] ?: key}: ${after.optString(key)}") }
+    fun lines(values: JSONObject?) = values?.keys()?.asSequence()?.map { "${fieldLabels[it] ?: it}: ${values.optString(it)}" }?.toList().orEmpty()
+    ChangeBox("변경 전", lines(before), emphasized = false)
+    ChangeBox("변경 후", if (afterData?.optString("action") == "delete") listOf("기억 삭제 — 이 삭제는 되돌릴 수 없습니다.") else lines(after), emphasized = true)
+}
+
+@Composable
+private fun ChangeBox(label: String, lines: List<String>, emphasized: Boolean) {
+    Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface,
+        border = androidx.compose.foundation.BorderStroke(if (emphasized) 1.5.dp else 1.dp,
+            if (emphasized) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            (lines.ifEmpty { listOf("내용 없음") }).forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
+        }
+    }
 }
 
 @Composable

@@ -1,5 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -15,32 +17,38 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+// Monochrome palette from the Jarvis design canvas: ink on white, grey surfaces, hairline borders.
 private val LightPalette = lightColorScheme(
-    primary = Color(0xFF2864F0), onPrimary = Color.White,
-    primaryContainer = Color(0xFFE9F0FF), onPrimaryContainer = Color(0xFF1743A4),
-    background = Color(0xFFF4F5F7), onBackground = Color(0xFF191F28),
-    surface = Color.White, onSurface = Color(0xFF191F28),
-    surfaceVariant = Color(0xFFF0F2F5), onSurfaceVariant = Color(0xFF5C6675),
-    outline = Color(0xFF8993A1), outlineVariant = Color(0xFFE4E7EC),
-    error = Color(0xFFC93442), errorContainer = Color(0xFFFFECEF),
+    primary = Color(0xFF0D0D0D), onPrimary = Color.White,
+    primaryContainer = Color(0xFFF4F4F4), onPrimaryContainer = Color(0xFF0D0D0D),
+    secondaryContainer = Color(0xFFF4F4F4), onSecondaryContainer = Color(0xFF0D0D0D),
+    background = Color.White, onBackground = Color(0xFF0D0D0D),
+    surface = Color.White, onSurface = Color(0xFF0D0D0D),
+    surfaceVariant = Color(0xFFF4F4F4), onSurfaceVariant = Color(0xFF6B6B6B),
+    surfaceContainer = Color.White, surfaceContainerLow = Color.White, surfaceContainerHigh = Color(0xFFF4F4F4),
+    outline = Color(0xFFD4D4D4), outlineVariant = Color(0xFFE5E5E5),
+    error = Color(0xFFC62828), errorContainer = Color(0xFFFDECEC),
 )
 private val DarkPalette = darkColorScheme(
-    primary = Color(0xFF8DAFFF), onPrimary = Color(0xFF002C81),
-    primaryContainer = Color(0xFF203863), onPrimaryContainer = Color(0xFFCFDEFF),
-    background = Color(0xFF101317), onBackground = Color(0xFFF1F3F6),
-    surface = Color(0xFF1C2026), onSurface = Color(0xFFF1F3F6),
-    surfaceVariant = Color(0xFF292F38), onSurfaceVariant = Color(0xFFB7C0CD),
-    outlineVariant = Color(0xFF343D49),
+    primary = Color(0xFFF2F2F2), onPrimary = Color(0xFF0D0D0D),
+    primaryContainer = Color(0xFF242424), onPrimaryContainer = Color(0xFFF2F2F2),
+    secondaryContainer = Color(0xFF242424), onSecondaryContainer = Color(0xFFF2F2F2),
+    background = Color(0xFF0D0D0D), onBackground = Color(0xFFF2F2F2),
+    surface = Color(0xFF0D0D0D), onSurface = Color(0xFFF2F2F2),
+    surfaceVariant = Color(0xFF242424), onSurfaceVariant = Color(0xFFA3A3A3),
+    surfaceContainer = Color(0xFF0D0D0D), surfaceContainerLow = Color(0xFF0D0D0D), surfaceContainerHigh = Color(0xFF242424),
+    outline = Color(0xFF525252), outlineVariant = Color(0xFF2E2E2E),
+    error = Color(0xFFFF8A80),
 )
 
 @Composable
 fun JarvisTheme(content: @Composable () -> Unit) {
     MaterialTheme(
         colorScheme = if (isSystemInDarkTheme()) DarkPalette else LightPalette,
-        shapes = Shapes(small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(20.dp), large = RoundedCornerShape(28.dp)),
+        shapes = Shapes(small = RoundedCornerShape(12.dp), medium = RoundedCornerShape(18.dp), large = RoundedCornerShape(24.dp)),
         typography = Typography(
-            headlineLarge = androidx.compose.ui.text.TextStyle(fontSize = 32.sp, lineHeight = 42.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.8).sp),
-            headlineMedium = androidx.compose.ui.text.TextStyle(fontSize = 26.sp, lineHeight = 36.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp),
+            headlineLarge = androidx.compose.ui.text.TextStyle(fontSize = 30.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.3).sp),
+            headlineMedium = androidx.compose.ui.text.TextStyle(fontSize = 28.sp, lineHeight = 36.sp, fontWeight = FontWeight.Medium),
             titleLarge = androidx.compose.ui.text.TextStyle(fontSize = 21.sp, lineHeight = 30.sp, fontWeight = FontWeight.Bold),
             titleMedium = androidx.compose.ui.text.TextStyle(fontSize = 17.sp, lineHeight = 25.sp, fontWeight = FontWeight.SemiBold),
             bodyLarge = androidx.compose.ui.text.TextStyle(fontSize = 16.sp, lineHeight = 25.sp),
@@ -52,18 +60,20 @@ fun JarvisTheme(content: @Composable () -> Unit) {
 
 @Composable
 fun JarvisCard(modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
-    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large, color = MaterialTheme.colorScheme.surface) {
-        Column(Modifier.padding(22.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
+    Surface(modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp), content = content)
     }
 }
 
 @Composable
 fun JarvisActionRow(icon: ImageVector, title: String, subtitle: String, onClick: () -> Unit) {
-    Surface(onClick = onClick, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface) {
+    Surface(onClick = onClick, shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surface,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
         Row(Modifier.fillMaxWidth().heightIn(min = 80.dp).padding(18.dp), verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Surface(shape = RoundedCornerShape(16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                Icon(icon, null, Modifier.padding(12.dp).size(24.dp), tint = MaterialTheme.colorScheme.primary)
+                Icon(icon, null, Modifier.padding(12.dp).size(24.dp), tint = MaterialTheme.colorScheme.onSurface)
             }
             Column(Modifier.weight(1f)) {
                 Text(title, style = MaterialTheme.typography.titleMedium)
@@ -76,8 +86,14 @@ fun JarvisActionRow(icon: ImageVector, title: String, subtitle: String, onClick:
 
 @Composable
 fun JarvisTag(label: String) {
-    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-        Text(label, Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
+    Surface(shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surfaceVariant) {
+        Text(label, Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
             style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
+}
+
+/** Small round status dot used across screens (connection, running work). */
+@Composable
+fun JarvisDot(color: Color = MaterialTheme.colorScheme.onSurface) {
+    androidx.compose.foundation.layout.Box(Modifier.size(8.dp).background(color, androidx.compose.foundation.shape.CircleShape))
 }

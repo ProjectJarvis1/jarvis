@@ -27,7 +27,15 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
     val tasks by geminiViewModel.taskRecords.collectAsStateWithLifecycle()
     var taskPage by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
-    val tab = when { state.isSettingsVisible -> 3; state.isMemoryVisible -> 2; taskPage -> 1; else -> 0 }
+    val tab = when { state.isMemoryVisible -> 3; taskPage -> 2; else -> 0 }
+    val activeTasks = tasks.count { it.state in setOf(com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState.QUEUED,
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState.RUNNING,
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState.WAITING_NETWORK,
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState.WAITING_USER) }
+    fun startConversation() {
+        viewModel.hideMemory(); viewModel.hideSettings(); taskPage = false
+        if (state.hasActiveDevice) viewModel.navigateToStreaming(onRequestWearablesPermission) else viewModel.navigateToPhoneMode()
+    }
     LaunchedEffect(state.recentError) {
         state.recentError?.let { snackbar.showSnackbar(it); viewModel.clearCameraPermissionError() }
     }
@@ -38,19 +46,29 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
         contentWindowInsets = WindowInsets(0, 0, 0, 0),
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            if (!state.isStreaming) NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                val labels = listOf("홈", "작업", "기록", "설정")
-                val icons = listOf(Icons.Default.Home, Icons.Default.TaskAlt, Icons.Default.AutoStories, Icons.Default.Tune)
-                labels.forEachIndexed { index, label ->
-                    NavigationBarItem(selected = tab == index, onClick = {
-                        viewModel.hideMemory(); viewModel.hideSettings(); taskPage = index == 1
-                        if (index == 2) viewModel.showMemory()
-                        if (index == 3) viewModel.showSettings()
-                    }, icon = {
-                        BadgedBox(badge = { if (index == 1 && tasks.any { it.state == com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState.WAITING_USER }) Badge() }) {
-                            Icon(icons[index], null)
-                        }
-                    }, label = { Text(label) })
+            if (!state.isStreaming) Column {
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                    val labels = listOf("홈", "대화", "작업", "기억")
+                    val icons = listOf(Icons.Default.Home, Icons.Default.Mic, Icons.Default.Checklist, Icons.Default.Search)
+                    labels.forEachIndexed { index, label ->
+                        NavigationBarItem(selected = tab == index, onClick = {
+                            when (index) {
+                                1 -> startConversation()
+                                else -> {
+                                    viewModel.hideMemory(); viewModel.hideSettings(); taskPage = index == 2
+                                    if (index == 3) viewModel.showMemory()
+                                }
+                            }
+                        }, icon = {
+                            BadgedBox(badge = { if (index == 2 && tasks.any { it.state == com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState.WAITING_USER }) Badge() }) {
+                                Icon(icons[index], null)
+                            }
+                        }, label = { Text(label) },
+                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surface,
+                                selectedIconColor = MaterialTheme.colorScheme.onSurface, selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant, unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant))
+                    }
                 }
             }
         }) { padding ->
@@ -59,8 +77,8 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
             when {
                 state.isStreaming -> StreamScreen(viewModel, isPhoneMode = state.isPhoneMode, isForeground = !state.isMemoryVisible && !state.isSettingsVisible, geminiViewModel = geminiViewModel)
                 !state.isMemoryVisible && !state.isSettingsVisible && !taskPage -> {
-                    if (state.isRegistered) NonStreamScreen(viewModel, onRequestWearablesPermission)
-                    else HomeScreen(viewModel)
+                    if (state.isRegistered) NonStreamScreen(viewModel, onRequestWearablesPermission, activeTasks, { taskPage = true })
+                    else HomeScreen(viewModel, activeTasks, { taskPage = true })
                 }
             }
             if (taskPage && !state.isStreaming) TaskBoardScreen(geminiViewModel)

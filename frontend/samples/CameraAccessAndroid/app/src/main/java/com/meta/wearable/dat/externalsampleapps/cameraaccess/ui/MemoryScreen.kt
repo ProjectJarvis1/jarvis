@@ -24,6 +24,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.OutlinedCard
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -114,7 +117,7 @@ fun MemoryScreen(
     val currentTitle = when {
         selectedMemory != null -> "기억 상세"
         selectedMeeting != null -> "회의 상세"
-        else -> "기록"
+        else -> "기억"
     }
 
     BackHandler(enabled = selectedMemory != null || selectedMeeting != null) {
@@ -369,9 +372,8 @@ private fun SummaryHeader(
     memoryCount: Int,
     meetingCount: Int,
 ) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("다시 꺼내고 싶은 순간들", style = MaterialTheme.typography.titleLarge)
-        Text("기억과 회의를 한곳에서 찾아보세요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("기억과 회의를 한곳에서 찾아보세요.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             JarvisTag("불러온 기억 $memoryCount")
             JarvisTag("불러온 회의 $meetingCount")
@@ -393,16 +395,16 @@ private fun SearchBar(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            label = { Text("어떤 기억을 찾을까요?") },
+            leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
             keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
             keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch() }),
-            shape = MaterialTheme.shapes.medium,
-            placeholder = { Text("예: 투자자 명함, 회의실 문서") },
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
+            placeholder = { Text("어떤 기억을 찾을까요?", maxLines = 1) },
             singleLine = true,
             modifier = Modifier.weight(1f),
         )
-        IconButton(onClick = onSearch) {
-            Icon(Icons.Default.Search, contentDescription = "Search")
+        FilledIconButton(onClick = onSearch, modifier = Modifier.size(52.dp)) {
+            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "검색")
         }
     }
 }
@@ -441,14 +443,14 @@ private fun MemoryCard(
     memory: MemoryItem,
     onClick: () -> Unit,
 ) {
-    ElevatedCard(
+    OutlinedCard(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.large,
-        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = androidx.compose.material3.CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.medium,
+        colors = androidx.compose.material3.CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             MemoryThumbnail(filename = memory.imageFilename)
@@ -483,7 +485,7 @@ private fun MemoryCard(
             Text(
                 text = "이 기억은 ${memory.recallHint()}로 다시 찾기 쉽습니다.",
                 style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -643,14 +645,14 @@ private fun MeetingCard(
     onClick: () -> Unit,
     onShare: () -> Unit,
 ) {
-    ElevatedCard(
+    OutlinedCard(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.large,
-        colors = androidx.compose.material3.CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = androidx.compose.material3.CardDefaults.elevatedCardElevation(defaultElevation = 0.dp),
+        shape = MaterialTheme.shapes.medium,
+        colors = androidx.compose.material3.CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
     ) {
         Column(
-            modifier = Modifier.padding(20.dp),
+            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(
@@ -676,7 +678,7 @@ private fun MeetingCard(
                     )
                 }
                 IconButton(onClick = onShare) {
-                    Icon(Icons.Default.Share, contentDescription = "Share meeting")
+                    Icon(Icons.Default.Share, contentDescription = "회의 공유")
                 }
             }
             meeting.durationDisplay?.let {
