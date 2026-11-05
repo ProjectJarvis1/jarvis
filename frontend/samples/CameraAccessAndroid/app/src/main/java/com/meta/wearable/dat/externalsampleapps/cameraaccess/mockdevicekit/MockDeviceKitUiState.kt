@@ -13,24 +13,31 @@
 // devices.
 //
 // MockDeviceInfo encapsulates:
-// - device: MockRaybanMeta instance from DAT MockDeviceKit API
+// - device: MockGlasses instance from DAT MockDeviceKit API
 // - deviceId: UI identifier for tracking multiple mock devices
 // - deviceName: Display name for the simulated device
 // - hasCameraFeed: Whether mock video content has been configured
 // - hasCapturedImage: Whether mock photo content has been configured
+// - cameraSource: Which phone camera is being used as the source, if any
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.mockdevicekit
 
-import com.meta.wearable.dat.mockdevice.api.MockRaybanMeta
+import com.meta.wearable.dat.mockdevice.api.MockGlasses
+import com.meta.wearable.dat.mockdevice.api.camera.CameraFacing
 
 data class MockDeviceInfo(
-    val device: MockRaybanMeta,
+    val device: MockGlasses,
     val deviceId: String,
     val deviceName: String,
     val hasCameraFeed: Boolean = false,
     val hasCapturedImage: Boolean = false,
+    val cameraSource: CameraFacing? = null,
+    val isPoweredOn: Boolean = false,
+    val isDonned: Boolean = false,
+    val isUnfolded: Boolean = false,
 )
 
 data class MockDeviceKitUiState(
+    val isEnabled: Boolean = false,
     val pairedDevices: List<MockDeviceInfo> = emptyList(),
 )
