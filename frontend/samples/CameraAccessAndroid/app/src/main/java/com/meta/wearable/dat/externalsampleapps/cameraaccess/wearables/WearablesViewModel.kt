@@ -45,7 +45,8 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
   val uiState: StateFlow<WearablesUiState> = _uiState.asStateFlow()
 
   // AutoDeviceSelector automatically selects the first available wearable device
-  val deviceSelector: DeviceSelector = AutoDeviceSelector()
+  // SDK 1.0 throws if this is built before Wearables.initialize(); create it on first use.
+  val deviceSelector: DeviceSelector by lazy { AutoDeviceSelector() }
   private var deviceSelectorJob: Job? = null
 
   private var monitoringStarted = false
