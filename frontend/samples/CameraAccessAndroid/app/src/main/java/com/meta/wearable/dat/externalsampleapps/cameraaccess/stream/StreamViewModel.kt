@@ -85,7 +85,8 @@ class StreamViewModel(
     private val INITIAL_STATE = StreamUiState()
   }
 
-  private val deviceSelector: DeviceSelector = wearablesViewModel.deviceSelector
+  // Read on first glasses use: touching it before Wearables.initialize() throws (phone mode never needs it).
+  private val deviceSelector: DeviceSelector by lazy { wearablesViewModel.deviceSelector }
   private var deviceSession: DeviceSession? = null
   private var camera: Camera? = null
   private var streamSession: Stream? = null
@@ -131,7 +132,16 @@ class StreamViewModel(
     VisualMemoryFrameStore.freshStillProvider = ::captureFreshVisualFrame
     Log.d(TAG, "Starting glasses stream session with HIGH/30fps")
     // SDK 1.0: a DeviceSession connects the glasses; the camera is a capability added to it.
-    val created = Wearables.createSession(deviceSelector)
+    val created =
+        try {
+          Wearables.createSession(deviceSelector)
+        } catch (e: com.meta.wearable.dat.core.types.WearablesException) {
+          Log.e(TAG, "Wearables SDK not ready", e)
+          _uiState.update {
+            it.copy(streamSessionState = StreamState.STOPPED, errorMessage = "글라스 기능이 아직 준비되지 않았어요. 앱 권한을 모두 허용한 뒤 다시 시도해 주세요.")
+          }
+          return
+        }
     created.onFailure { error, _ ->
       Log.e(TAG, "Failed to create glasses session: ${error.description}")
       _uiState.update {

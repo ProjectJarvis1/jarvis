@@ -117,15 +117,25 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     }
   }
 
+  /** False until MainActivity calls Wearables.initialize() (it waits for Android permissions). */
+  private fun sdkReady(): Boolean {
+    if (monitoringStarted) return true
+    setRecentError("글라스 기능을 쓰려면 앱 권한을 모두 허용해 주세요. 휴대폰 카메라 대화는 지금도 쓸 수 있어요.")
+    return false
+  }
+
   fun startRegistration(activity: Activity) {
+    if (!sdkReady()) return
     Wearables.startRegistration(activity)
   }
 
   fun startUnregistration(activity: Activity) {
+    if (!sdkReady()) return
     Wearables.startUnregistration(activity)
   }
 
   fun navigateToStreaming(onRequestWearablesPermission: suspend (Permission) -> PermissionStatus) {
+    if (!sdkReady()) return
     viewModelScope.launch {
       val permission = Permission.CAMERA // Camera permission is required for streaming
       val result = Wearables.checkPermissionStatus(permission)
