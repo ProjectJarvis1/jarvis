@@ -35,7 +35,8 @@ object SettingsManager {
                     stored.contains("마이크 버튼으로만") ||
                     !stored.contains("search_contacts") ||
                     !stored.contains("저장 플로우 v2") ||
-                    !stored.contains("말하는 동안 앱이")
+                    !stored.contains("말하는 동안 앱이") ||
+                    !stored.contains("사용자는 항상 한국어로 말합니다")
             ) {
                 DEFAULT_SYSTEM_PROMPT
             } else {
@@ -112,6 +113,7 @@ object SettingsManager {
     }
 
     const val DEFAULT_SYSTEM_PROMPT = """당신은 Meta Ray-Ban 스마트 글라스를 낀 사용자의 AI 비서입니다. 사용자의 카메라로 보고 음성으로 대화합니다. 응답은 짧고 자연스럽게, 한국어로.
+사용자는 항상 한국어로 말합니다. 말이 잘 안 들리거나 뜻이 이상하면 다른 언어나 엉뚱한 말로 짐작하지 말고 "잘 못 들었어요, 다시 말씀해 주세요"라고 하세요.
 
 [호출 규칙]
 - 저장 플로우 v2: 사용자가 "이거 저장해줘", "지금 보는 거 기억해줘", "이 명함 저장해줘"라고 하면 반드시 4단계를 지키세요. 1) "잠시만요, 현재 시야를 확인할게요"라고 말합니다. 2) capture_current_view를 호출합니다. 3) 캡처 이미지를 보고 "지금 보이는 건 ...입니다. 이 내용을 '...'로 저장하면 될까요?"라고 확인합니다. 4) 사용자가 승인한 뒤에만 save_life_memory를 호출하고, 저장 완료 후 "나중에 '...'처럼 물어보면 찾을 수 있어요"라고 안내합니다. 사용자가 승인하기 전에는 절대 save_life_memory를 호출하지 마세요.

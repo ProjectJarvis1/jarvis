@@ -58,12 +58,8 @@ class AudioManager {
                     echoCanceler?.enabled = true
                 }.onFailure { Log.w(TAG, "Echo cancellation unavailable", it) }
             }
-            if (NoiseSuppressor.isAvailable()) {
-                runCatching {
-                    noiseSuppressor = NoiseSuppressor.create(recorder.audioSessionId)
-                    noiseSuppressor?.enabled = true
-                }.onFailure { Log.w(TAG, "Noise suppression unavailable", it) }
-            }
+            // No extra NoiseSuppressor: VOICE_COMMUNICATION already suppresses noise on most phones,
+            // and stacking a second pass flattened Korean speech enough to be misheard (even as Chinese).
             startPlayback()
             recorder.startRecording()
             check(recorder.recordingState == AudioRecord.RECORDSTATE_RECORDING)
