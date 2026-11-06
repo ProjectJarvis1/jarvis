@@ -84,6 +84,14 @@ object ExternalTools {
     /** What the confirm card shows for an external write, from the tool's arguments. */
     fun preview(name: String, argsJson: String): String {
         val args = runCatching { JSONObject(argsJson) }.getOrNull() ?: JSONObject()
+        if (name == "calendar_create_event") {
+            // The time is what the user must catch before approving, so it leads the second line.
+            val start = args.optString("start").replace('T', ' ').take(16)
+            val end = args.optString("end").replace('T', ' ').take(16).let { if (it.take(10) == start.take(10)) it.drop(11) else it }
+            val time = if (end.isBlank()) start else "$start ~ $end"
+            val place = args.optString("location").takeIf { it.isNotBlank() }?.let { " · $it" }.orEmpty()
+            return "구글 캘린더에 '${args.optString("title")}' 일정을 넣을까요?\n$time$place"
+        }
         val body = listOf("text", "message", "content", "summary", "query", "title").firstNotNullOfOrNull { key ->
             args.optString(key).takeIf { it.isNotBlank() }
         }

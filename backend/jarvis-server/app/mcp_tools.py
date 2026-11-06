@@ -309,6 +309,37 @@ def _meeting_search(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     }
 
 
+def _calendar_create_event(args: dict[str, Any], user_id: str) -> dict[str, Any]:
+    token = _integration_token(user_id, "google")
+    if not token:
+        return _needs_auth("google", "Google Calendar 연결이 필요합니다.")
+    zone = args.get("time_zone") or "Asia/Seoul"
+    start, end = str(args["start"]).strip(), str(args.get("end") or "").strip()
+    if len(start) == 10:  # 2026-11-07 처럼 날짜만 있으면 하루 종일 일정
+        day = datetime.fromisoformat(start).date()
+        end_day = datetime.fromisoformat(end).date() if len(end) == 10 else day
+        if end_day <= day:
+            end_day = day + timedelta(days=1)
+        when = {"start": {"date": day.isoformat()}, "end": {"date": end_day.isoformat()}}
+    else:
+        begin = datetime.fromisoformat(start)
+        finish = datetime.fromisoformat(end) if end else begin + timedelta(hours=1)
+        when = {"start": {"dateTime": begin.isoformat(), "timeZone": zone},
+                "end": {"dateTime": finish.isoformat(), "timeZone": zone}}
+    event = {"summary": args["title"], **when}
+    for key, field in (("description", "description"), ("location", "location")):
+        if args.get(key):
+            event[field] = args[key]
+    data = _http_json("https://www.googleapis.com/calendar/v3/calendars/primary/events", method="POST",
+                      headers={"Authorization": f"Bearer {token}"}, body=event)
+    return {
+        "is_error": False,
+        "content": f"구글 캘린더에 '{data.get('summary', args['title'])}' 일정을 넣었습니다.",
+        "structured_content": {"id": data.get("id"), "html_link": data.get("htmlLink"),
+                               "start": data.get("start"), "end": data.get("end")},
+    }
+
+
 _TOOLS: dict[str, McpTool] = {
     "calendar_list_events": McpTool(
         name="calendar_list_events",
@@ -326,6 +357,27 @@ _TOOLS: dict[str, McpTool] = {
             "required": ["time_min", "time_max"],
         },
         handler=_calendar_list_events,
+    ),
+    "calendar_create_event": McpTool(
+        name="calendar_create_event",
+        title="Google Calendar 일정 등록",
+        description=("사용자의 Google Calendar(기본 캘린더)에 일정을 새로 넣습니다. 실행 전 사용자 확인이 필요합니다. "
+                     "start/end 는 한국 시간 기준 ISO 형식(예: 2026-11-07T15:00:00+09:00)이고, 하루 종일 일정은 "
+                     "날짜만(2026-11-07) 넣습니다. end 를 비우면 1시간짜리 일정이 됩니다."),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string"},
+                "start": {"type": "string"},
+                "end": {"type": "string"},
+                "location": {"type": "string"},
+                "description": {"type": "string"},
+                "time_zone": {"type": "string"},
+            },
+            "required": ["title", "start"],
+        },
+        handler=_calendar_create_event,
+        requires_confirmation=True,
     ),
     "slack_post_message": McpTool(
         name="slack_post_message",
