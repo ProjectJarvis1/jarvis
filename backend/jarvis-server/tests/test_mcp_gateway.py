@@ -216,3 +216,13 @@ def test_notion_string_error_status(tmp_path, monkeypatch):
         assert write["is_error"] and write["uncertain"]
 
     asyncio.run(run())
+
+
+def test_write_failure_from_mcp_is_uncertain_unless_clearly_rejected():
+    assert g._definitely_rejected({"status": 404}, "")
+    assert not g._definitely_rejected({"status": 500}, "")
+    assert g._definitely_rejected(None, "channel_not_found")
+    assert g._definitely_rejected(None, "Invalid argument: title is required")
+    assert not g._definitely_rejected(None, "upstream 503 Service Unavailable")
+    assert not g._definitely_rejected(None, "request timed out")
+    assert not g._definitely_rejected(None, "something went wrong")

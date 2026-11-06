@@ -391,7 +391,8 @@ fun StreamScreen(
             } }
             geminiViewModel.pendingSave(taskRecords)?.let { save -> item(key = "save-${save.id}-${save.revision}") {
                 SaveConfirmCard(save, onSave = { geminiViewModel.controlTask(save.id, save.revision, "approve") },
-                    onCancel = { geminiViewModel.controlTask(save.id, save.revision, "cancel") })
+                    onCancel = { geminiViewModel.controlTask(save.id, save.revision, "cancel") },
+                    loadChange = geminiViewModel::readChange)
             } }
             if (geminiUiState.userTranscript.isNotBlank()) item {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
@@ -543,8 +544,13 @@ private fun ContactActionConfirmCard(
 
 /** Shown the moment Jarvis waits on a save, so the user can tap or just say "확인". */
 @Composable
-private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskRecord, onSave: () -> Unit, onCancel: () -> Unit) {
+private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskRecord, onSave: () -> Unit, onCancel: () -> Unit,
+    loadChange: suspend (String) -> org.json.JSONObject) {
     val args = remember(task.argsJson) { runCatching { org.json.JSONObject(task.argsJson) }.getOrNull() }
+    if (task.tool == "apply_record_change" || task.tool == "undo_record_change") {
+        RecordChangeCard(task.tool == "undo_record_change", args?.optString("change_id").orEmpty(), onSave, onCancel, loadChange)
+        return
+    }
     val name = args?.optString("name").orEmpty()
     val face = args?.optBoolean("include_face") == true
     val external = com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools.isExternal(task.tool)
@@ -571,6 +577,58 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
                 TextButton(onClick = onCancel) { Text("취소") }
                 Spacer(Modifier.size(8.dp))
                 Button(onClick = onSave) { Text(action) }
+            }
+        }
+    }
+}
+
+/**
+ * A record change is approved on what it actually does: the card loads the server's preview and names the
+ * operation ("기억을 삭제할까요?" / 삭제), and the approve button stays off until the preview is on screen.
+ */
+@Composable
+private fun RecordChangeCard(undo: Boolean, changeId: String, onApprove: () -> Unit, onCancel: () -> Unit,
+    loadChange: suspend (String) -> org.json.JSONObject) {
+    var change by remember(changeId) { mutableStateOf<org.json.JSONObject?>(null) }
+    var failed by remember(changeId) { mutableStateOf<String?>(null) }
+    LaunchedEffect(changeId) {
+        runCatching { loadChange(changeId) }.onSuccess { change = it }.onFailure { failed = it.message ?: "변경 내용을 불러오지 못했어요." }
+    }
+    val loaded = change
+    val noun = when (loaded?.optString("kind")) { "person" -> "사람 정보를"; "meeting" -> "회의 기록을"; else -> "기억을" }
+    val delete = loaded?.optJSONObject("after_data")?.optString("action") == "delete"
+    val (headline, action) = when {
+        loaded == null -> "변경 내용을 확인하고 있어요" to "확인"
+        undo -> "방금 바꾼 $noun 되돌릴까요?" to "되돌리기"
+        delete -> "이 $noun 삭제할까요?" to "삭제"
+        else -> "이 $noun 이렇게 바꿀까요?" to "변경"
+    }
+    val lines = remember(loaded) {
+        val before = loaded?.optJSONObject("before_data")?.optJSONObject("values") ?: org.json.JSONObject()
+        val after = loaded?.optJSONObject("after_data")?.optJSONObject("values") ?: org.json.JSONObject()
+        when {
+            loaded == null -> emptyList()
+            delete -> listOfNotNull(listOf("text", "name", "title", "summary").firstNotNullOfOrNull { k ->
+                before.optString(k).takeIf { it.isNotBlank() && it != "null" } })
+            else -> after.keys().asSequence().filter { before.opt(it)?.toString() != after.opt(it)?.toString() }
+                .map { "${before.opt(it)?.toString()?.takeIf { v -> v != "null" } ?: "(없음)"} → ${after.opt(it)}" }.toList()
+        }
+    }
+    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(headline, style = MaterialTheme.typography.titleMedium)
+            lines.take(4).forEach {
+                Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            failed?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
+            if (loaded != null) Text("\"확인\"이라고 말하거나 $action 버튼을 누르세요.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onCancel) { Text("취소") }
+                Spacer(Modifier.size(8.dp))
+                Button(onClick = onApprove, enabled = loaded != null) { Text(action) }
             }
         }
     }

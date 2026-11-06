@@ -5,7 +5,8 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
  * scene the user is talking about is already in the turn when the server decides the turn ended.
  * No tool round trip.
  *
- * - Always (camera on, session live): one frame per [intervalMs], like Gemini Live's camera mode.
+ * - While [continuous] (the "연속 영상 전송" setting) is on: one frame per [intervalMs] even in silence, like
+ *   Gemini Live's camera mode. With it off, frames go out only around speech.
  *   Local voice detection alone missed real speech on phones (noise suppression lowers the level),
  *   so the steady cadence guarantees the model has a view no older than ~1s when the turn ends.
  * - Speech start: the newest frame goes out at once, without waiting for the cadence.
@@ -21,6 +22,7 @@ class SpeechSyncedVision(
     private val intervalMs: Long = 1_000L,
     private val endSilenceMs: Long = 450L,
     private val maxFramesPerUtterance: Int = 8,
+    private val continuous: () -> Boolean = { true },
 ) {
     private var speaking = false
     private var lastVoiceAt = 0L
@@ -43,7 +45,7 @@ class SpeechSyncedVision(
         } else if (speaking && nowMs - lastVoiceAt >= endSilenceMs) {
             speaking = false
             sendLatest(nowMs, closing = true)
-        } else if (nowMs - lastSentAt >= intervalMs) {
+        } else if (continuous() && nowMs - lastSentAt >= intervalMs) {
             sendLatest(nowMs, closing = true)
         }
     }

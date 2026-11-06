@@ -348,6 +348,20 @@ class SentRequestError(Exception):
         self.cause = cause
 
 
+
+_REJECTED = re.compile(r"\b4(0[0-9]|1[0-9]|2[0-9])\b|invalid|validation|not[ _]found|unauthori[sz]ed|forbidden|permission|"
+                       r"required|missing|not_in_channel|channel_not_found|no_permission|올바르지|권한")
+
+
+def _definitely_rejected(parsed: Any, text: str) -> bool:
+    """쓰기 실패가 '요청이 거절돼 반영되지 않음'이 분명한가. 4xx 상태나 입력·권한 오류만 그렇다고 본다."""
+    status = parsed.get("status") if isinstance(parsed, dict) else None
+    if isinstance(status, int):
+        return 400 <= status < 500
+    if re.search(r"\b5\d\d\b|timeout|timed out|unavailable|internal", text, re.I):
+        return False
+    return bool(_REJECTED.search(text.lower()))
+
 def _short_error(exc: BaseException) -> str:
     inner = getattr(exc, "exceptions", None)
     while inner:  # ExceptionGroup 은 안쪽 첫 원인을 보여 준다
@@ -472,12 +486,17 @@ class McpGateway:
         except Exception as exc:
             return {"is_error": True, "error": f"{tool.title} 실패: {_short_error(exc)}"}
         text, is_error = _content_text(result)
-        if is_error:
-            return {"is_error": True, "error": text[:1000] or f"{tool.title} 실패"}
         try:
             parsed = json.loads(text)
         except ValueError:
             parsed = None
+        if is_error:
+            # MCP 가 실패라고 해도 상대 서비스에서 이미 반영됐을 수 있다(5xx, 시간 초과). 쓰기는 요청이 잘못됐다고
+            # 분명히 알 수 있는 실패(4xx)만 확정 실패로 두고, 나머지는 다시 실행하지 않게 '확인 필요'로 남긴다.
+            if tool.confirm and not _definitely_rejected(parsed, text):
+                return {"is_error": True, "uncertain": True,
+                        "error": f"{tool.title} 결과를 확인하지 못했습니다({text[:300]}). 다시 보내지 말고 사용자에게 직접 확인해 달라고 안내하세요."}
+            return {"is_error": True, "error": text[:1000] or f"{tool.title} 실패"}
         # 노션 MCP 는 API 실패(401, 404 등)를 isError 없이 JSON 글로 돌려준다. 성공으로 넘기지 않는다.
         status = parsed.get("status") if isinstance(parsed, dict) else None
         if isinstance(parsed, dict) and (parsed.get("object") == "error" or status == "error" or

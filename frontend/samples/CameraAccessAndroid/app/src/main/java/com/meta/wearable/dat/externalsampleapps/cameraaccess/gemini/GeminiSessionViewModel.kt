@@ -113,6 +113,7 @@ class GeminiSessionViewModel : ViewModel() {
             Log.d(TAG, "Speech-synced frame sent: ${it.length * 3 / 4 / 1024}KB age=${System.currentTimeMillis() - VisualMemoryFrameStore.latestCapturedAtMs()}ms")
             geminiService.sendVideoFrameBase64(it)
         },
+        continuous = { SettingsManager.videoStreamingEnabled },
     )
     private var stateObservationJob: Job? = null
     private var reconnectJob: Job? = null
@@ -140,11 +141,16 @@ class GeminiSessionViewModel : ViewModel() {
 
     val taskRecords get() = taskManager.tasks
 
-    /** The save Jarvis just asked about and is waiting on (card on screen, or a spoken "확인"). */
+    /**
+     * The newest save or outside write still waiting on the user. The card shows it however old it is, so a
+     * request left waiting can still be approved or cancelled; a spoken "확인" only counts for one asked about
+     * in the last five minutes ([voiceApprovable]).
+     */
     fun pendingSave(tasks: List<TaskRecord>): TaskRecord? = tasks
-        .filter { needsReview(it.tool) && it.state == TaskState.WAITING_USER && !it.dispatched &&
-            System.currentTimeMillis() - it.createdAt < 5 * 60_000L }
+        .filter { needsReview(it.tool) && it.state == TaskState.WAITING_USER && !it.dispatched }
         .maxByOrNull { it.createdAt }
+
+    private fun voiceApprovable(task: TaskRecord) = System.currentTimeMillis() - task.createdAt < 5 * 60_000L
 
     private var voiceApprovalJob: Job? = null
     private val reviewTools = setOf("save_memory", "save_life_memory", "save_person", "save_meeting", "save_need",
@@ -379,7 +385,7 @@ class GeminiSessionViewModel : ViewModel() {
             voiceApprovalJob?.cancel()
             voiceApprovalJob = viewModelScope.launch {
                 delay(700L) // wait for the rest of the sentence before judging it a plain yes
-                val waiting = pendingSave(taskManager.tasks.value) ?: return@launch
+                val waiting = pendingSave(taskManager.tasks.value)?.takeIf(::voiceApprovable) ?: return@launch
                 if (VoiceApproval.isApproval(lastUtterance, System.currentTimeMillis() - lastUtteranceAt)) {
                     controlTask(waiting.id, waiting.revision, "approve")
                 }
