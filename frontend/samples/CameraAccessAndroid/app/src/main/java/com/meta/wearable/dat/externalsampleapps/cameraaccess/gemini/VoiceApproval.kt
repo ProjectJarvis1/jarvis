@@ -19,6 +19,16 @@ object VoiceApproval {
         return splitsIntoYes(t.replace(Regex("[ ,]+"), ""))
     }
 
+    /**
+     * Calendar entries are confirmed in the conversation itself: Jarvis says "장소 있으면 같이, 없으면 그냥 등록할게요",
+     * so any recent answer that is not a refusal ("강남세브란스", "없어", "그냥 해") is the go-ahead.
+     */
+    fun isConsent(utterance: String, ageMs: Long): Boolean {
+        if (ageMs !in 0..MAX_AGE_MS) return false
+        val t = utterance.trim().lowercase()
+        return t.isNotEmpty() && !no.containsMatchIn(t)
+    }
+
     /** True when the words, spaces removed, are only yes-words in a row ("그래저장해줘", "응승인"). */
     private fun splitsIntoYes(t: String): Boolean {
         if (t.isEmpty() || t.length > 12) return false

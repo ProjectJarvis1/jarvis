@@ -913,7 +913,10 @@ class GeminiSessionViewModel : ViewModel() {
 
     private suspend fun executeManagedTask(task: TaskRecord, execution: TaskManager.Execution): TaskOutcome {
         val args = parseTaskArgs(task.argsJson)
-        if (needsReview(task.tool) && !task.reviewed && !VoiceApproval.isApproval(lastUtterance, System.currentTimeMillis() - lastUtteranceAt)) {
+        val spokenAge = System.currentTimeMillis() - lastUtteranceAt
+        val calendar = task.tool == "create_calendar_event" || task.tool == "gcal_create_event"
+        if (needsReview(task.tool) && !task.reviewed && !VoiceApproval.isApproval(lastUtterance, spokenAge) &&
+            !(calendar && VoiceApproval.isConsent(lastUtterance, spokenAge))) {
             val external = ExternalTools.isExternal(task.tool)
             return TaskOutcome(result = if (external)
                 "아직 실행하지 않았습니다. 화면에 확인 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 확인을 누르면 실행됩니다. 같은 확인을 다시 묻지 말고 한 문장으로만 안내한 뒤 기다리세요."
