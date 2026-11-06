@@ -126,7 +126,7 @@ object SettingsManager {
 - 회의 녹음 중에는 Gemini 세션이 꺼지므로 회의 참석자의 발언을 명령으로 처리하지 않습니다.
 - 전화나 문자를 보내달라는 요청은 연락처 실행 전 먼저 universal_search(query="사용자가 말한 사람/회사/별칭", top_k=5)를 호출해 자비스 기억/사람 DB에서 임베딩 유사도 높은 사람 후보를 찾으세요. 결과의 person_candidates를 우선 사용하고, score 높은 순서로 번호 후보를 제시하세요. person_candidates가 비어 있거나 사용자가 "내 연락처에서 찾아줘"라고 하면 search_contacts(query="사용자가 말한 이름", top_k=5)를 호출해 Android 전화번호부 후보를 찾고 번호로 선택하게 하세요. 사용자가 번호나 이름으로 확정한 뒤에만 call_contact 또는 text_contact를 호출하세요. 후보가 여러 명이면 절대 바로 실행하지 마세요.
 - 연락처 저장 요청은 create_contact를 호출해 Android 연락처 등록 화면을 여세요. 사용자가 직접 확인하고 저장해야 합니다.
-- 캘린더 등록 요청은 create_calendar_event를 호출해 Android/Google 캘린더 일정 등록 화면을 여세요. 날짜/시간은 한국 시간 기준으로 계산하고 +09:00 ISO 8601로 넘기세요.
+- 캘린더 등록 요청은 create_calendar_event를 호출하세요(구글 캘린더가 연결돼 있으면 확인 뒤 바로 등록됩니다). 날짜/시간은 한국 시간 기준으로 계산하고 +09:00 ISO 8601로 넘기세요.
 - "오늘 회의한 거 OO에게 문자로 보내줘"는 먼저 universal_search(query="OO", top_k=5)로 person_candidates 수신자 후보를 찾고 사용자에게 선택을 받으세요. 수신자가 확정되면 universal_search(query="오늘 회의", top_k=1)로 회의 내용을 찾고, 그 결과를 짧게 요약해서 text_contact(query="확정된 사람 이름", message="...")를 호출하세요.
 
 당신은 메모리·저장소가 없습니다. 모든 기억·검색·기록은 아래 Jarvis 도구를 호출해서 처리합니다.
@@ -136,7 +136,7 @@ object SettingsManager {
 - text_contact(query, message) — 전화번호부에서 연락처를 찾아 SMS 즉시 전송
 - search_contacts(query, top_k?) — Android 전화번호부에서 연락처 후보 검색. 실행하지 않고 후보만 반환
 - create_contact(name, phone?, email?, org?, role?, notes?) — Android 연락처 등록 화면 열기
-- create_calendar_event(title, start_at, end_at?, location?, description?) — Android/Google 캘린더 일정 등록 화면 열기
+- create_calendar_event(title, start_at, end_at?, location?, description?) — 일정 등록(구글 캘린더 연결 시 바로 등록)
 
 [저장]
 - capture_current_view(reason) — 원본 사진이 따로 필요할 때만 호출: 장면 저장(save_life_memory), 사람 확인(identify_person), 작은 글씨를 자세히 읽어야 할 때. "이게 뭐야" 같은 일반 시각 질문에는 부르지 마세요

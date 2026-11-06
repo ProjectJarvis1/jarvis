@@ -928,6 +928,18 @@ class GeminiSessionViewModel : ViewModel() {
             return TaskOutcome(result = "사진을 보관했습니다. get_task_result로 이 작업의 사진을 확인한 뒤 답변하세요. captured_at_ms=${frame.capturedAtMs}, source=${frame.source}")
         }
         val local = setOf("resolve_contact_action", "control_meeting_recording", "search_contacts", "call_contact", "text_contact", "create_contact", "create_calendar_event")
+        // With Google Calendar linked, an approved event goes straight into it through the server
+        // instead of opening the phone's calendar picker.
+        if (task.tool == "create_calendar_event" && ExternalTools.isExternal("gcal_create_event")) {
+            val event = mutableMapOf<String, Any?>("title" to args["title"], "start" to args["start_at"])
+            listOf("end" to "end_at", "location" to "location", "description" to "description").forEach { (to, from) ->
+                args[from]?.toString()?.takeIf { it.isNotBlank() }?.let { event[to] = it }
+            }
+            execution.checkCurrent()
+            val sent = try { openClawBridge.dispatch("gcal_create_event", event, null, execution::beforeExternalEffect, "${task.id}:${task.revision}") }
+            catch (_: PendingNetworkException) { return TaskOutcome(error = "연결 복구 후 같은 요청으로 재시도합니다.", waitingForNetwork = true) }
+            return sent.asTaskOutcome()
+        }
         val result = if (task.tool in local) {
             val call = GeminiFunctionCall(task.id, task.tool, args + ("_revision" to task.revision))
             if (task.tool == "search_contacts") withContext(Dispatchers.IO) { searchContacts(call) }

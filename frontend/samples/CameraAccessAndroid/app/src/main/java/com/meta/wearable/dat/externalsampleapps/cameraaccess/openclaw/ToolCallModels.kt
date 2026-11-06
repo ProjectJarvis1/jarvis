@@ -332,7 +332,7 @@ object ToolDeclarations {
 
     private fun createCalendarEvent() = decl(
         name = "create_calendar_event",
-        description = "Android/Google 캘린더 앱의 일정 등록 화면을 엽니다. 사용자가 '내일 오후 4시에 OO에서 미팅 캘린더에 넣어줘'처럼 말하면 한국 시간 기준 ISO 8601로 start_at을 계산해 호출하세요. 사용자가 직접 확인 후 저장합니다.",
+        description = "일정을 등록합니다. 구글 캘린더가 연결돼 있으면 사용자 확인 뒤 구글 캘린더에 바로 넣고, 아니면 휴대폰 캘린더 앱의 등록 화면을 엽니다. 사용자가 '내일 오후 4시에 OO에서 미팅 캘린더에 넣어줘'처럼 말하면 한국 시간 기준 ISO 8601로 start_at을 계산해 호출하세요.",
         properties = JSONObject()
             .put("title", strProp("일정 제목. 예: '미팅', '김윤섭 미팅'"))
             .put("start_at", strProp("시작 시각 ISO 8601. 한국 시간은 +09:00 포함. 예: 2026-06-18T16:00:00+09:00"))
