@@ -112,6 +112,7 @@ fun StreamScreen(
 ) {
     val streamUiState by streamViewModel.uiState.collectAsStateWithLifecycle()
     val geminiUiState by geminiViewModel.uiState.collectAsStateWithLifecycle()
+    val taskRecords by geminiViewModel.taskRecords.collectAsStateWithLifecycle()
     val webrtcUiState by webrtcViewModel.uiState.collectAsStateWithLifecycle()
     val meetingRecordingUiState by meetingRecordingViewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -388,6 +389,10 @@ fun StreamScreen(
             geminiUiState.pendingContactAction?.let { action -> item {
                 ContactActionConfirmCard(action, geminiViewModel::confirmPendingContactAction, geminiViewModel::cancelPendingContactAction)
             } }
+            geminiViewModel.pendingSave(taskRecords)?.let { save -> item(key = "save-${save.id}-${save.revision}") {
+                SaveConfirmCard(save, onSave = { geminiViewModel.controlTask(save.id, save.revision, "approve") },
+                    onCancel = { geminiViewModel.controlTask(save.id, save.revision, "cancel") })
+            } }
             if (geminiUiState.userTranscript.isNotBlank()) item {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
                     Surface(Modifier.fillMaxWidth(.8f).wrapContentWidth(Alignment.End), shape = RoundedCornerShape(20.dp),
@@ -548,6 +553,31 @@ private fun ContactActionConfirmCard(
                 Button(onClick = onConfirm) {
                     Text(if (isCall) "전화 걸기" else "문자 보내기")
                 }
+            }
+        }
+    }
+}
+
+/** Shown the moment Jarvis waits on a save, so the user can tap or just say "확인". */
+@Composable
+private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskRecord, onSave: () -> Unit, onCancel: () -> Unit) {
+    val args = remember(task.argsJson) { runCatching { org.json.JSONObject(task.argsJson) }.getOrNull() }
+    val name = args?.optString("name").orEmpty()
+    val face = args?.optBoolean("include_face") == true
+    val headline = when {
+        task.tool == "save_person" && name.isNotBlank() -> if (face) "$name 님을 얼굴과 함께 저장할까요?" else "$name 님을 저장할까요?"
+        else -> "${task.title}, 저장할까요?"
+    }
+    Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(18.dp),
+        border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(headline, style = MaterialTheme.typography.titleMedium)
+            Text("\"확인\"이라고 말하거나 저장을 누르세요.", style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onCancel) { Text("취소") }
+                Spacer(Modifier.size(8.dp))
+                Button(onClick = onSave) { Text("저장") }
             }
         }
     }

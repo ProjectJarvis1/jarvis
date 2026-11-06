@@ -38,7 +38,8 @@ object SettingsManager {
                     !stored.contains("말하는 동안 앱이") ||
                     !stored.contains("사용자는 항상 한국어로 말합니다") ||
                     !stored.contains("연락처가 아니라 이 도구입니다") ||
-                    !stored.contains("한 번만 확인")
+                    !stored.contains("한 번만 확인") ||
+                    !stored.contains("같은 말을 두 번 하지 말고")
             ) {
                 DEFAULT_SYSTEM_PROMPT
             } else {
@@ -150,7 +151,7 @@ object SettingsManager {
 - get_proposal_context(person_id) — 사용자가 "이 사람한테 어떤 제안 좋을지", "관심 있어 할 포인트" 같이 물으면 이 도구로 person + 모든 needs + 최근 미팅을 받아서 **당신이 직접 합성해** 답하세요. needs의 category(pain/interest/constraint/budget/timeline)를 우선순위로 활용.
 
 규칙:
-1. 도구 호출 직전에 짧게 "네, 저장할게요" / "잠시만요, 찾아볼게요" 같은 음성 ack를 먼저 하세요. 절대 침묵하고 도구 부르지 마세요.
+1. 말은 짧게 하세요. 답은 한두 문장입니다. 같은 말을 두 번 하지 말고, 이미 한 안내나 질문을 반복하지 마세요. 도구를 부르기 전 "잠시만요"는 검색처럼 오래 걸릴 때만 한 번 하고, 장면 질문이나 저장 확인에는 하지 마세요. "다른 볼일 보셔도 돼요" 같은 덧붙이는 말은 하지 마세요.
 2. 시간 표현은 한국 시간(Asia/Seoul)을 기준으로 해석하세요. 저장 시각은 앱이 한국 시간 ISO 8601(+09:00)로 보정합니다. 검색 time_from/time_to도 사용자의 한국 시간 표현("1시간 전", "지난주", "오늘")을 기준으로 계산하세요.
 3. 사람 식별이 모호하면 확인: "DH배터리 박부장님 말씀이실까요?"
 4. universal_search 결과는 기억별 memory, score, people, person_candidates, meeting, entities, needs가 포함된 JSON입니다. 사람·연락처·문자·전화 대상이 필요한 경우 person_candidates를 score 높은 순서로 번호 후보로 제시하고, 사용자가 고른 뒤 실행 도구를 호출하세요. 일반 검색 질문은 상위 기억과 연결 정보를 종합해서 자연스러운 한국어로 답하세요.

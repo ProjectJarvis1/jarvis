@@ -115,7 +115,8 @@ class ToolCallRouter(
                 (call.args["source_revision"] as? Number)?.toInt())
         }
         submitted[call.id] = task.id
-        val background = liveConversation && TaskPolicies.forTool(task.tool).background
+        // A photo takes ~1s: answer with the finished capture instead of "촬영 시작했어요, 완료되면 말씀드릴게요".
+        val background = liveConversation && TaskPolicies.forTool(task.tool).background && task.tool != "capture_current_view"
         if (!background && task.state in setOf(TaskState.QUEUED, TaskState.RUNNING)) {
             tasks.tasks.first { list -> list.firstOrNull { it.id == task.id }?.state !in setOf(TaskState.QUEUED, TaskState.RUNNING) }
         }

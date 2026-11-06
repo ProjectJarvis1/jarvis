@@ -9,7 +9,7 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 object VoiceApproval {
     private const val MAX_AGE_MS = 30_000L
     private val yesWords = listOf("응", "어", "네", "예", "넵", "넹", "그래", "그래요", "맞아", "맞아요", "좋아", "좋아요",
-        "승인", "승인해", "승인할게", "저장해", "저장해줘", "저장해주세요", "그걸로", "그렇게해", "그렇게해줘", "오케이", "ok", "okay", "ㅇㅇ")
+        "승인", "승인해", "승인할게", "확인", "확인해", "확인했어", "했다고", "했어", "저장해", "저장해줘", "저장해주세요", "그걸로", "그렇게해", "그렇게해줘", "오케이", "ok", "okay", "ㅇㅇ")
     private val no = Regex("아니|말고|취소|잠깐|잠시만|틀렸|다시|안 ?돼|하지 ?마")
 
     fun isApproval(utterance: String, ageMs: Long): Boolean {

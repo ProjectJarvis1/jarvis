@@ -137,6 +137,14 @@ class GeminiSessionViewModel : ViewModel() {
     var streamingMode: StreamingMode = StreamingMode.GLASSES
 
     val taskRecords get() = taskManager.tasks
+
+    /** The save Jarvis just asked about and is waiting on (card on screen, or a spoken "확인"). */
+    fun pendingSave(tasks: List<TaskRecord>): TaskRecord? = tasks
+        .filter { it.tool in reviewTools && it.state == TaskState.WAITING_USER && !it.dispatched &&
+            System.currentTimeMillis() - it.createdAt < 5 * 60_000L }
+        .maxByOrNull { it.createdAt }
+
+    private var voiceApprovalJob: Job? = null
     private val reviewTools = setOf("save_memory", "save_life_memory", "save_person", "save_meeting", "save_need",
         "apply_record_change", "undo_record_change", "create_calendar_event")
 
@@ -342,6 +350,14 @@ class GeminiSessionViewModel : ViewModel() {
             val transcript = _uiState.value.userTranscript + text
             lastUtterance = transcript
             lastUtteranceAt = lastInputAt
+            voiceApprovalJob?.cancel()
+            voiceApprovalJob = viewModelScope.launch {
+                delay(700L) // wait for the rest of the sentence before judging it a plain yes
+                val waiting = pendingSave(taskManager.tasks.value) ?: return@launch
+                if (VoiceApproval.isApproval(lastUtterance, System.currentTimeMillis() - lastUtteranceAt)) {
+                    controlTask(waiting.id, waiting.revision, "approve")
+                }
+            }
             _uiState.value = _uiState.value.copy(
                 userTranscript = transcript,
                 aiTranscript = ""
@@ -867,7 +883,7 @@ class GeminiSessionViewModel : ViewModel() {
     private suspend fun executeManagedTask(task: TaskRecord, execution: TaskManager.Execution): TaskOutcome {
         val args = parseTaskArgs(task.argsJson)
         if (task.tool in reviewTools && !task.reviewed && !VoiceApproval.isApproval(lastUtterance, System.currentTimeMillis() - lastUtteranceAt)) {
-            return TaskOutcome(result = "작업 목록에서 내용을 확인·수정한 뒤 승인해주세요. 아직 실행하지 않았습니다.", waitingForUser = true)
+            return TaskOutcome(result = "아직 저장하지 않았습니다. 화면에 저장 확인 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 저장을 누르면 저장됩니다. 같은 확인을 다시 묻지 말고 한 문장으로만 안내한 뒤 기다리세요.", waitingForUser = true)
         }
         if (task.tool == "capture_current_view") {
             val frame = VisualMemoryFrameStore.captureFreshVisual()
