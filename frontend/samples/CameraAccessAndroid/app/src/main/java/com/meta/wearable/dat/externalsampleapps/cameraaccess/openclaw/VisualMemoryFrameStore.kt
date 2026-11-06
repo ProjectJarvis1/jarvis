@@ -31,6 +31,11 @@ object VisualMemoryFrameStore {
     @Volatile
     private var latestHeight: Int = 0
 
+    /** False when the latest frame is too dark or featureless to show anything (lens covered, phone face down). */
+    @Volatile
+    var latestUsable: Boolean = false
+        private set
+
     @Volatile
     var freshStillProvider: (suspend () -> VisualFrame?)? = null
 
@@ -41,7 +46,25 @@ object VisualMemoryFrameStore {
         latestCapturedAtMs = System.currentTimeMillis()
         latestWidth = bitmap.width
         latestHeight = bitmap.height
+        latestUsable = looksUsable(bitmap)
     }
+
+    /** Samples a 24x24 grid: mean brightness and spread. A covered lens is dark and flat. */
+    internal fun looksUsable(bitmap: Bitmap): Boolean {
+        val w = bitmap.width; val h = bitmap.height
+        if (w <= 0 || h <= 0) return false
+        var sum = 0.0; var sumSq = 0.0; var n = 0
+        for (gy in 0 until 24) for (gx in 0 until 24) {
+            val c = bitmap.getPixel((gx * 2 + 1) * w / 48, (gy * 2 + 1) * h / 48)
+            val y = 0.299 * ((c shr 16) and 255) + 0.587 * ((c shr 8) and 255) + 0.114 * (c and 255)
+            sum += y; sumSq += y * y; n++
+        }
+        val mean = sum / n
+        val std = kotlin.math.sqrt((sumSq / n - mean * mean).coerceAtLeast(0.0))
+        return isUsable(mean, std)
+    }
+
+    internal fun isUsable(meanLuma: Double, stdLuma: Double): Boolean = meanLuma >= 28.0 && stdLuma >= 9.0
 
     fun latestBase64(): String? {
         val jpeg = latestJpeg ?: return null

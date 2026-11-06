@@ -96,9 +96,15 @@ class GeminiSessionViewModel : ViewModel() {
     private val speechVision = SpeechSyncedVision(
         latestFrame = {
             val at = VisualMemoryFrameStore.latestCapturedAtMs()
-            VisualMemoryFrameStore.latestBase64()?.let { it to at }
+            if (!VisualMemoryFrameStore.latestUsable) {
+                Log.d(TAG, "Speech-synced frame skipped: camera view too dark or empty")
+                null
+            } else VisualMemoryFrameStore.latestBase64()?.let { it to at }
         },
-        send = { geminiService.sendVideoFrameBase64(it) },
+        send = {
+            Log.d(TAG, "Speech-synced frame sent: ${it.length * 3 / 4 / 1024}KB age=${System.currentTimeMillis() - VisualMemoryFrameStore.latestCapturedAtMs()}ms")
+            geminiService.sendVideoFrameBase64(it)
+        },
     )
     private var stateObservationJob: Job? = null
     private var reconnectJob: Job? = null
