@@ -1,87 +1,84 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
 import androidx.activity.compose.LocalActivity
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @Composable
 fun HomeScreen(viewModel: WearablesViewModel, modifier: Modifier = Modifier) {
     val activity = LocalActivity.current
-    JarvisHome(false, false, { activity?.let(viewModel::startRegistration) },
-        viewModel::navigateToPhoneMode, viewModel::showMemory, modifier)
+    JarvisHome(false, false, { activity?.let(viewModel::startRegistration) }, viewModel::navigateToPhoneMode, modifier)
+}
+
+/** The glasses mark from the company site: two round lenses and a bridge. */
+@Composable
+fun JarvisMark(modifier: Modifier = Modifier) {
+    Icon(painterResource(R.drawable.ic_jarvis_mark), null, modifier, tint = MaterialTheme.colorScheme.onSurface)
 }
 
 /**
- * Home: connection pill, headline, spoken examples and an ask bar. Settings live in the bottom bar.
- * [onGlasses] connects or starts the glasses; [onPhone] starts with the phone camera.
+ * Home is only the way to the glasses. Every request happens in the conversation screen by saying "자비스",
+ * so this screen shows where the glasses are and offers one next step. [onGlasses] registers, opens connection
+ * help, or starts the conversation depending on the state; [onPhone] uses the phone camera instead.
  */
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun JarvisHome(registered: Boolean, deviceReady: Boolean, onGlasses: () -> Unit, onPhone: () -> Unit,
-    onRecords: () -> Unit, modifier: Modifier = Modifier) {
-    val onStart = if (deviceReady) onGlasses else onPhone
+    modifier: Modifier = Modifier) {
+    val (status, heading, body, action) = when {
+        deviceReady -> listOf("글라스 연결됨", "글라스가 연결됐어요",
+            "대화를 시작하고 글라스에 대고\n\"자비스\"라고 부르면 무엇이든 요청할 수 있어요.", "대화 시작")
+        registered -> listOf("글라스 기다리는 중", "글라스를 켜 주세요",
+            "글라스를 쓰고 전원을 켜면\n바로 대화 화면으로 넘어가요.", "연결 도움말")
+        else -> listOf("글라스 연결 안 됨", "글라스를 연결하세요",
+            "한 번 연결해 두면 글라스에 대고\n\"자비스\"라고 불러 요청할 수 있어요.", "글라스 연결하기")
+    }
     Column(modifier.fillMaxSize().statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 24.dp, end = 12.dp, top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 24.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            JarvisMark(Modifier.size(28.dp))
             Text("Jarvis", style = MaterialTheme.typography.titleLarge)
         }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally) {
-            Spacer(Modifier.height(48.dp))
-            Surface(onClick = if (deviceReady) onStart else onGlasses, shape = RoundedCornerShape(50),
-                color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.heightIn(min = 36.dp)) {
-                Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    JarvisDot(if (deviceReady) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
-                    Text(when { deviceReady -> "글라스 연결됨"; registered -> "글라스 연결 대기 · 도움말"; else -> "글라스 연결하기" },
-                        style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Spacer(Modifier.height(40.dp))
+            Surface(shape = RoundedCornerShape(28.dp), color = if (deviceReady) MaterialTheme.colorScheme.onSurface
+                else MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(112.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(painterResource(R.drawable.ic_jarvis_mark), null, Modifier.size(64.dp),
+                        tint = if (deviceReady) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.onSurface)
                 }
             }
-            Spacer(Modifier.height(20.dp))
-            Text("보고, 말하고,\n기억을 이어가세요", style = MaterialTheme.typography.headlineLarge, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(36.dp))
-            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.CenterHorizontally),
-                verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                listOf("“이거 기억해줘”" to onStart, "“지난번 미팅에서 어떤 얘기를 했지?”" to onRecords,
-                    "“아까 찍은 사진 다시 설명해줘”" to onRecords).forEach { (label, action) ->
-                    Surface(onClick = action, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.surface,
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.heightIn(min = 44.dp)) {
-                        Box(Modifier.padding(horizontal = 18.dp, vertical = 11.dp), contentAlignment = Alignment.Center) {
-                            Text(label, style = MaterialTheme.typography.bodyMedium)
-                        }
-                    }
-                }
+            Spacer(Modifier.height(28.dp))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                JarvisDot(if (deviceReady) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.outline)
+                Text(status, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            if (deviceReady) TextButton(onClick = onPhone, modifier = Modifier.padding(top = 12.dp).heightIn(min = 44.dp)) {
-                Text("휴대폰 카메라로 사용", color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(12.dp))
+            // Korean wraps by word (phrase), not in the middle of a word.
+            val byWord = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase)
+            Text(heading, style = MaterialTheme.typography.headlineLarge.copy(lineBreak = byWord), textAlign = TextAlign.Center)
+            Spacer(Modifier.height(12.dp))
+            Text(body, style = MaterialTheme.typography.bodyLarge.copy(lineBreak = byWord), textAlign = TextAlign.Center,
+                color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.widthIn(max = 360.dp))
+            Spacer(Modifier.height(40.dp))
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Surface(onClick = onStart, shape = RoundedCornerShape(32.dp), color = MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.fillMaxWidth()) {
-                Row(Modifier.heightIn(min = 64.dp).padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text("Jarvis에게 물어보기", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    IconButton(onClick = onStart, modifier = Modifier.size(44.dp)) { Icon(Icons.Outlined.PhotoCamera, "카메라로 시작") }
-                    FilledIconButton(onClick = onStart, modifier = Modifier.size(48.dp), shape = CircleShape) { Icon(Icons.Default.Mic, "대화 시작") }
-                }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Button(onClick = onGlasses, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text(action) }
+            TextButton(onClick = onPhone, modifier = Modifier.heightIn(min = 48.dp)) {
+                Text("휴대폰 카메라로 쓰기", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
     }

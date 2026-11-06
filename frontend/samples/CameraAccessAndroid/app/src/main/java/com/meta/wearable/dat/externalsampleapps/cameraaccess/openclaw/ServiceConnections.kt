@@ -1,5 +1,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
@@ -16,10 +17,10 @@ import org.json.JSONObject
  * user comes back to the app.
  */
 object ServiceConnections {
-    enum class Service(val key: String, val label: String) {
-        NOTION("notion", "노션"),
-        GOOGLE("google", "구글 캘린더"),
-        SLACK("slack", "슬랙"),
+    enum class Service(val key: String, val label: String, val icon: Int) {
+        NOTION("notion", "노션", R.drawable.ic_service_notion),
+        GOOGLE("google", "구글 캘린더", R.drawable.ic_service_google_calendar),
+        SLACK("slack", "슬랙", R.drawable.ic_service_slack),
     }
 
     /** [ready] is false when the server has no sign-in app registered for this service yet. */

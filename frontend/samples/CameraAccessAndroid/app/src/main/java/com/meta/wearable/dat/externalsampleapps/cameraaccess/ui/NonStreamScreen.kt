@@ -19,7 +19,7 @@ fun NonStreamScreen(viewModel: WearablesViewModel,
     var connectionHelp by remember { mutableStateOf(false) }
     JarvisHome(true, state.hasActiveDevice,
         { if (state.hasActiveDevice) viewModel.navigateToStreaming(onRequestWearablesPermission) else connectionHelp = true },
-        viewModel::navigateToPhoneMode, viewModel::showMemory, modifier)
+        viewModel::navigateToPhoneMode, modifier)
     if (connectionHelp || state.isGettingStartedSheetVisible) {
         ModalBottomSheet(onDismissRequest = { connectionHelp = false; viewModel.hideGettingStartedSheet() }) {
             Column(Modifier.padding(24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {

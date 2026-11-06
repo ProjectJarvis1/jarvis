@@ -25,10 +25,16 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val activity = androidx.activity.compose.LocalActivity.current
     val snackbar = remember { SnackbarHostState() }
-    val tab = when { state.isMemoryVisible -> 2; state.isSettingsVisible -> 3; else -> 0 }
-    fun startConversation() {
-        viewModel.hideMemory(); viewModel.hideSettings()
-        if (state.hasActiveDevice) viewModel.navigateToStreaming(onRequestWearablesPermission) else viewModel.navigateToPhoneMode()
+    val tab = when { state.isMemoryVisible -> 1; state.isSettingsVisible -> 2; else -> 0 }
+    // Glasses-first: when the glasses are connected at launch, go straight to the conversation screen, which
+    // waits for "자비스". Only once per app run, so leaving the conversation is not undone.
+    var autoEntered by rememberSaveable { mutableStateOf(false) }
+    LaunchedEffect(state.hasActiveDevice) {
+        if (state.hasActiveDevice && !autoEntered && !state.isStreaming) {
+            autoEntered = true
+            viewModel.hideMemory(); viewModel.hideSettings()
+            viewModel.navigateToStreaming(onRequestWearablesPermission)
+        }
     }
     LaunchedEffect(state.recentError) {
         state.recentError?.let { snackbar.showSnackbar(it); viewModel.clearCameraPermissionError() }
@@ -43,18 +49,13 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
             if (!state.isStreaming) Column {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
-                    val labels = listOf("홈", "대화", "기억", "설정")
-                    val icons = listOf(Icons.Default.Home, Icons.Default.Mic, Icons.Default.Search, Icons.Default.Settings)
+                    val labels = listOf("대화", "기억", "설정")
+                    val icons = listOf(Icons.Default.Mic, Icons.Default.Search, Icons.Default.Settings)
                     labels.forEachIndexed { index, label ->
                         NavigationBarItem(selected = tab == index, onClick = {
-                            when (index) {
-                                1 -> startConversation()
-                                else -> {
-                                    viewModel.hideMemory(); viewModel.hideSettings()
-                                    if (index == 2) viewModel.showMemory()
-                                    if (index == 3) viewModel.showSettings()
-                                }
-                            }
+                            viewModel.hideMemory(); viewModel.hideSettings()
+                            if (index == 1) viewModel.showMemory()
+                            if (index == 2) viewModel.showSettings()
                         }, icon = { Icon(icons[index], null) }, label = { Text(label) },
                             colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surface,
                                 selectedIconColor = MaterialTheme.colorScheme.onSurface, selectedTextColor = MaterialTheme.colorScheme.onSurface,

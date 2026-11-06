@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Jarvis 안경 마크. 크런치랩스 홈페이지(crunch-site) 머리말 마크와 같은 모양: 둥근 렌즈 둘과 브리지. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="32dp" android:height="32dp" android:viewportWidth="32" android:viewportHeight="32">
+    <path android:strokeColor="#FF000000" android:strokeWidth="2.2"
+        android:pathData="M1,15 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 M19,15 a6,6 0 1,0 12,0 a6,6 0 1,0 -12,0 M13,15 L19,15" />
+</vector>
