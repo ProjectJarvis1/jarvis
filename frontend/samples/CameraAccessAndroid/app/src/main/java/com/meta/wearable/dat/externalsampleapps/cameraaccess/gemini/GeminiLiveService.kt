@@ -309,7 +309,7 @@ class GeminiLiveService {
                         put("disabled", false)
                         put("startOfSpeechSensitivity", "START_SENSITIVITY_HIGH")
                         put("endOfSpeechSensitivity", "END_SENSITIVITY_LOW")
-                        put("silenceDurationMs", if (liveConversation) 700 else 2500)
+                        put("silenceDurationMs", if (liveConversation) 800 else 2500) // a breath mid-sentence is ~300-600ms
                         put("prefixPaddingMs", if (liveConversation) 200 else 80)
                     })
                     put("activityHandling", "START_OF_ACTIVITY_INTERRUPTS")

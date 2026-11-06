@@ -34,7 +34,8 @@ object SettingsManager {
                     !stored.contains("[호출 규칙]") ||
                     stored.contains("마이크 버튼으로만") ||
                     !stored.contains("search_contacts") ||
-                    !stored.contains("저장 플로우 v2")
+                    !stored.contains("저장 플로우 v2") ||
+                    !stored.contains("말하는 동안 앱이")
             ) {
                 DEFAULT_SYSTEM_PROMPT
             } else {
@@ -131,7 +132,7 @@ object SettingsManager {
 - create_calendar_event(title, start_at, end_at?, location?, description?) — Android/Google 캘린더 일정 등록 화면 열기
 
 [저장]
-- capture_current_view(reason) — 현재 시야가 필요한 질문/저장 요청이면 먼저 호출. 예: "이 재료가 뭔지 모르겠어", "앞에 있는 사람 누구야", "이 문서 읽어줘", "이거 저장해줘"
+- capture_current_view(reason) — 원본 사진이 따로 필요할 때만 호출: 장면 저장(save_life_memory), 사람 확인(identify_person), 작은 글씨를 자세히 읽어야 할 때. "이게 뭐야" 같은 일반 시각 질문에는 부르지 마세요
 - save_person(name, org?, role?, aliases?) — 사용자가 "이 사람 저장해줘" 같은 말 할 때
 - save_meeting(person_ids, started_at, summary, title?) — "방금 미팅 저장"
 - save_memory(text, captured_at, related_person_ids?) — "이거 기억해" / 자동 episodic 메모리
@@ -154,8 +155,8 @@ object SettingsManager {
 7. save_life_memory의 ai_interpretation에는 현재 보이는 이미지에서 추론 가능한 장소/물건/문서/사람/상황 단서를 구체적으로 적고, 확실하지 않은 내용은 단정하지 마세요.
 8. 명함을 저장할 때는 labels에 "business_card", "document"를 넣고, entities에는 읽을 수 있는 범위에서 person/company/business_card를 넣으세요. 예: [{"type":"person","label":"김민수 팀장","metadata":{"phone":"...","email":"..."}},{"type":"company","label":"ABC상사"}]. 그러면 사람 검색에도 연결됩니다.
 9. save_life_memory가 성공하면 "저장 완료했습니다"라고 말하고, 어떤 내용으로 저장했는지와 나중에 어떤 질문으로 찾을 수 있는지 1~2개 예시를 알려주세요. 예: "나중에 '오늘 본 투자자 명함'이나 '회의실 노트북 문서'처럼 물어보면 찾을 수 있어요."
-10. 현재 시야를 봐야 답할 수 있는 질문이면 capture_current_view를 먼저 호출하세요. 단순 키워드가 없어도 의미상 시야가 필요하면 호출합니다. 예: "요리하다가 이 재료가 뭔지 모르겠어", "방금 받은 물건이 뭔 제품인지 알아?", "이 상황에서 뭐 해야 해?"
-11. 사용자가 "이거", "앞에 있는 것", "지금 보는 것", "이 문서"처럼 시각 질문이나 저장 요청을 하면 capture_current_view로 최신 카메라 이미지 1장을 요청한 뒤, 그 이미지를 근거로 짧게 답하거나 save_life_memory의 ai_interpretation을 작성하세요.
+10. 사용자가 말하는 동안 앱이 그 순간의 카메라 장면을 영상 프레임으로 함께 보냅니다. "이거 뭐야", "앞에 있는 게 뭐야", "이 문서 뭐라고 써 있어"처럼 시야가 필요한 질문은 도구를 부르지 말고, 이번 말과 함께 받은 가장 최근 프레임을 근거로 바로 짧게 답하세요.
+11. 이번 말과 함께 받은 프레임이 없거나, 흐리거나, 질문한 대상이 보이지 않으면 절대 추측해서 지어내지 마세요. "지금 화면이 잘 안 보여요. 카메라를 그쪽으로 향해 주세요"처럼 말하세요. 예전 대화에서 본 장면을 지금 장면처럼 말하지 마세요.
 12. capture_current_view나 save_life_memory가 오래된 프레임 오류를 반환하면 저장하지 말고 "화면이 조금 늦게 들어오고 있어요. 잠깐 멈춘 뒤 다시 말씀해주세요"처럼 안내하세요.
 13. 도구 없이 메모리 있는 척, 저장한 척, 검색한 척 절대 하지 마세요."""
 }

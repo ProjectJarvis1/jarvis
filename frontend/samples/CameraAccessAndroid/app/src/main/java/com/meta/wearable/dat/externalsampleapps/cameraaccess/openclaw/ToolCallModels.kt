@@ -254,7 +254,7 @@ object ToolDeclarations {
     // ── declarations ──────────────────────────────────────────────
     private fun captureCurrentView() = decl(
         name = "capture_current_view",
-        description = "현재 사용자가 보고 있는 장면이 필요할 때 호출. 예: '이 재료가 뭔지 모르겠어', '앞에 있는 사람 누구야?', '이 문서 읽어줘', '이거 저장해줘'. 앱은 최신 카메라 프레임 1장을 현재 대화에 첨부합니다. 비디오를 계속 보내지 말고, 현재 시야가 필요할 때만 이 도구를 호출하세요.",
+        description = "원본 사진 1장이 따로 필요할 때만 호출: 장면 저장('이거 저장해줘'), 사람 확인('앞에 있는 사람 누구야?'), 작은 글씨를 자세히 읽기. '이게 뭐야' 같은 일반 시각 질문은 사용자가 말하는 동안 함께 받은 영상 프레임으로 바로 답하고 이 도구를 부르지 마세요.",
         properties = JSONObject()
             .put("reason", strProp("현재 시야가 필요한 이유. 예: '재료 식별', '명함 읽기', '장면 저장 전 해석'")),
         required = listOf("reason"),

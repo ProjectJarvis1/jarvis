@@ -92,6 +92,14 @@ class GeminiSessionViewModel : ViewModel() {
 
     private var commandSpeechRecognizer: SpeechInputController? = null
     private var visualContextSentForTurn: Boolean = false
+    // Frames ride along with the user's speech so visual questions need no capture tool round trip.
+    private val speechVision = SpeechSyncedVision(
+        latestFrame = {
+            val at = VisualMemoryFrameStore.latestCapturedAtMs()
+            VisualMemoryFrameStore.latestBase64()?.let { it to at }
+        },
+        send = { geminiService.sendVideoFrameBase64(it) },
+    )
     private var stateObservationJob: Job? = null
     private var reconnectJob: Job? = null
     private var userRequestedStop: Boolean = false
@@ -257,8 +265,10 @@ class GeminiSessionViewModel : ViewModel() {
                     val sample = (((data[i + 1].toInt() shl 8) or (data[i].toInt() and 255)).toShort()).toDouble() / 32768.0
                     energy += sample * sample
                 }
-                if (data.isNotEmpty() && energy / (data.size / 2).coerceAtLeast(1) > 0.000225) lastInputAt = System.currentTimeMillis()
+                val voiced = data.isNotEmpty() && energy / (data.size / 2).coerceAtLeast(1) > 0.000225
+                if (voiced) lastInputAt = System.currentTimeMillis()
                 geminiService.sendAudio(data)
+                speechVision.onAudio(voiced)
             }
         }
         audioManager.onError = { message ->
@@ -477,6 +487,7 @@ class GeminiSessionViewModel : ViewModel() {
         stateObservationJob?.cancel()
         stateObservationJob = null
         visualContextSentForTurn = false
+        speechVision.reset()
         inputAudioSuspended = false
         inFlightToolCalls = 0
         wakeWordSessionActive = false
