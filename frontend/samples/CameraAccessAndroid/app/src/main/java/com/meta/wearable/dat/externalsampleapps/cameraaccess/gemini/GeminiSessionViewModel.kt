@@ -149,7 +149,8 @@ class GeminiSessionViewModel : ViewModel() {
     private fun onUserSpeech(text: String, at: Long) {
         lastUtterance = text
         lastUtteranceAt = at
-        lastUtteranceUsed = false
+        // Said while a call or text is waiting: that answer belongs to the call/text, never to another task.
+        lastUtteranceUsed = _uiState.value.pendingContactAction != null
         voiceApprovalJob?.cancel()
         voiceApprovalJob = viewModelScope.launch {
             delay(700L) // wait for the rest of the sentence before judging it a plain yes
@@ -161,7 +162,8 @@ class GeminiSessionViewModel : ViewModel() {
     /** Uses up the last utterance as approval, so one "응" never approves two different tasks. */
     @Synchronized
     private fun takeSpokenApproval(calendar: Boolean): Boolean {
-        if (lastUtteranceUsed) return false
+        // A call or text waiting on the user owns the next "응"; it must not also approve something else.
+        if (lastUtteranceUsed || _uiState.value.pendingContactAction != null) return false
         val age = System.currentTimeMillis() - lastUtteranceAt
         val ok = VoiceApproval.isApproval(lastUtterance, age) || (calendar && VoiceApproval.isConsent(lastUtterance, age))
         if (ok) lastUtteranceUsed = true
@@ -638,7 +640,6 @@ class GeminiSessionViewModel : ViewModel() {
         if (text == lastSentSpeechText && now - lastSentSpeechAt < 2_000L) return
         lastSentSpeechText = text
         lastSentSpeechAt = now
-        onUserSpeech(text, now)
 
         _uiState.value = _uiState.value.copy(
             userTranscript = text,
@@ -658,6 +659,8 @@ class GeminiSessionViewModel : ViewModel() {
                 }
             }
         }
+
+        onUserSpeech(text, now)
 
         val command = MeetingVoiceCommandParser.parse(text)
         if (command != null && command != lastHandledVoiceCommand) {

@@ -19,7 +19,8 @@ object GeminiConfig {
     const val VIDEO_JPEG_QUALITY = 50
 
     fun systemInstruction(requireWakeWord: Boolean): String {
-        val base = SettingsManager.geminiSystemPrompt
+        val base = SettingsManager.geminiSystemPrompt + if (SettingsManager.liveConversationEnabled) "" else
+            "\n\n[음성 인식 모드]\n- 이 모드에서는 말과 함께 카메라 장면이 오지 않습니다. \"이거 뭐야\"처럼 시야가 필요한 질문에는 capture_current_view를 호출해 사진을 보고 답하세요. 위 10~11번 규칙보다 이 규칙이 우선합니다."
         if (requireWakeWord) return base
         return buildString {
             append(base)

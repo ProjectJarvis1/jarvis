@@ -40,7 +40,10 @@ def sync_meeting_memory(cur, meeting):
                    WHERE """ + _PROJECTED,
                 (meeting["started_at"], text, embed_text(text), meeting["person_ids"],
                  Jsonb({"origin_meeting_id": str(meeting["id"]), "user_note": text,
-                        "ai_interpretation": "", "people_text": "", "labels": [], "entities": []}), meeting["id"]))
+                        "ai_interpretation": "", "people_text": "", "labels": [], "entities": [],
+                        # 녹음 기억에 복사해 둔 요약도 회의의 현재 값으로 덮는다(정정 뒤 예전 결정·할 일이 검색 근거로 남지 않게).
+                        **{k: metadata.get(k) for k in ("markdown_summary", "decisions", "action_items", "followups")}}),
+                 meeting["id"]))
     # Labels/links extracted from an earlier projection must not survive its correction.
     cur.execute("""DELETE FROM memory_entities WHERE memory_id IN (
                        SELECT id FROM memories WHERE """ + _PROJECTED + """

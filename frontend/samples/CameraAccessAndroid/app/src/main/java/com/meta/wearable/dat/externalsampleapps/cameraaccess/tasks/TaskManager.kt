@@ -261,7 +261,9 @@ class TaskManager(
     }
 
     suspend fun completeWaiting(id: String, revision: Int, outcome: TaskOutcome) {
-        val archived = archive(id, revision, outcome.result)
+        // A full result that cannot be archived (store full, disk error) must not leave a finished task stuck in
+        // RUNNING: keep the inline preview and finish the task anyway.
+        val archived = try { archive(id, revision, outcome.result) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
         synchronized(lock) {
         val task = records[id] ?: return@synchronized
         if (task.revision != revision || task.state !in setOf(TaskState.WAITING_USER, TaskState.RUNNING)) return@synchronized
