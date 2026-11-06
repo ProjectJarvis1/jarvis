@@ -47,6 +47,8 @@ data class GeminiUiState(
     val openClawConnectionState: OpenClawConnectionState = OpenClawConnectionState.NotConfigured,
     val pendingContactAction: PendingContactAction? = null,
     val taskSummary: String = "",
+    /** What the user said while Jarvis was talking or working; answered after the current turn. */
+    val queuedTranscript: String = "",
 )
 
 enum class PendingContactActionType {
@@ -303,7 +305,9 @@ class GeminiSessionViewModel : ViewModel() {
         geminiService.onTurnComplete = {
             readyForCompletionNotice = true
             visualContextSentForTurn = false
-            _uiState.value = _uiState.value.copy(userTranscript = "")
+            // Speech queued during this turn is what the server answers next: show it as the question.
+            val queued = _uiState.value.queuedTranscript
+            _uiState.value = _uiState.value.copy(userTranscript = queued, queuedTranscript = "")
             // Server generation can finish before the queued audio has reached the speaker.
             // Live mode keeps listening throughout; legacy mode resumes after actual playback.
             if (!liveConversation) {
@@ -318,7 +322,14 @@ class GeminiSessionViewModel : ViewModel() {
             }
         }
 
-        geminiService.onInputTranscription = { text ->
+        geminiService.onInputTranscription = transcription@{ text ->
+            // Live mode does not interrupt (NO_INTERRUPTION): speech during an answer or tool work is
+            // queued for the next turn, so it must not hold running tasks or wipe the current answer.
+            val busy = liveConversation && (geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0)
+            if (busy) {
+                _uiState.value = _uiState.value.copy(queuedTranscript = _uiState.value.queuedTranscript + text)
+                return@transcription
+            }
             readyForCompletionNotice = false
             taskManager.onNewUserInput()
             lastInputAt = System.currentTimeMillis()

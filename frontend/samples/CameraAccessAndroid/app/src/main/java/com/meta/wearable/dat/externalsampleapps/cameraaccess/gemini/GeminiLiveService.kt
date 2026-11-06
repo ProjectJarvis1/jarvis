@@ -312,7 +312,8 @@ class GeminiLiveService {
                         put("silenceDurationMs", if (liveConversation) 800 else 2500) // a breath mid-sentence is ~300-600ms
                         put("prefixPaddingMs", if (liveConversation) 200 else 80)
                     })
-                    put("activityHandling", "START_OF_ACTIVITY_INTERRUPTS")
+                    // Speaking over Jarvis queues the words for the next turn instead of cutting the answer off.
+                    put("activityHandling", if (liveConversation) "NO_INTERRUPTION" else "START_OF_ACTIVITY_INTERRUPTS")
                     put("turnCoverage", "TURN_INCLUDES_ALL_INPUT")
                 })
                 put("contextWindowCompression", JSONObject().apply {

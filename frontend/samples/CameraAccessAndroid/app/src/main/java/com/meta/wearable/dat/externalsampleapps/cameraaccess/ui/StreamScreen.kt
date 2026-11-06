@@ -400,6 +400,20 @@ fun StreamScreen(
             if (geminiUiState.aiTranscript.isNotBlank()) item {
                 Text(geminiUiState.aiTranscript, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 27.sp))
             }
+            // Words spoken over Jarvis: outlined (not filled) so they read as "not asked yet".
+            if (geminiUiState.queuedTranscript.isNotBlank()) item {
+                Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterEnd) {
+                    Surface(Modifier.fillMaxWidth(.8f).wrapContentWidth(Alignment.End), shape = RoundedCornerShape(20.dp),
+                        color = MaterialTheme.colorScheme.background,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
+                        Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(geminiUiState.queuedTranscript.trim(), style = MaterialTheme.typography.bodyLarge)
+                            Text("지금 답이 끝나면 이어서 들을게요", style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
             val working = (geminiUiState.toolCallStatus as? ToolCallStatus.Executing)?.displayText ?: geminiUiState.taskSummary
             if (working.isNotBlank()) item {
                 Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surface,
