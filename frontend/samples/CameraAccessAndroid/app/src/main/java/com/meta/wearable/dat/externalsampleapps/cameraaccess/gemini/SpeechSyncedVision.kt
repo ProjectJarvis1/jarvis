@@ -1,11 +1,14 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
 /**
- * Sends camera frames to the live model only while the user is speaking, so the scene the user is
- * talking about is already in the turn when the server decides the turn ended. No tool round trip.
+ * Keeps the live model supplied with the current camera view, timed to the user's speech, so the
+ * scene the user is talking about is already in the turn when the server decides the turn ended.
+ * No tool round trip.
  *
- * - Speech start: the newest frame goes out at once ("이거 뭐야" usually points at what is in view now).
- * - While speaking: at most one new frame per [intervalMs].
+ * - Always (camera on, session live): one frame per [intervalMs], like Gemini Live's camera mode.
+ *   Local voice detection alone missed real speech on phones (noise suppression lowers the level),
+ *   so the steady cadence guarantees the model has a view no older than ~1s when the turn ends.
+ * - Speech start: the newest frame goes out at once, without waiting for the cadence.
  * - Speech end (local silence for [endSilenceMs]): one last frame, because "이거" is often said last.
  *
  * Turn ending itself stays with the server's voice activity detection; local silence only decides
@@ -39,6 +42,8 @@ class SpeechSyncedVision(
             }
         } else if (speaking && nowMs - lastVoiceAt >= endSilenceMs) {
             speaking = false
+            sendLatest(nowMs, closing = true)
+        } else if (nowMs - lastSentAt >= intervalMs) {
             sendLatest(nowMs, closing = true)
         }
     }

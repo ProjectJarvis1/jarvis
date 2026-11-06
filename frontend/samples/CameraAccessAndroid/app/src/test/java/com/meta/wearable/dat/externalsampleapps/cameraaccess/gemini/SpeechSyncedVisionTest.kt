@@ -22,11 +22,19 @@ class SpeechSyncedVisionTest {
     }
 
     @Test
+    fun keepsAOneSecondCadenceEvenWhenNoVoiceIsDetected() {
+        frameAt = 1_000; vision.onAudio(false, 1_000)         // quiet but camera on: send
+        frameAt = 1_500; vision.onAudio(false, 1_500)         // < 1s: skip
+        frameAt = 2_000; vision.onAudio(false, 2_000)         // 1s later: send
+        assertEquals(listOf(1_000L, 2_000L), sent)
+    }
+
+    @Test
     fun neverSendsStaleOrRepeatedFrames() {
         frameAt = 0; vision.onAudio(true, 5_000)              // camera stopped long ago: nothing
         assertEquals(emptyList<Long>(), sent)
         frameAt = 5_000; vision.onAudio(false, 5_500)         // closing frame of that utterance
-        vision.onAudio(true, 6_000)                           // same frame again: not resent
+        vision.onAudio(false, 6_600)                          // cadence tick, same frame: not resent
         assertEquals(listOf(5_000L), sent)
     }
 }
