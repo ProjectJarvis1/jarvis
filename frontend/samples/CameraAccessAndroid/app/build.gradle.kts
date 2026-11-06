@@ -33,7 +33,8 @@ android {
     }
     externalNativeBuild {
       cmake {
-        arguments += listOf("-DANDROID_STL=c++_shared")
+        // Android 15+ 16KB page devices: static C++ runtime, 16KB-aligned segments, no OpenMP runtime (its prebuilt is 4KB-aligned).
+        arguments += listOf("-DANDROID_STL=c++_static", "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384", "-DGGML_OPENMP=OFF")
       }
     }
   }
