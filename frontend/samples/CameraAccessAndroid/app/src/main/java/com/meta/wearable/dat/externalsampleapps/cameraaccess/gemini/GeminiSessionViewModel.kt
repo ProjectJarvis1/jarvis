@@ -96,6 +96,9 @@ class GeminiSessionViewModel : ViewModel() {
     private var visualContextSentForTurn: Boolean = false
     // Frames ride along with the user's speech so visual questions need no capture tool round trip.
     private val visionExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+    // Latest thing the user said, for voice approval of a save the assistant just asked about.
+    @Volatile private var lastUtterance = ""
+    @Volatile private var lastUtteranceAt = 0L
     private val speechVision = SpeechSyncedVision(
         latestFrame = {
             val at = VisualMemoryFrameStore.latestCapturedAtMs()
@@ -337,6 +340,8 @@ class GeminiSessionViewModel : ViewModel() {
             taskManager.onNewUserInput()
             lastInputAt = System.currentTimeMillis()
             val transcript = _uiState.value.userTranscript + text
+            lastUtterance = transcript
+            lastUtteranceAt = lastInputAt
             _uiState.value = _uiState.value.copy(
                 userTranscript = transcript,
                 aiTranscript = ""
@@ -861,7 +866,7 @@ class GeminiSessionViewModel : ViewModel() {
 
     private suspend fun executeManagedTask(task: TaskRecord, execution: TaskManager.Execution): TaskOutcome {
         val args = parseTaskArgs(task.argsJson)
-        if (task.tool in reviewTools && !task.reviewed) {
+        if (task.tool in reviewTools && !task.reviewed && !VoiceApproval.isApproval(lastUtterance, System.currentTimeMillis() - lastUtteranceAt)) {
             return TaskOutcome(result = "작업 목록에서 내용을 확인·수정한 뒤 승인해주세요. 아직 실행하지 않았습니다.", waitingForUser = true)
         }
         if (task.tool == "capture_current_view") {
