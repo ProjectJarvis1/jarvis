@@ -140,3 +140,20 @@ def test_universal_search_batches_related_reads_and_keeps_needs_per_memory():
     assert len(output) == 3
     assert all(item["needs"][0]["id"] == "need1" for item in output)
     assert all(item["people"][0]["id"] == "p1" for item in output)
+
+
+def test_unreadable_write_response_is_uncertain():
+    import importlib, sys, types
+    from unittest import mock
+    if "app.mcp_tools" not in sys.modules:
+        try:
+            importlib.import_module("app.mcp_tools")
+        except ModuleNotFoundError:
+            import pytest
+            pytest.skip("psycopg 없음")
+    t = sys.modules["app.mcp_tools"]
+    def broken(*a, **k):
+        raise t.ResponseUnreadable("bad json")
+    with mock.patch.object(t, "_integration_token", return_value="tok"), mock.patch.object(t, "_http_json", side_effect=broken):
+        out = t.call_tool("calendar_create_event", {"title": "a", "start": "2026-11-07"})
+    assert out["is_error"] and out["uncertain"]

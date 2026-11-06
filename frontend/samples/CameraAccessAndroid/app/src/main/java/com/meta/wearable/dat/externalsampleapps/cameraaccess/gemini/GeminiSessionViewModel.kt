@@ -383,7 +383,8 @@ class GeminiSessionViewModel : ViewModel() {
             // Speech queued during this turn is what the server answers next: show it as the question.
             val queued = _uiState.value.queuedTranscript
             if (queued.isNotBlank()) {
-                _uiState.value = _uiState.value.copy(userTranscript = queued, queuedTranscript = "")
+                // The answer on screen belonged to the previous question; the next one starts empty.
+                _uiState.value = _uiState.value.copy(userTranscript = queued, queuedTranscript = "", aiTranscript = "")
                 startNewQuestion = false
             } else startNewQuestion = true
             // Server generation can finish before the queued audio has reached the speaker.

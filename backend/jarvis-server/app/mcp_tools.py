@@ -41,6 +41,10 @@ def list_tools() -> list[dict[str, Any]]:
     return [tool.to_manifest() for tool in _TOOLS.values()]
 
 
+class ResponseUnreadable(Exception):
+    """요청은 상대에게 닿았는데 응답 본문을 해석하지 못함."""
+
+
 def call_tool(name: str, arguments: dict[str, Any], user_id: str = "default") -> dict[str, Any]:
     tool = _TOOLS.get(name)
     if tool is None:
@@ -56,7 +60,7 @@ def call_tool(name: str, arguments: dict[str, Any], user_id: str = "default") ->
         if isinstance(exc, urllib.error.HTTPError):
             sent_maybe = exc.code >= 500
         else:
-            sent_maybe = isinstance(exc, (TimeoutError, OSError))
+            sent_maybe = isinstance(exc, (TimeoutError, OSError, ResponseUnreadable))
         return {
             "is_error": True,
             "uncertain": bool(tool.requires_confirmation and sent_maybe),
@@ -161,8 +165,12 @@ def _http_json(
         request_headers = {"Content-Type": "application/json", **request_headers}
     request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
     with urllib.request.urlopen(request, timeout=20) as response:
-        payload = response.read().decode("utf-8")
-    return json.loads(payload) if payload else {}
+        payload = response.read().decode("utf-8", errors="replace")
+    try:
+        return json.loads(payload) if payload else {}
+    except ValueError as exc:
+        # 상대가 요청을 받아 처리한 뒤 응답만 깨진 경우다. 쓰기라면 이미 반영됐을 수 있다.
+        raise ResponseUnreadable(f"응답을 읽지 못했습니다: {exc}") from exc
 
 
 def _calendar_list_events(args: dict[str, Any], user_id: str) -> dict[str, Any]:
