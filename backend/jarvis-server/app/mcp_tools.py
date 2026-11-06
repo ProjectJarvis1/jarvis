@@ -330,8 +330,10 @@ def _calendar_create_event(args: dict[str, Any], user_id: str) -> dict[str, Any]
             end_day = day + timedelta(days=1)
         when = {"start": {"date": day.isoformat()}, "end": {"date": end_day.isoformat()}}
     else:
-        begin = datetime.fromisoformat(start)
-        finish = datetime.fromisoformat(end) if end else begin + timedelta(hours=1)
+        # 사용자는 늘 한국 시간으로 말한다. 모델이 붙인 Z(세계 표준시)나 다른 시간대는 버리고 말한 시각 그대로 한국 시간으로 넣는다.
+        begin = datetime.fromisoformat(start.replace("Z", "")).replace(tzinfo=None)
+        finish = datetime.fromisoformat(end.replace("Z", "")).replace(tzinfo=None) if end else begin + timedelta(hours=1)
+        zone = "Asia/Seoul"
         when = {"start": {"dateTime": begin.isoformat(), "timeZone": zone},
                 "end": {"dateTime": finish.isoformat(), "timeZone": zone}}
     event = {"summary": args["title"], **when}

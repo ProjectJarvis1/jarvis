@@ -157,3 +157,21 @@ def test_unreadable_write_response_is_uncertain():
     with mock.patch.object(t, "_integration_token", return_value="tok"), mock.patch.object(t, "_http_json", side_effect=broken):
         out = t.call_tool("calendar_create_event", {"title": "a", "start": "2026-11-07"})
     assert out["is_error"] and out["uncertain"]
+
+
+def test_calendar_times_are_korean_wall_clock():
+    import sys
+    from unittest import mock
+    try:
+        import app.mcp_tools as t
+    except ModuleNotFoundError:
+        import pytest
+        pytest.skip("psycopg 없음")
+    sent = {}
+    def fake(url, method="GET", headers=None, body=None):
+        sent.update(body)
+        return {}
+    with mock.patch.object(t, "_integration_token", return_value="tok"), mock.patch.object(t, "_http_json", side_effect=fake):
+        t._calendar_create_event({"title": "병원", "start": "2026-11-07T09:00:00Z"}, "default")
+    assert sent["start"] == {"dateTime": "2026-11-07T09:00:00", "timeZone": "Asia/Seoul"}
+    assert sent["end"]["dateTime"] == "2026-11-07T10:00:00"
