@@ -63,9 +63,10 @@ class OpenClawBridge {
     val durableRequests by lazy { DurableRequests(File(AppContextProvider.require().filesDir, "outbox"), client) }
     private val writeTools = setOf("save_person", "save_meeting", "save_memory", "save_life_memory", "save_need", "prepare_record_change", "apply_record_change", "undo_record_change")
 
+    // The memory server answers /health in 1.5–9s through the tunnel; 5s marked a working server as down.
     private val pingClient = OkHttpClient.Builder()
-        .readTimeout(5, TimeUnit.SECONDS)
-        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
         .build()
 
     private val jsonMediaType = "application/json".toMediaType()
