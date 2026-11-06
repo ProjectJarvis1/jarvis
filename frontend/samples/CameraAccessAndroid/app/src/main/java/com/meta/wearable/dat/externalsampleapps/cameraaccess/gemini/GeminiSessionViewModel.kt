@@ -27,6 +27,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.ContactAction
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.whisper.WhisperSpeechRecognizer
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -163,6 +164,7 @@ class GeminiSessionViewModel : ViewModel() {
             try {
                 // Stored tasks may name outside-service tools; know them before the task list is restored.
                 withContext(Dispatchers.IO) { openClawBridge.loadCachedExternalTools() }
+                refreshExternalToolsInBackground()
                 taskManager.initialize()
                 while (isActive) {
                     try {
@@ -192,6 +194,12 @@ class GeminiSessionViewModel : ViewModel() {
                 _uiState.value = _uiState.value.copy(errorMessage = "작업 기록을 불러오지 못했습니다: ${e.message}")
             }
         }
+    }
+
+    private var externalToolsJob: Job? = null
+    private fun refreshExternalToolsInBackground() {
+        if (externalToolsJob?.isActive == true) return
+        externalToolsJob = viewModelScope.launch { openClawBridge.refreshExternalTools(timeoutMs = 10_000) }
     }
 
     fun controlTask(id: String, revision: Int, action: String) {
@@ -455,8 +463,10 @@ class GeminiSessionViewModel : ViewModel() {
                 }
             }
 
-            // Outside-service tools are declared at setup, so the list has to be in hand first (cache if slow).
-            openClawBridge.refreshExternalTools()
+            // Tools are declared once at setup. Use the list fetched in the background; wait briefly only if a
+            // fetch is already running, then refresh for the next session. The tunnel can take seconds to answer.
+            withTimeoutOrNull(300) { externalToolsJob?.join() }
+            refreshExternalToolsInBackground()
 
             // Connect to Gemini
             geminiService.connect(
