@@ -5,7 +5,7 @@
       "transport": "stdio",
       "command": "npx",
       "args": ["-y", "@notionhq/notion-mcp-server@2.6.1"],
-      "env": {"NOTION_TOKEN": "$NOTION_TOKEN"},
+      "env": {"NOTION_TOKEN": "$NOTION_TOKEN|db:notion"},
       "tools": {
         "notion_search": {
           "upstream": "API-post-search",

@@ -21,6 +21,9 @@ object ExternalTools {
     )
 
     @Volatile private var tools: Map<String, Tool> = emptyMap()
+    // Every external tool ever listed, with whether it needed approval. Kept after a service disconnects so
+    // stored tasks that used it still resolve a policy (TaskManager looks up every stored record).
+    private val seen = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
 
     /** Names the app already declares. A server tool with the same name is ignored. */
     var reservedNames: Set<String> = emptySet()
@@ -34,10 +37,21 @@ object ExternalTools {
     /** Parses a `/mcp/tools` body and replaces the current list. Returns how many tools were accepted. */
     fun load(body: String): Int {
         tools = parse(body, reservedNames + appToolNames)
+        tools.values.forEach { seen[it.name] = it.requiresConfirmation }
         return tools.size
     }
 
-    fun clear() { tools = emptyMap() }
+    fun clear() { tools = emptyMap(); seen.clear() }
+
+    /** Approval flag of a tool listed now or earlier; null if this name was never an external tool. */
+    fun everRequiredConfirmation(name: String): Boolean? = tools[name]?.requiresConfirmation ?: seen[name]
+
+    fun seenJson(): String = JSONObject(seen.toMap()).toString()
+
+    fun restoreSeen(json: String) {
+        val obj = JSONObject(json)
+        obj.keys().forEach { name -> if (NAME.matches(name) && name !in appToolNames) seen[name] = obj.optBoolean(name, true) }
+    }
 
     fun declarations(): List<JSONObject> = tools.values.map { JSONObject(it.declaration.toString()) }
 

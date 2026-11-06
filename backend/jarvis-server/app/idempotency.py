@@ -42,6 +42,8 @@ def eligible(method, path):
     return method == "POST" and (path in {
         "/people", "/meetings", "/memory/save", "/memory/life/save", "/needs",
         "/assistant/changes",
+        # 외부 도구 실행(슬랙 보내기, 노션 쓰기). 응답이 끊겨 앱이 다시 보내도 저장된 응답을 돌려줘 두 번 실행되지 않는다.
+        "/mcp",
     } or (path.startswith("/assistant/changes/") and path.endswith(("/apply", "/undo"))))
 
 

@@ -10,6 +10,7 @@ mcp_servers.json 에 적힌 외부 서버마다 연결을 하나씩 계속 열�
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -24,6 +25,7 @@ CONFIG_PATH = Path(__file__).with_name("mcp_servers.json")
 CALL_TIMEOUT_S = 20.0
 CONNECT_TIMEOUT_S = 25.0
 RESULT_LIMIT = 6000
+WATCH_INTERVAL_S = 30.0
 _NAME_RE = re.compile(r"[^A-Za-z0-9_]")
 
 # Gemini 함수 선언은 OpenAPI 의 일부만 받는다. 아래 키는 지우거나 바꾼다.
@@ -71,8 +73,13 @@ def export_name(name: str) -> str:
     return _NAME_RE.sub("_", name)[:64]
 
 
-def _expand_env(value: str) -> str:
-    return re.sub(r"\$([A-Z0-9_]+)", lambda m: os.getenv(m.group(1), ""), value)
+def _expand_env(value: str, token_provider: Optional[Callable[[str], Optional[str]]] = None) -> str:
+    """"$NAME" 은 환경 변수, "$NAME|db:provider" 는 환경 변수가 없을 때 계정 연결(DB) 토큰."""
+    name, _, fallback = value.partition("|db:")
+    expanded = re.sub(r"\$([A-Z0-9_]+)", lambda m: os.getenv(m.group(1), ""), name)
+    if not expanded and fallback and token_provider:
+        expanded = token_provider(fallback) or ""
+    return expanded
 
 
 # ─── 결과 다듬기·입력 만들기 (도구별) ─────────────────────────────
@@ -103,11 +110,19 @@ def _shape_notion_markdown(data: Any) -> Any:
     return data
 
 
+_NOTION_TEXT_LIMIT = 1900  # 노션 rich_text 한 칸은 2,000자까지
+_NOTION_MAX_BLOCKS = 100
+
+
 def _build_notion_append(args: dict[str, Any]) -> dict[str, Any]:
+    text = str(args["text"])
+    chunks = [text[i:i + _NOTION_TEXT_LIMIT] for i in range(0, len(text), _NOTION_TEXT_LIMIT)] or [""]
+    if len(chunks) > _NOTION_MAX_BLOCKS:
+        raise ValueError(f"내용이 너무 깁니다({len(text)}자). 나눠서 요청해 주세요.")
     return {"block_id": args["page_id"], "children": [{
         "object": "block", "type": "paragraph",
-        "paragraph": {"rich_text": [{"type": "text", "text": {"content": str(args["text"])[:1900]}}]},
-    }]}
+        "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk}}]},
+    } for chunk in chunks]}
 
 
 SHAPERS: dict[str, Callable[[Any], Any]] = {
@@ -188,7 +203,7 @@ class _Connection:
 
     def credentials_present(self) -> bool:
         if self.cfg.transport == "stdio":
-            return all(_expand_env(v) for v in self.cfg.env.values())
+            return all(_expand_env(v, self.token_provider) for v in self.cfg.env.values())
         return self.cfg.auth is None or bool(self.token_provider(self.cfg.auth))
 
     def start(self) -> None:
@@ -206,29 +221,34 @@ class _Connection:
             except (asyncio.CancelledError, Exception):
                 pass
 
-    def _transport(self):
+    @contextlib.asynccontextmanager
+    async def _transport(self):
         from mcp import StdioServerParameters
         from mcp.client.stdio import stdio_client
         from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
         if self.cfg.transport == "stdio":
             env = {"PATH": os.getenv("PATH", "/opt/homebrew/bin:/usr/bin:/bin"), "HOME": os.getenv("HOME", "")}
-            env.update({k: _expand_env(v) for k, v in self.cfg.env.items()})
-            return stdio_client(StdioServerParameters(command=self.cfg.command, args=self.cfg.args, env=env))
+            env.update({k: _expand_env(v, self.token_provider) for k, v in self.cfg.env.items()})
+            async with stdio_client(StdioServerParameters(command=self.cfg.command, args=self.cfg.args, env=env)) as streams:
+                yield streams
+            return
 
         import httpx2
 
         provider, auth_name = self.token_provider, self.cfg.auth
 
-        class _Bearer(httpx2.Auth):  # 요청마다 최신 토큰을 넣는다(구글 토큰은 1시간마다 바뀜)
-            def auth_flow(self, request):
-                token = provider(auth_name) if auth_name else None
+        class _Bearer(httpx2.Auth):  # 요청마다 최신 토큰을 넣는다. 토큰 조회는 DB 라서 작업자 스레드에서
+            async def async_auth_flow(self, request):
+                token = await asyncio.to_thread(provider, auth_name) if auth_name else None
                 if token:
                     request.headers["Authorization"] = f"Bearer {token}"
                 yield request
 
-        client = create_mcp_http_client(auth=_Bearer())
-        return streamable_http_client(self.cfg.url, http_client=client)
+        # streamable_http_client 는 넘겨받은 클라이언트를 닫지 않으므로 여기서 닫는다.
+        async with create_mcp_http_client(auth=_Bearer()) as client:
+            async with streamable_http_client(self.cfg.url, http_client=client) as streams:
+                yield streams
 
     async def _run(self) -> None:
         from mcp import ClientSession
@@ -317,11 +337,32 @@ class McpGateway:
         self.tools: dict[str, ExportedTool] = {t.name: t for s in servers.values() for t in s.tools.values()}
 
     async def start(self) -> None:
-        for conn in self.connections.values():
-            if conn.credentials_present():
+        await self._reconnect()
+        self._watcher = asyncio.create_task(self._watch(), name="mcp:watch")
+
+    async def _reconnect(self) -> None:
+        idle = [c for c in self.connections.values() if c._task is None or c._task.done()]
+        if not idle:
+            return
+        # 키 확인은 DB 를 볼 수 있어 작업자 스레드에서, 연결 시작은 이 이벤트 루프에서 한다.
+        present = await asyncio.to_thread(lambda: [c.credentials_present() for c in idle])
+        for conn, ok in zip(idle, present):
+            if ok:
                 conn.start()
 
+    async def _watch(self) -> None:
+        """키를 나중에 넣었거나 연결이 끊긴 서버를 30초마다 다시 연다."""
+        while True:
+            await asyncio.sleep(WATCH_INTERVAL_S)
+            try:
+                await self._reconnect()
+            except Exception:
+                log.exception("MCP 재연결 확인 실패")
+
     async def stop(self) -> None:
+        watcher = getattr(self, "_watcher", None)
+        if watcher:
+            watcher.cancel()
         for conn in self.connections.values():
             await conn.stop()
 
@@ -331,9 +372,7 @@ class McpGateway:
         for tool in self.tools.values():
             conn = self.connections[tool.server]
             if not conn.ready.is_set():
-                if conn.credentials_present():
-                    conn.start()  # 다음 목록 요청 때는 붙어 있도록
-                continue
+                continue  # 끊긴 연결은 _watch 가 이벤트 루프에서 다시 연다
             upstream = conn.upstream_tools.get(tool.upstream)
             if upstream is None:
                 continue
@@ -352,6 +391,10 @@ class McpGateway:
     def is_external(self, name: str) -> bool:
         return name in self.tools
 
+    def is_ready(self, name: str) -> bool:
+        tool = self.tools.get(name)
+        return bool(tool) and self.connections[tool.server].ready.is_set()
+
     def preview(self, name: str, arguments: dict[str, Any]) -> Optional[str]:
         tool = self.tools.get(name)
         if not tool or not tool.confirm:
@@ -367,8 +410,14 @@ class McpGateway:
     async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         tool = self.tools[name]
         args = {k: v for k, v in arguments.items() if v is not None}
-        if tool.build:
-            args = BUILDERS[tool.build](args)
+        missing = [k for k in (tool.parameters or {}).get("required", []) if args.get(k) in (None, "")]
+        if missing:
+            return {"is_error": True, "error": f"{tool.title}에 필요한 값이 없습니다: {', '.join(missing)}"}
+        try:
+            if tool.build:
+                args = BUILDERS[tool.build](args)
+        except (KeyError, TypeError, ValueError) as exc:
+            return {"is_error": True, "error": f"{tool.title} 입력이 올바르지 않습니다: {exc}"}
         args = {**tool.fixed, **args}
         try:
             result = await self.connections[tool.server].call(tool.upstream, args)

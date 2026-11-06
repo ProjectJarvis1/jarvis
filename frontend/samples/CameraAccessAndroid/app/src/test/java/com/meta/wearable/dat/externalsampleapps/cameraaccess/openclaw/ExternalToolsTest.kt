@@ -47,6 +47,18 @@ class ExternalToolsTest {
         assertThrows(IllegalStateException::class.java) { TaskPolicies.forTool("unknown_tool") }
     }
 
+    @Test fun disconnectedToolKeepsPolicyForStoredTasks() {
+        ExternalTools.load(body)
+        val seen = ExternalTools.seenJson()
+        ExternalTools.clear()
+        ExternalTools.restoreSeen(seen)          // app restart
+        ExternalTools.load("""{"tools": []}""")  // Notion and Slack disconnected
+        TaskPolicies.external = { name -> ExternalTools.everRequiredConfirmation(name)?.let { if (it) TaskPolicy(false, "external-write", true) else TaskPolicy(true) } }
+        assertFalse(ExternalTools.isExternal("notion_search"))   // not offered to Gemini any more
+        assertTrue(TaskPolicies.forTool("notion_search").background)
+        assertTrue(TaskPolicies.forTool("slack_send_message").write)
+    }
+
     @Test fun brokenBodyKeepsPreviousList() {
         ExternalTools.load(body)
         runCatching { ExternalTools.load("not json") }

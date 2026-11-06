@@ -92,3 +92,37 @@ def test_list_call_shape_confirm_timeout(tmp_path, monkeypatch):
         await gw.stop()
 
     asyncio.run(run())
+
+
+def test_long_notion_text_is_split_not_cut():
+    text = "가" * 4000
+    built = g._build_notion_append({"page_id": "p1", "text": text})
+    contents = [c["paragraph"]["rich_text"][0]["text"]["content"] for c in built["children"]]
+    assert "".join(contents) == text and all(len(c) <= 1900 for c in contents)
+    with pytest.raises(ValueError):
+        g._build_notion_append({"page_id": "p1", "text": "가" * (1900 * 100 + 1)})
+
+
+def test_env_falls_back_to_connected_account(monkeypatch):
+    monkeypatch.delenv("NOTION_TOKEN", raising=False)
+    assert g._expand_env("$NOTION_TOKEN|db:notion", lambda p: "db-token" if p == "notion" else None) == "db-token"
+    monkeypatch.setenv("NOTION_TOKEN", "env-token")
+    assert g._expand_env("$NOTION_TOKEN|db:notion", lambda p: "db-token") == "env-token"
+
+
+def test_missing_argument_is_a_tool_error_and_late_key_connects(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    monkeypatch.setattr(g, "WATCH_INTERVAL_S", 0.2)
+
+    async def run():
+        gw = g.McpGateway(_config(tmp_path), lambda _: None)
+        await gw.start()
+        assert gw.manifest() == []
+        missing = await gw.call("notion_append_note", {"text": "메모"})  # page_id 없음: 500 이 아니라 도구 오류
+        assert missing["is_error"] is True and "page_id" in missing["error"]
+        monkeypatch.setenv("FAKE_TOKEN", "tok")  # 키를 나중에 넣으면 감시 작업이 연결한다
+        await asyncio.wait_for(gw.connections["fake"].ready.wait(), 20)
+        assert {t["name"] for t in gw.manifest()} >= {"notion_search"}
+        await gw.stop()
+
+    asyncio.run(run())

@@ -154,8 +154,8 @@ class GeminiSessionViewModel : ViewModel() {
     init {
         // Reads run alongside the conversation; writes to outside services wait for approval like saves.
         TaskPolicies.external = { name ->
-            ExternalTools.get(name)?.let {
-                if (it.requiresConfirmation) TaskPolicy(false, "external-write", true, timeoutMs = 30_000)
+            ExternalTools.everRequiredConfirmation(name)?.let { confirm ->
+                if (confirm) TaskPolicy(false, "external-write", true, timeoutMs = 30_000)
                 else TaskPolicy(true, timeoutMs = 30_000)
             }
         }

@@ -67,6 +67,7 @@ class OpenClawBridge {
     private fun isWrite(toolName: String) = toolName in writeTools || ExternalTools.requiresConfirmation(toolName)
 
     private val externalToolsCache by lazy { File(AppContextProvider.require().filesDir, "external_tools.json") }
+    private val externalToolsSeen by lazy { File(AppContextProvider.require().filesDir, "external_tools_seen.json") }
 
     /**
      * Refreshes the outside-service tool list before a Live session. Waits at most [timeoutMs] so the
@@ -83,11 +84,13 @@ class OpenClawBridge {
         val body = fresh ?: runCatching { externalToolsCache.readText() }.getOrNull() ?: return@withContext ExternalTools.all().size
         val count = runCatching { ExternalTools.load(body) }.getOrElse { return@withContext ExternalTools.all().size }
         if (fresh != null) runCatching { externalToolsCache.writeText(fresh) }
+        runCatching { externalToolsSeen.writeText(ExternalTools.seenJson()) }
         Log.d(TAG, "External tools: $count (${if (fresh != null) "server" else "cache"})")
         count
     }
 
     fun loadCachedExternalTools() {
+        runCatching { ExternalTools.restoreSeen(externalToolsSeen.readText()) }
         runCatching { ExternalTools.load(externalToolsCache.readText()) }
     }
 
@@ -97,7 +100,8 @@ class OpenClawBridge {
             if (k.startsWith("_") || v == null || v == JSONObject.NULL) continue
             arguments.put(k, v)
         }
-        val rpc = JSONObject().put("jsonrpc", "2.0").put("id", System.currentTimeMillis()).put("method", "tools/call")
+        val rpc = JSONObject().put("jsonrpc", "2.0").put("id", 1) // fixed: a retried write must have the same body for server-side dedup
+           .put("method", "tools/call")
             .put("params", JSONObject().put("name", toolName).put("arguments", arguments))
         return when (val raw = post("/mcp", rpc)) {
             is ToolResult.Failure -> raw

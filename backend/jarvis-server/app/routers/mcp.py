@@ -1,3 +1,4 @@
+import json
 from typing import Any, Optional, Union
 
 from fastapi import APIRouter, Depends
@@ -80,14 +81,33 @@ def status():
     return {"servers": gw.status() if gw else {}}
 
 
+# 외부 MCP 연결은 서버 하나에 계정 하나(.env 키 또는 "default" 사용자의 계정 연결)로 연다.
+# 다른 user_id 로 외부 도구를 부르면 남의 계정으로 실행되지 않게 거절한다.
+_GATEWAY_USER = "default"
+
+
+def _with_details(result: dict[str, Any]) -> dict[str, Any]:
+    """서버 자체 도구는 본문이 "1개의 일정을 찾았습니다" 뿐이라, 세부 내용(structured_content)을 글에 붙인다."""
+    details = result.get("structured_content")
+    if result.get("is_error") or not details:
+        return result
+    text = (result.get("content") or "") + "\n" + json.dumps(details, ensure_ascii=False, default=str)
+    return {**result, "content": text[:mcp_gateway.RESULT_LIMIT]}
+
+
 async def _call(name: str, arguments: dict[str, Any], user_id: str) -> dict[str, Any]:
     gw = mcp_gateway.gateway
-    if gw and gw.is_external(name):
-        return await gw.call(name, arguments)
     native = _ALIASES.get(name, name)
+    if gw and gw.is_external(name):
+        if user_id != _GATEWAY_USER:
+            return {"is_error": True, "error": "외부 도구는 기본 사용자 계정으로만 실행합니다."}
+        # 노션 MCP 가 아직 안 붙었으면, 예전 계정 연결로 동작하던 서버 자체 노션 검색을 쓴다.
+        if not gw.is_ready(name) and get_tool(native) is not None:
+            return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id))
+        return await gw.call(name, arguments)
     if get_tool(native) is None:
         return {"is_error": True, "error": f"unknown tool: {name}"}
-    return await run_in_threadpool(call_tool, native, arguments, user_id)
+    return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id))
 
 
 @router.post("")
