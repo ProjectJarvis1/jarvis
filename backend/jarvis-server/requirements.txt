@@ -13,3 +13,4 @@ langgraph>=0.2
 insightface>=0.7.3
 onnxruntime>=1.19
 opencv-python-headless>=4.10
+mcp>=2.3,<3  # 외부 MCP 연결(app/mcp_gateway.py). 파이썬 3.10 이상 필요

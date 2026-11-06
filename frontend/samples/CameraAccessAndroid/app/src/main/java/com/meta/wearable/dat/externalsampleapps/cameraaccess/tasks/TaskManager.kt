@@ -54,7 +54,9 @@ object TaskPolicies {
         "resolve_contact_action" to TaskPolicy(false, "device-action", true),
         "control_meeting_recording" to TaskPolicy(false, "microphone", true),
     )
-    fun forTool(name: String): TaskPolicy = policies[name] ?: error("Unsupported task tool: $name")
+    /** Outside-service tools (ExternalTools) the server lists at runtime. Returns null for unknown names. */
+    @Volatile var external: (String) -> TaskPolicy? = { null }
+    fun forTool(name: String): TaskPolicy = policies[name] ?: external(name) ?: error("Unsupported task tool: $name")
 }
 
 interface TaskStore {

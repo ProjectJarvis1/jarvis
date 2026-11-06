@@ -8,6 +8,7 @@ import android.util.Log
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiToolCall
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.GeminiToolCallCancellation
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolDeclarations
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools
 import java.io.ByteArrayOutputStream
 import java.util.Timer
 import java.util.TimerTask
@@ -304,9 +305,16 @@ class GeminiLiveService {
                         put("text", systemInstruction)
                     }))
                 })
-                put("tools", JSONArray().put(JSONObject().apply {
-                    put("functionDeclarations", ToolDeclarations.allDeclarationsJSON(liveConversation))
-                }))
+                put("tools", JSONArray().apply {
+                    val declarations = ToolDeclarations.allDeclarationsJSON(liveConversation)
+                    val own = (0 until declarations.length()).map { declarations.getJSONObject(it).getString("name") }.toSet()
+                    ExternalTools.reservedNames = own
+                    // Notion, Slack, Google Calendar through the Jarvis server; only the ones connected right now.
+                    ExternalTools.declarations().filter { it.getString("name") !in own }.forEach { declarations.put(it) }
+                    put(JSONObject().put("functionDeclarations", declarations))
+                    // Built-in Google Search: one session handled search + app tools together (eval/live_tools_check.py).
+                    put(JSONObject().put("googleSearch", JSONObject()))
+                })
                 put("realtimeInputConfig", JSONObject().apply {
                     put("automaticActivityDetection", JSONObject().apply {
                         put("disabled", false)

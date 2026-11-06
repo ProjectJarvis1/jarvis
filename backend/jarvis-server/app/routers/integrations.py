@@ -1,5 +1,8 @@
 import base64
+import hashlib
+import hmac
 import json
+import time
 import urllib.parse
 import urllib.request
 from typing import Any, Optional
@@ -19,7 +22,12 @@ router = APIRouter(
 )
 
 
-_PROVIDERS = ("google", "slack", "notion")
+_SLACK_USER_SCOPES = (
+    "search:read.public", "search:read.private", "search:read.im", "search:read.mpim", "search:read.users",
+    "channels:history", "groups:history", "im:history", "mpim:history",
+    "channels:read", "groups:read", "users:read", "chat:write",
+)
+_PROVIDERS = ("google", "slack", "slack_user", "notion")
 
 
 def _form_post(url: str, data: dict[str, Any], headers: Optional[dict[str, str]] = None) -> dict[str, Any]:
@@ -100,8 +108,44 @@ def status(user_id: str = "default"):
     }
 
 
+# 계정 연결 주소는 공개돼 있어서, 아무나 자기 계정을 Jarvis 에 연결하지 못하게 서명한 state 를 쓴다.
+# /integrations/{provider}/link (API 키 필요) 가 10분짜리 서명 주소를 만들어 준다.
+_STATE_TTL_S = 600
+
+
+def _sign(text: str) -> str:
+    return hmac.new(settings.api_key.encode(), text.encode(), hashlib.sha256).hexdigest()[:32]
+
+
+def _make_state(provider: str, user_id: str) -> str:
+    body = f"{provider}.{user_id}.{int(time.time()) + _STATE_TTL_S}"
+    return f"{body}.{_sign(body)}"
+
+
+def _check_state(provider: str, state: str) -> str:
+    try:
+        body, sig = state.rsplit(".", 1)
+        state_provider, user_id, expires = body.split(".")
+    except ValueError:
+        raise HTTPException(400, "잘못된 연결 요청입니다. 연결 주소를 새로 받아 주세요.")
+    if not hmac.compare_digest(sig, _sign(body)) or state_provider != provider.split("_")[0] or int(expires) < time.time():
+        raise HTTPException(400, "연결 주소가 만료되었거나 올바르지 않습니다. 새로 받아 주세요.")
+    return user_id
+
+
+@router.get("/{provider}/link", dependencies=[Depends(require_api_key)])
+def link(provider: str, user_id: str = "default"):
+    if provider not in ("google", "slack", "notion"):
+        raise HTTPException(404, "unknown integration provider")
+    if "." in user_id:
+        raise HTTPException(400, "user_id 에 마침표를 쓸 수 없습니다.")
+    query = urllib.parse.urlencode({"state": _make_state(provider, user_id)})
+    return {"url": f"https://api.projectjarvis.biz/integrations/{provider}/connect?{query}", "expires_in": _STATE_TTL_S}
+
+
 @router.get("/{provider}/connect")
-def connect(provider: str, user_id: str = "default"):
+def connect(provider: str, state: str = Query(...)):
+    _check_state(provider, state)
     if provider == "google":
         if not settings.google_client_id or not settings.google_redirect_uri:
             raise HTTPException(400, "GOOGLE_CLIENT_ID and GOOGLE_REDIRECT_URI are required")
@@ -109,10 +153,10 @@ def connect(provider: str, user_id: str = "default"):
             "client_id": settings.google_client_id,
             "redirect_uri": settings.google_redirect_uri,
             "response_type": "code",
-            "scope": "https://www.googleapis.com/auth/calendar.events.readonly",
+            "scope": "https://www.googleapis.com/auth/calendar.events",
             "access_type": "offline",
             "prompt": "consent",
-            "state": user_id,
+            "state": state,
         }
         return RedirectResponse("https://accounts.google.com/o/oauth2/v2/auth?" + urllib.parse.urlencode(params))
 
@@ -123,7 +167,9 @@ def connect(provider: str, user_id: str = "default"):
             "client_id": settings.slack_client_id,
             "redirect_uri": settings.slack_redirect_uri,
             "scope": "chat:write,channels:read,groups:read,im:write",
-            "state": user_id,
+            # 슬랙 MCP 서버는 사용자 토큰으로만 쓴다(docs.slack.dev/ai/slack-mcp-server).
+            "user_scope": ",".join(_SLACK_USER_SCOPES),
+            "state": state,
         }
         return RedirectResponse("https://slack.com/oauth/v2/authorize?" + urllib.parse.urlencode(params))
 
@@ -135,7 +181,7 @@ def connect(provider: str, user_id: str = "default"):
             "redirect_uri": settings.notion_redirect_uri,
             "response_type": "code",
             "owner": "user",
-            "state": user_id,
+            "state": state,
         }
         return RedirectResponse("https://api.notion.com/v1/oauth/authorize?" + urllib.parse.urlencode(params))
 
@@ -143,8 +189,8 @@ def connect(provider: str, user_id: str = "default"):
 
 
 @router.get("/{provider}/callback")
-def callback(provider: str, code: str = Query(...), state: str = "default"):
-    user_id = state or "default"
+def callback(provider: str, code: str = Query(...), state: str = Query(...)):
+    user_id = _check_state(provider, state)
     if provider == "google":
         data = _form_post(
             "https://oauth2.googleapis.com/token",
@@ -164,7 +210,8 @@ def callback(provider: str, code: str = Query(...), state: str = "default"):
             access_token=data["access_token"],
             refresh_token=data.get("refresh_token"),
             scopes=(data.get("scope") or "").split(),
-            metadata={"token_type": data.get("token_type"), "expires_in": data.get("expires_in")},
+            metadata={"token_type": data.get("token_type"), "expires_in": data.get("expires_in"),
+                      "expires_at": time.time() + float(data.get("expires_in") or 3600)},
         )
         return _connected_html("Google Calendar")
 
@@ -180,13 +227,22 @@ def callback(provider: str, code: str = Query(...), state: str = "default"):
         )
         if not data.get("ok") or not data.get("access_token"):
             raise HTTPException(400, f"slack token exchange failed: {data}")
+        authed = data.get("authed_user") or {}
         _upsert_integration(
             user_id=user_id,
             provider="slack",
             access_token=data["access_token"],
             scopes=(data.get("scope") or "").split(","),
-            metadata={"team": data.get("team"), "authed_user": data.get("authed_user")},
+            metadata={"team": data.get("team"), "authed_user": {"id": authed.get("id")}},
         )
+        if authed.get("access_token"):
+            _upsert_integration(
+                user_id=user_id,
+                provider="slack_user",
+                access_token=authed["access_token"],
+                scopes=(authed.get("scope") or "").split(","),
+                metadata={"team": data.get("team"), "user_id": authed.get("id")},
+            )
         return _connected_html("Slack")
 
     if provider == "notion":

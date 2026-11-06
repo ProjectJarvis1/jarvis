@@ -67,6 +67,18 @@ def run_agent_query(
     image_id: Optional[str] = None,
     client_context: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
+    if settings.use_langgraph and settings.openai_api_key:
+        try:
+            from .agent_graph import run_graph
+            return run_graph(
+                user_id=user_id,
+                text=text,
+                timezone=timezone,
+                image_id=image_id,
+                client_context=client_context,
+            )
+        except Exception:
+            pass  # fall back to deterministic router below
     run_id = create_agent_run(
         user_id,
         text,

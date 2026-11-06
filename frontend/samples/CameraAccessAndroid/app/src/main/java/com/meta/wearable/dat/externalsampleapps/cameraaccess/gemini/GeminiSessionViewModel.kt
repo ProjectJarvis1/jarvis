@@ -11,6 +11,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.AppContextProvider
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawBridge
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawEventClient
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
@@ -140,17 +141,28 @@ class GeminiSessionViewModel : ViewModel() {
 
     /** The save Jarvis just asked about and is waiting on (card on screen, or a spoken "확인"). */
     fun pendingSave(tasks: List<TaskRecord>): TaskRecord? = tasks
-        .filter { it.tool in reviewTools && it.state == TaskState.WAITING_USER && !it.dispatched &&
+        .filter { needsReview(it.tool) && it.state == TaskState.WAITING_USER && !it.dispatched &&
             System.currentTimeMillis() - it.createdAt < 5 * 60_000L }
         .maxByOrNull { it.createdAt }
 
     private var voiceApprovalJob: Job? = null
     private val reviewTools = setOf("save_memory", "save_life_memory", "save_person", "save_meeting", "save_need",
         "apply_record_change", "undo_record_change", "create_calendar_event")
+    /** Saves, record changes and outside-service writes (Slack post, Notion append) wait for "확인". */
+    private fun needsReview(tool: String) = tool in reviewTools || ExternalTools.requiresConfirmation(tool)
 
     init {
+        // Reads run alongside the conversation; writes to outside services wait for approval like saves.
+        TaskPolicies.external = { name ->
+            ExternalTools.get(name)?.let {
+                if (it.requiresConfirmation) TaskPolicy(false, "external-write", true, timeoutMs = 30_000)
+                else TaskPolicy(true, timeoutMs = 30_000)
+            }
+        }
         viewModelScope.launch {
             try {
+                // Stored tasks may name outside-service tools; know them before the task list is restored.
+                withContext(Dispatchers.IO) { openClawBridge.loadCachedExternalTools() }
                 taskManager.initialize()
                 while (isActive) {
                     try {
@@ -180,7 +192,7 @@ class GeminiSessionViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 if (action == "approve") {
-                    require(taskManager.get(id)?.tool in reviewTools) { "이 작업은 전용 확인 화면을 사용하세요." }
+                    require(taskManager.get(id)?.tool?.let(::needsReview) == true) { "이 작업은 전용 확인 화면을 사용하세요." }
                     taskManager.approve(id, revision)
                 } else {
                     taskManager.control(id, revision, action)
@@ -436,6 +448,9 @@ class GeminiSessionViewModel : ViewModel() {
                     announceFocusedCompletion()
                 }
             }
+
+            // Outside-service tools are declared at setup, so the list has to be in hand first (cache if slow).
+            openClawBridge.refreshExternalTools()
 
             // Connect to Gemini
             geminiService.connect(
@@ -882,8 +897,11 @@ class GeminiSessionViewModel : ViewModel() {
 
     private suspend fun executeManagedTask(task: TaskRecord, execution: TaskManager.Execution): TaskOutcome {
         val args = parseTaskArgs(task.argsJson)
-        if (task.tool in reviewTools && !task.reviewed && !VoiceApproval.isApproval(lastUtterance, System.currentTimeMillis() - lastUtteranceAt)) {
-            return TaskOutcome(result = "아직 저장하지 않았습니다. 화면에 저장 확인 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 저장을 누르면 저장됩니다. 같은 확인을 다시 묻지 말고 한 문장으로만 안내한 뒤 기다리세요.", waitingForUser = true)
+        if (needsReview(task.tool) && !task.reviewed && !VoiceApproval.isApproval(lastUtterance, System.currentTimeMillis() - lastUtteranceAt)) {
+            val external = ExternalTools.isExternal(task.tool)
+            return TaskOutcome(result = if (external)
+                "아직 실행하지 않았습니다. 화면에 확인 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 확인을 누르면 실행됩니다. 같은 확인을 다시 묻지 말고 한 문장으로만 안내한 뒤 기다리세요."
+            else "아직 저장하지 않았습니다. 화면에 저장 확인 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 저장을 누르면 저장됩니다. 같은 확인을 다시 묻지 말고 한 문장으로만 안내한 뒤 기다리세요.", waitingForUser = true)
         }
         if (task.tool == "capture_current_view") {
             val frame = VisualMemoryFrameStore.captureFreshVisual()

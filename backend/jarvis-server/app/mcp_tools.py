@@ -65,7 +65,7 @@ def _integration_token(user_id: str, provider: str) -> Optional[str]:
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT access_token_encrypted
+                SELECT access_token_encrypted, refresh_token_encrypted, metadata
                 FROM user_integrations
                 WHERE user_id = %s AND provider = %s
                 """,
@@ -74,7 +74,53 @@ def _integration_token(user_id: str, provider: str) -> Optional[str]:
             row = cur.fetchone()
     if not row:
         return None
+    if provider == "google":
+        return _fresh_google_token(user_id, row)
     return row["access_token_encrypted"]
+
+
+def _fresh_google_token(user_id: str, row: dict[str, Any]) -> Optional[str]:
+    """구글 접근 토큰은 1시간이면 만료된다. 만료 1분 전부터는 refresh token 으로 새로 받는다."""
+    metadata = row.get("metadata") or {}
+    expires_at = float(metadata.get("expires_at") or 0)
+    if expires_at - 60 > datetime.now().timestamp() or not row.get("refresh_token_encrypted"):
+        return row["access_token_encrypted"]
+    body = urllib.parse.urlencode({
+        "client_id": settings.google_client_id,
+        "client_secret": settings.google_client_secret,
+        "refresh_token": row["refresh_token_encrypted"],
+        "grant_type": "refresh_token",
+    }).encode("utf-8")
+    request = urllib.request.Request("https://oauth2.googleapis.com/token", data=body, method="POST",
+                                     headers={"Content-Type": "application/x-www-form-urlencoded"})
+    with urllib.request.urlopen(request, timeout=15) as response:
+        data = json.loads(response.read().decode("utf-8"))
+    token = data.get("access_token")
+    if not token:
+        return None
+    new_expiry = datetime.now().timestamp() + float(data.get("expires_in", 3600))
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE user_integrations
+                SET access_token_encrypted = %s,
+                    metadata = metadata || %s,
+                    updated_at = now()
+                WHERE user_id = %s AND provider = 'google'
+                """,
+                (token, Jsonb({"expires_at": new_expiry}), user_id),
+            )
+        conn.commit()
+    return token
+
+
+def integration_token(provider: str, user_id: str = "default") -> Optional[str]:
+    """외부 MCP 연결(mcp_gateway)이 쓰는 토큰 조회. 실패하면 None."""
+    try:
+        return _integration_token(user_id, provider)
+    except Exception:
+        return None
 
 
 def _needs_auth(provider: str, message: str) -> dict[str, Any]:

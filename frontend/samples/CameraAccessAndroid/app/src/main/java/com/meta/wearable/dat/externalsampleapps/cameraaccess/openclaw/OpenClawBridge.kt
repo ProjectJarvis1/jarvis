@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -62,6 +63,58 @@ class OpenClawBridge {
 
     val durableRequests by lazy { DurableRequests(File(AppContextProvider.require().filesDir, "outbox"), client) }
     private val writeTools = setOf("save_person", "save_meeting", "save_memory", "save_life_memory", "save_need", "prepare_record_change", "apply_record_change", "undo_record_change")
+
+    private fun isWrite(toolName: String) = toolName in writeTools || ExternalTools.requiresConfirmation(toolName)
+
+    private val externalToolsCache by lazy { File(AppContextProvider.require().filesDir, "external_tools.json") }
+
+    /**
+     * Refreshes the outside-service tool list before a Live session. Waits at most [timeoutMs] so the
+     * conversation is not held up; falls back to the last list that worked.
+     */
+    suspend fun refreshExternalTools(timeoutMs: Long = 2_500): Int = withContext(Dispatchers.IO) {
+        val fresh = withTimeoutOrNull(timeoutMs) {
+            runCatching {
+                val request = Request.Builder().url("${baseUrl()}/mcp/tools").get()
+                    .addHeader("X-API-Key", GeminiConfig.jarvisApiKey).build()
+                client.newCall(request).awaitTaskResponse().takeIf { it.code in 200..299 }?.body
+            }.getOrNull()
+        }
+        val body = fresh ?: runCatching { externalToolsCache.readText() }.getOrNull() ?: return@withContext ExternalTools.all().size
+        val count = runCatching { ExternalTools.load(body) }.getOrElse { return@withContext ExternalTools.all().size }
+        if (fresh != null) runCatching { externalToolsCache.writeText(fresh) }
+        Log.d(TAG, "External tools: $count (${if (fresh != null) "server" else "cache"})")
+        count
+    }
+
+    fun loadCachedExternalTools() {
+        runCatching { ExternalTools.load(externalToolsCache.readText()) }
+    }
+
+    private suspend fun callExternal(toolName: String, args: Map<String, Any?>): ToolResult {
+        val arguments = JSONObject()
+        for ((k, v) in args) {
+            if (k.startsWith("_") || v == null || v == JSONObject.NULL) continue
+            arguments.put(k, v)
+        }
+        val rpc = JSONObject().put("jsonrpc", "2.0").put("id", System.currentTimeMillis()).put("method", "tools/call")
+            .put("params", JSONObject().put("name", toolName).put("arguments", arguments))
+        return when (val raw = post("/mcp", rpc)) {
+            is ToolResult.Failure -> raw
+            is ToolResult.Success -> {
+                val json = runCatching { JSONObject(raw.result) }.getOrNull()
+                    ?: return ToolResult.Failure("서버 응답을 읽지 못했습니다.")
+                json.optJSONObject("error")?.let { return ToolResult.Failure(it.optString("message", "도구 실행 실패")) }
+                val result = json.optJSONObject("result") ?: return ToolResult.Failure("서버 응답이 비어 있습니다.")
+                val content = result.optJSONArray("content")
+                val text = buildString {
+                    for (i in 0 until (content?.length() ?: 0)) content?.optJSONObject(i)?.optString("text")?.let { append(it) }
+                }
+                if (result.optBoolean("isError")) ToolResult.Failure(text.ifBlank { "도구 실행 실패" })
+                else ToolResult.Success(text)
+            }
+        }
+    }
 
     // The memory server answers /health in 1.5–9s through the tunnel; 5s marked a working server as down.
     private val pingClient = OkHttpClient.Builder()
@@ -115,12 +168,12 @@ class OpenClawBridge {
         beforeWrite: suspend () -> Unit = {},
         requestKey: String? = null,
     ): ToolResult =
-        withContext(Dispatchers.IO + RequestIdentity(if (toolName in writeTools) requestKey else null)) {
+        withContext(Dispatchers.IO + RequestIdentity(if (isWrite(toolName)) requestKey else null)) {
             _lastToolCallStatus.value = ToolCallStatus.Executing(toolName)
             val result: ToolResult = try {
                 currentCoroutineContext().ensureActive()
                 // Mark before dispatch, not when the tool is merely queued.
-                if (toolName in writeTools) {
+                if (isWrite(toolName)) {
                     if (toolName == "save_life_memory" && visualFrame == null) {
                         return@withContext ToolResult.Failure("저장할 사진이 없습니다. 먼저 사진 작업 결과를 확인해주세요.")
                     }
@@ -215,7 +268,8 @@ class OpenClawBridge {
                             ?: return@withContext ToolResult.Failure("person_id required")
                         get("/people/$pid/context")
                     }
-                    else -> ToolResult.Failure("Unknown tool: $toolName")
+                    else -> if (ExternalTools.isExternal(toolName)) callExternal(toolName, args)
+                        else ToolResult.Failure("Unknown tool: $toolName")
                 }
             } catch (e: PendingNetworkException) {
                 throw e

@@ -1,0 +1,63 @@
+{
+  "_comment": "외부 MCP 서버와 앱에 내보낼 도구 목록. 비밀값은 여기 두지 않고 .env 또는 계정 연결(DB)에서 읽는다. upstream 이름이 실제 서버에 없으면 건너뛰고 로그에 실제 목록을 남긴다.",
+  "servers": {
+    "notion": {
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "@notionhq/notion-mcp-server@2.6.1"],
+      "env": {"NOTION_TOKEN": "$NOTION_TOKEN"},
+      "tools": {
+        "notion_search": {
+          "upstream": "API-post-search",
+          "title": "노션 검색",
+          "description": "사용자가 노션을 말할 때만 씁니다. Jarvis에 공유된 노션 페이지와 데이터베이스를 제목으로 찾습니다. 결과의 id로 notion_read_page를 부를 수 있습니다.",
+          "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "찾을 페이지 제목의 핵심 단어"}}, "required": ["query"]},
+          "fixed": {"page_size": 5},
+          "shape": "notion_search"
+        },
+        "notion_read_page": {
+          "upstream": "API-retrieve-page-markdown",
+          "title": "노션 페이지 읽기",
+          "description": "notion_search로 찾은 노션 페이지의 본문을 읽습니다. 사용자가 그 페이지 내용을 물을 때 씁니다.",
+          "parameters": {"type": "object", "properties": {"page_id": {"type": "string", "description": "notion_search 결과의 id"}}, "required": ["page_id"]},
+          "shape": "notion_markdown"
+        },
+        "notion_append_note": {
+          "upstream": "API-patch-block-children",
+          "title": "노션에 내용 추가",
+          "description": "사용자가 노션 페이지에 내용을 적어 달라고 할 때, notion_search로 찾은 페이지 끝에 문단을 덧붙입니다. 앱이 실행 전에 사용자 확인을 받습니다.",
+          "parameters": {"type": "object", "properties": {
+            "page_id": {"type": "string", "description": "notion_search 결과의 id"},
+            "text": {"type": "string", "description": "덧붙일 내용"}
+          }, "required": ["page_id", "text"]},
+          "build": "notion_append",
+          "confirm": true,
+          "preview": "노션 페이지에 이 내용을 추가할까요?\n{text}"
+        }
+      }
+    },
+    "slack": {
+      "transport": "http",
+      "url": "https://mcp.slack.com/mcp",
+      "auth": "slack_user",
+      "tools": {
+        "slack_search": {
+          "upstream": "slack_search_public_and_private",
+          "title": "슬랙 검색",
+          "description": "사용자가 슬랙을 말할 때 슬랙 메시지를 검색합니다."
+        },
+        "slack_read_channel": {
+          "upstream": "slack_read_channel",
+          "title": "슬랙 채널 읽기",
+          "description": "사용자가 슬랙 채널의 최근 대화를 물을 때 읽습니다."
+        },
+        "slack_send_message": {
+          "upstream": "slack_send_message",
+          "title": "슬랙 메시지 보내기",
+          "description": "사용자가 슬랙에 메시지를 보내 달라고 할 때 씁니다. 앱이 실행 전에 사용자 확인을 받습니다.",
+          "confirm": true
+        }
+      }
+    }
+  }
+}

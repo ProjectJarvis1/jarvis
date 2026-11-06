@@ -564,20 +564,30 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
     val args = remember(task.argsJson) { runCatching { org.json.JSONObject(task.argsJson) }.getOrNull() }
     val name = args?.optString("name").orEmpty()
     val face = args?.optBoolean("include_face") == true
+    val external = com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools.isExternal(task.tool)
+    // Outside-service writes show what will be sent, so the user approves the actual message, not a title.
+    val externalPreview = if (external) com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools
+        .preview(task.tool, task.argsJson).split("\n", limit = 2) else emptyList()
     val headline = when {
+        external -> externalPreview.first()
         task.tool == "save_person" && name.isNotBlank() -> if (face) "$name 님을 얼굴과 함께 저장할까요?" else "$name 님을 저장할까요?"
         else -> "${task.title}, 저장할까요?"
     }
+    val action = if (external) "확인" else "저장"
     Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(18.dp),
         border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(headline, style = MaterialTheme.typography.titleMedium)
-            Text("\"확인\"이라고 말하거나 저장을 누르세요.", style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            externalPreview.getOrNull(1)?.let {
+                Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 6,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            Text(if (external) "\"확인\"이라고 말하거나 확인을 누르세요." else "\"확인\"이라고 말하거나 저장을 누르세요.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                 TextButton(onClick = onCancel) { Text("취소") }
                 Spacer(Modifier.size(8.dp))
-                Button(onClick = onSave) { Text("저장") }
+                Button(onClick = onSave) { Text(action) }
             }
         }
     }

@@ -104,7 +104,7 @@ private fun String.userFacingToolLabel(): String = when (this) {
     "identify_person" -> "사진 속 사람 확인"
     "save_need" -> "니즈 저장"
     "get_proposal_context" -> "제안 정보 정리"
-    else -> "요청 처리"
+    else -> ExternalTools.title(this) ?: "요청 처리"
 }
 
 // ─── Connection State (Jarvis API, name kept for compatibility) ──

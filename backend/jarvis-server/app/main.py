@@ -34,7 +34,17 @@ from .routers import (
 async def lifespan(app: FastAPI):
     open_pool()
     ensure_schema()
+    from . import mcp_gateway
+    from .mcp_tools import integration_token
+
+    try:
+        mcp_gateway.gateway = mcp_gateway.McpGateway(mcp_gateway.load_config(), integration_token)
+        await mcp_gateway.gateway.start()
+    except Exception:  # 외부 도구가 안 붙어도 서버 자체 기능은 떠야 한다
+        logging.getLogger("jarvis.mcp").exception("외부 MCP 연결 준비 실패")
     yield
+    if mcp_gateway.gateway:
+        await mcp_gateway.gateway.stop()
     close_pool()
 
 

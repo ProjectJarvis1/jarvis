@@ -1,0 +1,94 @@
+"""외부 MCP 연결부 시험. 실제 stdio 프로세스(tests/fake_mcp_server.py)로 연결·목록·실행·시간 초과를 본다."""
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app import mcp_gateway as g  # noqa: E402
+
+FAKE = str(Path(__file__).with_name("fake_mcp_server.py"))
+
+
+def _config(tmp_path, env_value="tok"):
+    cfg = {"servers": {"fake": {
+        "transport": "stdio", "command": sys.executable, "args": [FAKE], "env": {"FAKE_TOKEN": "$FAKE_TOKEN"},
+        "tools": {
+            "notion_search": {"upstream": "API-post-search", "title": "노션 검색", "description": "검색",
+                              "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+                              "fixed": {"page_size": 5}, "shape": "notion_search"},
+            "notion_append_note": {"upstream": "API-patch-block-children", "title": "노션에 내용 추가",
+                                   "build": "notion_append", "confirm": True, "preview": "추가할까요?\n{text}",
+                                   "parameters": {"type": "object", "properties": {"page_id": {"type": "string"}, "text": {"type": "string"}}}},
+            "slow_tool": {"upstream": "slow", "title": "느린 도구"},
+            "boom_tool": {"upstream": "boom", "title": "실패 도구"},
+            "ghost": {"upstream": "does-not-exist", "title": "없는 도구"},
+        }}}}
+    path = tmp_path / "servers.json"
+    path.write_text(json.dumps(cfg))
+    return g.load_config(path)
+
+
+def test_sanitize_schema_keeps_gemini_subset():
+    schema = {"$schema": "x", "type": "object", "additionalProperties": False, "$defs": {"a": {}},
+              "properties": {"q": {"type": ["string", "null"], "format": "uuid", "default": "", "description": "d"},
+                             "sort": {"anyOf": [{"type": "object", "properties": {"dir": {"type": "string", "enum": ["a", "b"]}}}, {"type": "string"}]},
+                             "parent": {"$ref": "#/$defs/a"},
+                             "tags": {"type": "array", "items": {"type": "string", "const": "x"}}},
+              "required": ["q", "missing"]}
+    out = g.sanitize_schema(schema)
+    assert out == {"type": "object", "properties": {
+        "q": {"type": "string", "description": "d"},
+        "sort": {"type": "object", "properties": {"dir": {"type": "string", "enum": ["a", "b"]}}},
+        "parent": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}}}, "required": ["q"]}
+
+
+def test_export_name_is_gemini_safe():
+    assert g.export_name("API-post.search") == "API_post_search"
+
+
+def test_server_without_credentials_is_not_listed(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    gw = g.McpGateway(_config(tmp_path), lambda _: None)
+    assert gw.manifest() == []
+    assert gw.status()["fake"]["credentials"] is False
+
+
+def test_list_call_shape_confirm_timeout(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_TOKEN", "tok")
+    monkeypatch.setattr(g, "CALL_TIMEOUT_S", 2.0)
+
+    async def run():
+        gw = g.McpGateway(_config(tmp_path), lambda _: None)
+        await gw.start()
+        await asyncio.wait_for(gw.connections["fake"].ready.wait(), 20)
+        names = {t["name"]: t for t in gw.manifest()}
+        assert set(names) == {"notion_search", "notion_append_note", "slow_tool", "boom_tool"}  # 없는 도구는 빠짐
+        assert names["notion_append_note"]["annotations"]["requires_confirmation"] is True
+        assert names["notion_search"]["gemini"]["parameters"]["required"] == ["query"]
+        assert "properties" in names["slow_tool"]["gemini"]["parameters"]  # parameters 를 안 적으면 원본을 다듬어 씀
+
+        found = await gw.call("notion_search", {"query": "견적서"})
+        assert found["is_error"] is False
+        data = json.loads(found["content"])
+        assert data == {"results": [{"id": "p1", "title": "견적서 페이지", "type": "page", "url": "https://n/p1", "last_edited": None}]}
+
+        added = await gw.call("notion_append_note", {"page_id": "p1", "text": "메모"})
+        assert json.loads(added["content"])["text"] == "메모"
+        assert gw.preview("notion_append_note", {"page_id": "p1", "text": "메모"}) == "추가할까요?\n메모"
+        assert gw.preview("notion_search", {"query": "x"}) is None
+
+        failed = await gw.call("boom_tool", {})
+        assert failed["is_error"] is True
+
+        timed_out = await gw.call("slow_tool", {})
+        assert timed_out["is_error"] is True
+
+        again = await gw.call("notion_search", {"query": "다시"})  # 시간 초과 뒤 다시 연결해서 동작
+        assert again["is_error"] is False, again
+        await gw.stop()
+
+    asyncio.run(run())
