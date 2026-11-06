@@ -315,7 +315,7 @@ class GeminiSessionViewModel : ViewModel() {
 
         if (!GeminiConfig.isConfigured) {
             _uiState.value = _uiState.value.copy(
-                errorMessage = "Gemini API key not configured. Open Settings and add your key from https://aistudio.google.com/apikey"
+                errorMessage = "게이트웨이 키가 없습니다. 설정 > 고급 설정 > Gemini 키 (마인드로직)에 키를 넣어 주세요."
             )
             return
         }

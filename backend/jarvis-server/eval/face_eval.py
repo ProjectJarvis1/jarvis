@@ -43,7 +43,7 @@ def decide(scores):
         return "no_match", None
     top_id, top = scores[0]
     runner = scores[1][1] if len(scores) > 1 else -1.0
-    if top >= CONFIDENT or top - runner >= MIN_MARGIN:
+    if top >= CONFIDENT and top - runner >= MIN_MARGIN:  # people._decide_match 와 같은 규칙(둘 다)
         return "confident", top_id
     return "uncertain", top_id
 

@@ -48,6 +48,7 @@ def test_meeting_correction_updates_search_projection_from_returned_record():
     assert "UPDATE meetings" in cursor.calls[0][0]
     assert "UPDATE memories" in cursor.calls[1][0]
     assert "source='derived'" in cursor.calls[1][0]
+    assert "meeting_recording" in cursor.calls[1][0]  # 회의 녹음으로 만든 기억도 함께 고친다
     assert "corrected" in cursor.calls[1][1][1]
     assert "original evidence" in cursor.calls[1][1][1]
     assert embedded[0] == "corrected"

@@ -557,6 +557,9 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
     // Outside-service writes show what will be sent, so the user approves the actual message, not a title.
     val externalPreview = if (external) com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools
         .preview(task.tool, task.argsJson).split("\n", limit = 2) else emptyList()
+    // Saves show what will be kept, so a misheard note is caught before it is stored.
+    val saveContent = if (external) null else listOf("user_note", "text", "summary", "ai_interpretation")
+        .firstNotNullOfOrNull { k -> args?.optString(k)?.takeIf { it.isNotBlank() && it != "null" } }
     val headline = when {
         external -> externalPreview.first()
         task.tool == "save_person" && name.isNotBlank() -> if (face) "$name 님을 얼굴과 함께 저장할까요?" else "$name 님을 저장할까요?"
@@ -567,6 +570,10 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
         border = androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.onSurface)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(headline, style = MaterialTheme.typography.titleMedium)
+            saveContent?.let {
+                Text("저장할 내용: $it", style = MaterialTheme.typography.bodyLarge, maxLines = 6,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
             externalPreview.getOrNull(1)?.let {
                 Text(it, style = MaterialTheme.typography.bodyLarge, maxLines = 6,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)

@@ -27,17 +27,21 @@ def meeting_memory_text(
 
 
 def sync_meeting_memory(cur, meeting):
+    # 회의가 직접 만든 기억만 고친다: 회의 저장(source='derived')과 회의 녹음(source='voice', memory_type='meeting_recording').
+    # 사용자가 따로 남긴 다른 기억은 같은 회의에 연결돼 있어도 건드리지 않는다.
+    _PROJECTED = ("related_meeting_id=%s AND (source='derived' OR "
+                  "(source='voice' AND metadata->>'memory_type'='meeting_recording'))")
     metadata = meeting.get("metadata") or {}
     text = meeting_memory_text(meeting.get("title"), meeting.get("summary"),
                                meeting.get("raw_transcript"), meeting.get("location"),
                                metadata.get("decisions") or [], metadata.get("action_items") or [])
     cur.execute("""UPDATE memories SET captured_at=%s, text=%s, embedding=%s,
                    related_person_ids=%s, metadata=metadata || %s
-                   WHERE related_meeting_id=%s AND source='derived'""",
+                   WHERE """ + _PROJECTED,
                 (meeting["started_at"], text, embed_text(text), meeting["person_ids"],
                  Jsonb({"origin_meeting_id": str(meeting["id"]), "user_note": text,
                         "ai_interpretation": "", "people_text": "", "labels": [], "entities": []}), meeting["id"]))
     # Labels/links extracted from an earlier projection must not survive its correction.
     cur.execute("""DELETE FROM memory_entities WHERE memory_id IN (
-                       SELECT id FROM memories WHERE related_meeting_id=%s AND source='derived'
+                       SELECT id FROM memories WHERE """ + _PROJECTED + """
                    )""", (meeting["id"],))
