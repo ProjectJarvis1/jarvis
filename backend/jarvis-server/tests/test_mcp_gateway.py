@@ -126,3 +126,46 @@ def test_missing_argument_is_a_tool_error_and_late_key_connects(tmp_path, monkey
         await gw.stop()
 
     asyncio.run(run())
+
+
+def test_notion_error_payload_is_not_success(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_TOKEN", "tok")
+
+    class _Conn:
+        ready = asyncio.Event()
+
+        async def call(self, name, args):
+            class R:
+                content = [type("T", (), {"text": json.dumps({"object": "error", "status": 401, "code": "unauthorized", "message": "API token is invalid."})})()]
+                structured_content = None
+                is_error = False
+            return R()
+
+    async def run():
+        gw = g.McpGateway(_config(tmp_path), lambda _: None)
+        gw.connections["fake"] = _Conn()
+        res = await gw.call("notion_search", {"query": "x"})
+        assert res["is_error"] is True and "API token is invalid" in res["error"]
+
+    asyncio.run(run())
+
+
+def test_changed_account_token_restarts_connection(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    token = {"v": "account-a"}
+    cfg = _config(tmp_path)
+    cfg["fake"].env = {"FAKE_TOKEN": "$FAKE_TOKEN|db:fake"}
+
+    async def run():
+        gw = g.McpGateway(cfg, lambda p: token["v"] if p == "fake" else None)
+        await gw.start()
+        conn = gw.connections["fake"]
+        await asyncio.wait_for(conn.ready.wait(), 20)
+        first = conn._task
+        token["v"] = "account-b"
+        await gw._reconnect()
+        assert conn._task is not first
+        await asyncio.wait_for(conn.ready.wait(), 20)
+        await gw.stop()
+
+    asyncio.run(run())

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -200,6 +201,14 @@ class _Connection:
         self._queue: asyncio.Queue = asyncio.Queue()
         self._task: Optional[asyncio.Task] = None
         self._closing = False  # 요청 하나가 실패해 연결을 닫는 중
+        self.fingerprint = ""  # 지금 연결이 쓰는 키의 지문
+
+    def credential_fingerprint(self) -> str:
+        """지금 쓸 키의 지문. 노션 계정을 다시 연결해 토큰이 바뀌면 달라진다."""
+        if self.cfg.transport != "stdio":
+            return ""
+        joined = "\n".join(_expand_env(v, self.token_provider) for v in self.cfg.env.values())
+        return hashlib.sha256(joined.encode()).hexdigest()
 
     def credentials_present(self) -> bool:
         if self.cfg.transport == "stdio":
@@ -300,6 +309,8 @@ class _Connection:
                 await asyncio.wait_for(asyncio.shield(self._task), 10)
             except Exception:
                 pass
+        if self._task is None or self._task.done():
+            self.fingerprint = await asyncio.to_thread(self.credential_fingerprint)
         self.start()
         try:
             await asyncio.wait_for(self.ready.wait(), CONNECT_TIMEOUT_S)
@@ -341,13 +352,17 @@ class McpGateway:
         self._watcher = asyncio.create_task(self._watch(), name="mcp:watch")
 
     async def _reconnect(self) -> None:
-        idle = [c for c in self.connections.values() if c._task is None or c._task.done()]
-        if not idle:
-            return
+        conns = list(self.connections.values())
         # 키 확인은 DB 를 볼 수 있어 작업자 스레드에서, 연결 시작은 이 이벤트 루프에서 한다.
-        present = await asyncio.to_thread(lambda: [c.credentials_present() for c in idle])
-        for conn, ok in zip(idle, present):
-            if ok:
+        checks = await asyncio.to_thread(lambda: [(c.credentials_present(), c.credential_fingerprint()) for c in conns])
+        for conn, (ok, fingerprint) in zip(conns, checks):
+            running = conn._task is not None and not conn._task.done()
+            if running and fingerprint != conn.fingerprint:
+                log.info("MCP %s 키가 바뀌어 다시 연결", conn.cfg.name)
+                await conn.stop()
+                running = False
+            if not running and ok:
+                conn.fingerprint = fingerprint
                 conn.start()
 
     async def _watch(self) -> None:
@@ -426,10 +441,18 @@ class McpGateway:
         text, is_error = _content_text(result)
         if is_error:
             return {"is_error": True, "error": text[:1000] or f"{tool.title} 실패"}
-        if tool.shape:
+        try:
+            parsed = json.loads(text)
+        except ValueError:
+            parsed = None
+        # 노션 MCP 는 API 실패(401, 404 등)를 isError 없이 JSON 글로 돌려준다. 성공으로 넘기지 않는다.
+        if isinstance(parsed, dict) and (parsed.get("object") == "error" or
+                                         (isinstance(parsed.get("status"), int) and parsed["status"] >= 400)):
+            return {"is_error": True, "error": f"{tool.title} 실패: {parsed.get('message') or parsed.get('code') or text[:300]}"}
+        if tool.shape and parsed is not None:
             try:
-                text = json.dumps(SHAPERS[tool.shape](json.loads(text)), ensure_ascii=False)
-            except (ValueError, TypeError):
+                text = json.dumps(SHAPERS[tool.shape](parsed), ensure_ascii=False)
+            except (ValueError, TypeError, AttributeError):
                 pass
         truncated = len(text) > RESULT_LIMIT
         return {"is_error": False, "content": text[:RESULT_LIMIT] + ("\n…(뒷부분 생략)" if truncated else "")}

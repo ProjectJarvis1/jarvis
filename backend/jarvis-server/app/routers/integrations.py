@@ -140,7 +140,7 @@ def link(provider: str, user_id: str = "default"):
     if "." in user_id:
         raise HTTPException(400, "user_id 에 마침표를 쓸 수 없습니다.")
     query = urllib.parse.urlencode({"state": _make_state(provider, user_id)})
-    return {"url": f"https://api.projectjarvis.biz/integrations/{provider}/connect?{query}", "expires_in": _STATE_TTL_S}
+    return {"url": f"{settings.public_base_url}/integrations/{provider}/connect?{query}", "expires_in": _STATE_TTL_S}
 
 
 @router.get("/{provider}/connect")

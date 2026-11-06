@@ -54,6 +54,8 @@ class Settings:
     notion_client_secret: str = os.getenv("NOTION_CLIENT_SECRET", "")
     notion_redirect_uri: str = os.getenv("NOTION_REDIRECT_URI", "")
 
+    public_base_url: str = os.getenv("PUBLIC_BASE_URL", "https://api.projectjarvis.biz").rstrip("/")
+
     use_langgraph: bool = os.getenv("JARVIS_USE_LANGGRAPH", "false").lower() == "true"
 
 
