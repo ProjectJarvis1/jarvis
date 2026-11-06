@@ -61,6 +61,23 @@ def degrade(x: np.ndarray, cond: str, rng: np.random.Generator) -> np.ndarray:
     return np.clip(x, -32768, 32767)
 
 
+def normalize_like_app(x: np.ndarray, chunk: int = 1600) -> np.ndarray:
+    """Software gain tried on 2026-11-06 (target 4500, floor 300, max x6). A/B on quiet voices showed
+    no gain in accuracy (error 66.8% -> 68.4%), so it was not shipped; kept here to re-test."""
+    gain, out = 1.0, []
+    for i in range(0, x.size, chunk):
+        c = x[i:i + chunk].astype(np.float64)
+        rms = float(np.sqrt(np.mean(c ** 2))) if c.size else 0.0
+        if rms > 300:
+            desired = min(max(4500 / rms, 1.0), 6.0)
+            gain += (desired - gain) * (0.5 if desired < gain else 0.15)
+        y = c * gain
+        a = np.abs(y)
+        y = np.where(a > 28000, np.sign(y) * (28000 + (a - 28000) * 0.2), y)
+        out.append(np.clip(y, -32768, 32767))
+    return np.concatenate(out).astype(np.float32)
+
+
 def cer(ref: str, hyp: str) -> float:
     r, h = ref.replace(" ", ""), re.sub(r"[\s.,?!]", "", hyp)
     d = list(range(len(h) + 1))
@@ -79,32 +96,40 @@ async def transcribe(key: str, pcm: np.ndarray) -> tuple:
             "systemInstruction": {"parts": [{"text": "사용자는 항상 한국어로 말합니다. 짧게 '네'라고만 답하세요."}]},
             "realtimeInputConfig": {"automaticActivityDetection": {
                 "disabled": False, "startOfSpeechSensitivity": "START_SENSITIVITY_HIGH",
-                "endOfSpeechSensitivity": "END_SENSITIVITY_LOW", "silenceDurationMs": 800, "prefixPaddingMs": 200},
+                "endOfSpeechSensitivity": "END_SENSITIVITY_LOW", "silenceDurationMs": int(os.environ.get("SILENCE_MS", "800")), "prefixPaddingMs": 200},
                 "activityHandling": "NO_INTERRUPTION", "turnCoverage": "TURN_INCLUDES_ALL_INPUT"},
             "inputAudioTranscription": {},
         }}))
         await ws.recv()  # setupComplete
         audio = np.concatenate([np.zeros(3200), pcm, np.zeros(16000 * 2)]).astype(np.int16).tobytes()
+        speech_end_byte = 3200 * 2 + pcm.size * 2
+        state = {"text": "", "first_reply": None, "done": asyncio.Event()}
+
+        async def reader():  # runs while audio is still streaming, so reply time is real
+            async for raw in ws:
+                sc = json.loads(raw).get("serverContent", {})
+                if "inputTranscription" in sc:
+                    state["text"] += sc["inputTranscription"].get("text", "")
+                if sc.get("modelTurn") and state["first_reply"] is None:
+                    state["first_reply"] = time.monotonic()
+                if sc.get("turnComplete"):
+                    state["done"].set()
+                    return
+
+        task = asyncio.create_task(reader())
         t_end_speech = None
         for i in range(0, len(audio), 3200):  # 100 ms chunks, real time
             await ws.send(json.dumps({"realtimeInput": {"audio": {"mimeType": "audio/pcm;rate=16000",
                                                                   "data": base64.b64encode(audio[i:i + 3200]).decode()}}}))
-            if i >= 3200 * 2 + pcm.size * 2 and t_end_speech is None:
+            if i >= speech_end_byte and t_end_speech is None:
                 t_end_speech = time.monotonic()
             await asyncio.sleep(0.1)
-        text, first_reply = "", None
         try:
-            while True:
-                msg = json.loads(await asyncio.wait_for(ws.recv(), 8))
-                sc = msg.get("serverContent", {})
-                if "inputTranscription" in sc:
-                    text += sc["inputTranscription"].get("text", "")
-                if sc.get("modelTurn") and first_reply is None:
-                    first_reply = time.monotonic()
-                if sc.get("turnComplete"):
-                    break
+            await asyncio.wait_for(state["done"].wait(), 8)
         except asyncio.TimeoutError:
             pass
+        task.cancel()
+        text, first_reply = state["text"], state["first_reply"]
         latency = round(first_reply - t_end_speech, 2) if first_reply and t_end_speech else None
         return text.strip(), latency
 
@@ -114,18 +139,26 @@ async def main():
     ap.add_argument("--key-file", required=True, type=Path)
     ap.add_argument("--out", required=True, type=Path)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--ids", default="", help="comma-separated sentence ids to run")
+    ap.add_argument("--voices", default="", help="comma-separated voice prefixes to run")
     args = ap.parse_args()
     key = re.search(r'geminiAPIKey\s*=\s*"([^"]+)"', args.key_file.read_text()).group(1)
     rows = list(csv.DictReader(open(Path(__file__).with_name("speech_sentences.tsv"), encoding="utf-8"), delimiter="\t"))
     if args.limit:
         rows = rows[: args.limit]
+    if args.ids:
+        rows = [r for r in rows if r["id"] in args.ids.split(",")]
+    voices = [v for v in VOICES if not args.voices or any(v.startswith(p) for p in args.voices.split(","))]
     rng = np.random.default_rng(7)
     results = []
     for row in rows:
-        for voice in VOICES:
+        for voice in voices:
             clean = synth(row["text"], voice)
             for cond in CONDITIONS:
-                hyp, latency = await transcribe(key, degrade(clean, cond, rng))
+                audio = degrade(clean, cond, rng)
+                if os.environ.get("NORMALIZE") == "1":
+                    audio = normalize_like_app(audio)
+                hyp, latency = await transcribe(key, audio)
                 keys = KEY_TOKENS.findall(row["text"])
                 keys_ok = all(k.replace(" ", "") in hyp.replace(" ", "") for k in keys)
                 r = {"id": row["id"], "kind": row["kind"], "voice": voice, "cond": cond, "ref": row["text"],
