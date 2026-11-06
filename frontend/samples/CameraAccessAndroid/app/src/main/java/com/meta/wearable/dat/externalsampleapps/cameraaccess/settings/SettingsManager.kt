@@ -36,7 +36,8 @@ object SettingsManager {
                     !stored.contains("search_contacts") ||
                     !stored.contains("저장 플로우 v2") ||
                     !stored.contains("말하는 동안 앱이") ||
-                    !stored.contains("사용자는 항상 한국어로 말합니다")
+                    !stored.contains("사용자는 항상 한국어로 말합니다") ||
+                    !stored.contains("연락처가 아니라 이 도구입니다")
             ) {
                 DEFAULT_SYSTEM_PROMPT
             } else {
@@ -135,7 +136,7 @@ object SettingsManager {
 
 [저장]
 - capture_current_view(reason) — 원본 사진이 따로 필요할 때만 호출: 장면 저장(save_life_memory), 사람 확인(identify_person), 작은 글씨를 자세히 읽어야 할 때. "이게 뭐야" 같은 일반 시각 질문에는 부르지 마세요
-- save_person(name, org?, role?, aliases?) — 사용자가 "이 사람 저장해줘" 같은 말 할 때
+- save_person(name, org?, role?, aliases?, include_face?) — 앞에 있는 사람을 기억해 달라고 할 때. "내 앞에 있는 사람 이유나라고 저장해줘", "이 사람 기억해"는 연락처가 아니라 이 도구입니다. 순서: capture_current_view로 얼굴 사진을 찍고 → "이 분을 이유나로 저장할까요?"라고 확인 → 승인하면 save_person(name, include_face=true, source_task_id, source_revision). create_contact는 사용자가 "연락처"라고 직접 말할 때만 쓰세요
 - save_meeting(person_ids, started_at, summary, title?) — "방금 미팅 저장"
 - save_memory(text, captured_at, related_person_ids?) — "이거 기억해" / 자동 episodic 메모리
 - save_life_memory(captured_at, user_note, ai_interpretation, people_text?, labels?, entities?) — 일상 장면을 최신 카메라 이미지와 함께 저장. 사용자가 "이거 저장해줘", "지금 보는 거 기억해"라고 하면 capture_current_view로 현재 이미지를 확인하고, 보이는 내용과 저장 요약을 말한 뒤 "이 내용으로 저장하면 될까요?"라고 사용자 승인을 받아야 함. 승인 후 사용자의 답과 현재 이미지 해석을 같이 저장. 명함/문서/사람/회사/차량/음식처럼 식별 가능한 객체는 labels와 entities에 구조화해서 넣음

@@ -95,6 +95,7 @@ class GeminiSessionViewModel : ViewModel() {
     private var commandSpeechRecognizer: SpeechInputController? = null
     private var visualContextSentForTurn: Boolean = false
     // Frames ride along with the user's speech so visual questions need no capture tool round trip.
+    private val visionExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
     private val speechVision = SpeechSyncedVision(
         latestFrame = {
             val at = VisualMemoryFrameStore.latestCapturedAtMs()
@@ -276,7 +277,9 @@ class GeminiSessionViewModel : ViewModel() {
                 val voiced = data.isNotEmpty() && energy / (data.size / 2).coerceAtLeast(1) > 0.000225
                 if (voiced) lastInputAt = System.currentTimeMillis()
                 geminiService.sendAudio(data)
-                speechVision.onAudio(voiced)
+                // Never encode or send frames on the capture thread: a stalled read drops audio and
+                // speech came out garbled ("내 앞에 있는 사람" heard as "바람이 불어").
+                visionExecutor.execute { speechVision.onAudio(voiced) }
             }
         }
         audioManager.onError = { message ->
@@ -961,5 +964,6 @@ class GeminiSessionViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         stopSession()
+        visionExecutor.shutdownNow()
     }
 }
