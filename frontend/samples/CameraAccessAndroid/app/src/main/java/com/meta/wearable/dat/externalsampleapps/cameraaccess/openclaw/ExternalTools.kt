@@ -84,7 +84,7 @@ object ExternalTools {
     /** What the confirm card shows for an external write, from the tool's arguments. */
     fun preview(name: String, argsJson: String): String {
         val args = runCatching { JSONObject(argsJson) }.getOrNull() ?: JSONObject()
-        if (name == "calendar_create_event") {
+        if (name == "gcal_create_event" || name == "calendar_create_event") {
             // The time is what the user must catch before approving, so it leads the second line.
             val start = args.optString("start").replace('T', ' ').take(16)
             val end = args.optString("end").replace('T', ' ').take(16).let { if (it.take(10) == start.take(10)) it.drop(11) else it }
