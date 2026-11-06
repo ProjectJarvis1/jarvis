@@ -191,3 +191,28 @@ def test_timed_out_write_is_marked_uncertain_not_retryable(tmp_path, monkeypatch
         assert read["is_error"] and not read.get("uncertain")
 
     asyncio.run(run())
+
+
+def test_notion_string_error_status(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_TOKEN", "tok")
+    cfg = _config(tmp_path)
+
+    class _Conn:
+        ready = asyncio.Event()
+
+        async def call(self, name, args):
+            class R:
+                content = [type("T", (), {"text": json.dumps({"status": "error", "data": "Bad Gateway"})})()]
+                structured_content = None
+                is_error = False
+            return R()
+
+    async def run():
+        gw = g.McpGateway(cfg, lambda _: None)
+        gw.connections["fake"] = _Conn()
+        read = await gw.call("notion_search", {"query": "x"})
+        assert read["is_error"] and not read.get("uncertain")
+        write = await gw.call("notion_append_note", {"page_id": "p1", "text": "메모"})
+        assert write["is_error"] and write["uncertain"]
+
+    asyncio.run(run())

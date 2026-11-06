@@ -108,10 +108,19 @@ _UNCERTAIN_RETRY = ("이전 시도에서 이미 실행됐을 수 있어 다시 �
                     "다시 보내지 말고, 사용자에게 직접 확인해 달라고 안내하세요.")
 
 
+def _own_connection():
+    import psycopg
+    from psycopg.rows import dict_row
+
+    from ..config import settings
+    return psycopg.connect(settings.database_url, connect_timeout=10, row_factory=dict_row)
+
+
 def _claim_dispatch(key: str, name: str) -> bool:
     """쓰기 시작을 따로 커밋해 남긴다. 이미 시작 기록이 있으면 False(앞 시도가 실행됐을 수 있음)."""
-    from ..db import pool  # 요청 트랜잭션과 따로 바로 커밋해야 서버가 꺼져도 남는다
-    with pool.connection() as conn:
+    # 요청 트랜잭션과 따로 바로 커밋해야 서버가 꺼져도 남는다. 요청들이 공용 풀을 다 쥐고 있을 수 있어
+    # 풀이 아닌 별도 연결을 잠깐 연다(쓰기 확인을 거친 요청만 오므로 드물다).
+    with _own_connection() as conn:
         row = conn.execute(
             """
             INSERT INTO external_dispatches (request_key, tool) VALUES (%s, %s)
@@ -126,8 +135,7 @@ def _claim_dispatch(key: str, name: str) -> bool:
 
 
 def _finish_dispatch(key: str, definite_failure: bool) -> None:
-    from ..db import pool
-    with pool.connection() as conn:
+    with _own_connection() as conn:
         conn.execute("UPDATE external_dispatches SET status = %s, updated_at = now() WHERE request_key = %s",
                      ("failed" if definite_failure else "done", key))
         conn.commit()

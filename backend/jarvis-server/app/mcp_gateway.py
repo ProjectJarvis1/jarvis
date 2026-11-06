@@ -468,9 +468,16 @@ class McpGateway:
         except ValueError:
             parsed = None
         # 노션 MCP 는 API 실패(401, 404 등)를 isError 없이 JSON 글로 돌려준다. 성공으로 넘기지 않는다.
-        if isinstance(parsed, dict) and (parsed.get("object") == "error" or
-                                         (isinstance(parsed.get("status"), int) and parsed["status"] >= 400)):
-            return {"is_error": True, "error": f"{tool.title} 실패: {parsed.get('message') or parsed.get('code') or text[:300]}"}
+        status = parsed.get("status") if isinstance(parsed, dict) else None
+        if isinstance(parsed, dict) and (parsed.get("object") == "error" or status == "error" or
+                                         (isinstance(status, int) and status >= 400)):
+            detail = parsed.get("message") or parsed.get("code") or parsed.get("data") or text[:300]
+            # 5xx 나 상태를 알 수 없는 실패는 상대 쪽에서 반영됐을 수 있다. 쓰기라면 다시 실행하지 않게 표시한다.
+            ambiguous = not (isinstance(status, int) and 400 <= status < 500)
+            if tool.confirm and ambiguous:
+                return {"is_error": True, "uncertain": True,
+                        "error": f"{tool.title} 결과를 확인하지 못했습니다({detail}). 다시 보내지 말고 사용자에게 직접 확인해 달라고 안내하세요."}
+            return {"is_error": True, "error": f"{tool.title} 실패: {detail}"}
         if tool.shape and parsed is not None:
             try:
                 text = json.dumps(SHAPERS[tool.shape](parsed), ensure_ascii=False)

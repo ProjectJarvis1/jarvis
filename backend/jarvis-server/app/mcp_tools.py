@@ -52,7 +52,11 @@ def call_tool(name: str, arguments: dict[str, Any], user_id: str = "default") ->
         return tool.handler(arguments, user_id)
     except Exception as exc:
         # 보낸 뒤 응답만 못 받았을 수 있는 쓰기(예: 슬랙 보내기 시간 초과)는 다시 실행하면 두 번 간다.
-        sent_maybe = isinstance(exc, (TimeoutError, OSError)) and not isinstance(exc, urllib.error.HTTPError)
+        # 5xx 는 중간 서버가 실패를 돌려줘도 상대 쪽에서는 이미 받았을 수 있다. 4xx 만 확실한 실패로 본다.
+        if isinstance(exc, urllib.error.HTTPError):
+            sent_maybe = exc.code >= 500
+        else:
+            sent_maybe = isinstance(exc, (TimeoutError, OSError))
         return {
             "is_error": True,
             "uncertain": bool(tool.requires_confirmation and sent_maybe),
