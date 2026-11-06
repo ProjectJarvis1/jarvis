@@ -604,8 +604,11 @@ private fun RecordChangeCard(undo: Boolean, changeId: String, onApprove: () -> U
         else -> "이 $noun 이렇게 바꿀까요?" to "변경"
     }
     val lines = remember(loaded) {
-        val before = loaded?.optJSONObject("before_data")?.optJSONObject("values") ?: org.json.JSONObject()
-        val after = loaded?.optJSONObject("after_data")?.optJSONObject("values") ?: org.json.JSONObject()
+        // Undo goes the other way: what is there now (after) turns back into what was there (before).
+        val applied = loaded?.optJSONObject("before_data")?.optJSONObject("values") ?: org.json.JSONObject()
+        val changed = loaded?.optJSONObject("after_data")?.optJSONObject("values") ?: org.json.JSONObject()
+        val before = if (undo) changed else applied
+        val after = if (undo) applied else changed
         when {
             loaded == null -> emptyList()
             delete -> listOfNotNull(listOf("text", "name", "title", "summary").firstNotNullOfOrNull { k ->

@@ -118,7 +118,8 @@ def status(user_id: str = "default"):
     return result
 
 
-_SERVICE_ROWS = {"notion": ("notion_mcp",), "google": ("google",), "slack": ("slack", "slack_user")}
+# 노션은 예전 방식 연결(notion)도 함께 지워야 해제 뒤 어떤 경로로도 노션에 접근하지 않는다.
+_SERVICE_ROWS = {"notion": ("notion_mcp", "notion"), "google": ("google",), "slack": ("slack", "slack_user")}
 
 
 @router.delete("/{service}", dependencies=[Depends(require_api_key)])

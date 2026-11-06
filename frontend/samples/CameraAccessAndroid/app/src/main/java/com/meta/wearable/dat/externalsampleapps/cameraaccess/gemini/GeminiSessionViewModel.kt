@@ -101,6 +101,10 @@ class GeminiSessionViewModel : ViewModel() {
     // Latest thing the user said, for voice approval of a save the assistant just asked about.
     @Volatile private var lastUtterance = ""
     @Volatile private var lastUtteranceAt = 0L
+    // One spoken yes approves one thing: set once the utterance has approved a task, cleared by new speech.
+    @Volatile private var lastUtteranceUsed = false
+    // The visible question stays until the user starts the next turn.
+    private var startNewQuestion = true
     private val speechVision = SpeechSyncedVision(
         latestFrame = {
             val at = VisualMemoryFrameStore.latestCapturedAtMs()
@@ -140,6 +144,29 @@ class GeminiSessionViewModel : ViewModel() {
     var streamingMode: StreamingMode = StreamingMode.GLASSES
 
     val taskRecords get() = taskManager.tasks
+
+    /** Every finished piece of user speech (live, queued during an answer, or local recognition) goes through here. */
+    private fun onUserSpeech(text: String, at: Long) {
+        lastUtterance = text
+        lastUtteranceAt = at
+        lastUtteranceUsed = false
+        voiceApprovalJob?.cancel()
+        voiceApprovalJob = viewModelScope.launch {
+            delay(700L) // wait for the rest of the sentence before judging it a plain yes
+            val waiting = pendingSave(taskManager.tasks.value)?.takeIf(::voiceApprovable) ?: return@launch
+            if (takeSpokenApproval(calendar = false)) controlTask(waiting.id, waiting.revision, "approve")
+        }
+    }
+
+    /** Uses up the last utterance as approval, so one "응" never approves two different tasks. */
+    @Synchronized
+    private fun takeSpokenApproval(calendar: Boolean): Boolean {
+        if (lastUtteranceUsed) return false
+        val age = System.currentTimeMillis() - lastUtteranceAt
+        val ok = VoiceApproval.isApproval(lastUtterance, age) || (calendar && VoiceApproval.isConsent(lastUtterance, age))
+        if (ok) lastUtteranceUsed = true
+        return ok
+    }
 
     /**
      * The newest save or outside write still waiting on the user. The card shows it however old it is, so a
@@ -353,7 +380,10 @@ class GeminiSessionViewModel : ViewModel() {
             visualContextSentForTurn = false
             // Speech queued during this turn is what the server answers next: show it as the question.
             val queued = _uiState.value.queuedTranscript
-            _uiState.value = _uiState.value.copy(userTranscript = queued, queuedTranscript = "")
+            if (queued.isNotBlank()) {
+                _uiState.value = _uiState.value.copy(userTranscript = queued, queuedTranscript = "")
+                startNewQuestion = false
+            } else startNewQuestion = true
             // Server generation can finish before the queued audio has reached the speaker.
             // Live mode keeps listening throughout; legacy mode resumes after actual playback.
             if (!liveConversation) {
@@ -373,23 +403,18 @@ class GeminiSessionViewModel : ViewModel() {
             // queued for the next turn, so it must not hold running tasks or wipe the current answer.
             val busy = liveConversation && (geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0)
             if (busy) {
-                _uiState.value = _uiState.value.copy(queuedTranscript = _uiState.value.queuedTranscript + text)
+                val queued = _uiState.value.queuedTranscript + text
+                _uiState.value = _uiState.value.copy(queuedTranscript = queued)
+                // "확인" said over Jarvis's own question still answers the card on screen.
+                onUserSpeech(queued, System.currentTimeMillis())
                 return@transcription
             }
             readyForCompletionNotice = false
             taskManager.onNewUserInput()
             lastInputAt = System.currentTimeMillis()
-            val transcript = _uiState.value.userTranscript + text
-            lastUtterance = transcript
-            lastUtteranceAt = lastInputAt
-            voiceApprovalJob?.cancel()
-            voiceApprovalJob = viewModelScope.launch {
-                delay(700L) // wait for the rest of the sentence before judging it a plain yes
-                val waiting = pendingSave(taskManager.tasks.value)?.takeIf(::voiceApprovable) ?: return@launch
-                if (VoiceApproval.isApproval(lastUtterance, System.currentTimeMillis() - lastUtteranceAt)) {
-                    controlTask(waiting.id, waiting.revision, "approve")
-                }
-            }
+            val transcript = (if (startNewQuestion) "" else _uiState.value.userTranscript) + text
+            startNewQuestion = false
+            onUserSpeech(transcript, lastInputAt)
             _uiState.value = _uiState.value.copy(
                 userTranscript = transcript,
                 aiTranscript = ""
@@ -613,6 +638,7 @@ class GeminiSessionViewModel : ViewModel() {
         if (text == lastSentSpeechText && now - lastSentSpeechAt < 2_000L) return
         lastSentSpeechText = text
         lastSentSpeechAt = now
+        onUserSpeech(text, now)
 
         _uiState.value = _uiState.value.copy(
             userTranscript = text,
@@ -919,10 +945,8 @@ class GeminiSessionViewModel : ViewModel() {
 
     private suspend fun executeManagedTask(task: TaskRecord, execution: TaskManager.Execution): TaskOutcome {
         val args = parseTaskArgs(task.argsJson)
-        val spokenAge = System.currentTimeMillis() - lastUtteranceAt
         val calendar = task.tool == "create_calendar_event" || task.tool == "gcal_create_event"
-        if (needsReview(task.tool) && !task.reviewed && !VoiceApproval.isApproval(lastUtterance, spokenAge) &&
-            !(calendar && VoiceApproval.isConsent(lastUtterance, spokenAge))) {
+        if (needsReview(task.tool) && !task.reviewed && !takeSpokenApproval(calendar)) {
             val external = ExternalTools.isExternal(task.tool)
             return TaskOutcome(result = if (external)
                 "아직 실행하지 않았습니다. 화면에 확인 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 확인을 누르면 실행됩니다. 같은 확인을 다시 묻지 말고 한 문장으로만 안내한 뒤 기다리세요."
