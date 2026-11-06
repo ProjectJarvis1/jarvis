@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import hashlib
 import json
 import logging
@@ -220,7 +221,8 @@ class _Connection:
             self.ready.clear()
             self.error = None
             self._closing = False
-            self._task = asyncio.create_task(self._run(), name=f"mcp:{self.cfg.name}")
+            # 연결은 요청보다 오래 산다. 요청의 DB 트랜잭션 같은 문맥 변수를 물려받지 않게 빈 문맥으로 띄운다.
+            self._task = asyncio.create_task(self._run(), name=f"mcp:{self.cfg.name}", context=contextvars.Context())
 
     async def stop(self) -> None:
         if self._task and not self._task.done():
@@ -363,7 +365,7 @@ class McpGateway:
 
     async def start(self) -> None:
         await self._reconnect()
-        self._watcher = asyncio.create_task(self._watch(), name="mcp:watch")
+        self._watcher = asyncio.create_task(self._watch(), name="mcp:watch", context=contextvars.Context())
 
     async def _reconnect(self) -> None:
         conns = list(self.connections.values())

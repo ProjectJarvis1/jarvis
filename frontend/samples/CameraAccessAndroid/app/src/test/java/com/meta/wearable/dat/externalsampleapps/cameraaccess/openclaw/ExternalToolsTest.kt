@@ -60,6 +60,13 @@ class ExternalToolsTest {
         assertTrue(TaskPolicies.forTool("slack_send_message").write)
     }
 
+    @Test fun recoveredUncertainWriteIsNotCompletion() {
+        val uncertain = """{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"확인하지 못했습니다"}],"isError":true}}"""
+        assertEquals("확인하지 못했습니다", ExternalTools.rpcFailure(uncertain))
+        assertNull(ExternalTools.rpcFailure("""{"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"ok"}],"isError":false}}"""))
+        assertNull(ExternalTools.rpcFailure("""{"id":"memory-1"}"""))  // ordinary saves are untouched
+    }
+
     @Test fun brokenBodyKeepsPreviousList() {
         ExternalTools.load(body)
         runCatching { ExternalTools.load("not json") }

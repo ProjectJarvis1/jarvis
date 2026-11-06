@@ -99,6 +99,18 @@ object ExternalTools {
         return if (body != null) "$headline\n$body" else headline
     }
 
+    /** Error text of a JSON-RPC `/mcp` response that failed (error object or result.isError); null otherwise. */
+    fun rpcFailure(body: String): String? {
+        val json = runCatching { JSONObject(body) }.getOrNull() ?: return null
+        if (json.optString("jsonrpc") != "2.0") return null
+        json.optJSONObject("error")?.let { return it.optString("message", "도구 실행 실패") }
+        val result = json.optJSONObject("result") ?: return null
+        if (!result.optBoolean("isError")) return null
+        val content = result.optJSONArray("content")
+        return (0 until (content?.length() ?: 0)).joinToString("") { content!!.optJSONObject(it)?.optString("text").orEmpty() }
+            .ifBlank { "도구 실행 실패" }
+    }
+
     private val appToolNames: Set<String> by lazy {
         val declarations = ToolDeclarations.allDeclarationsJSON(liveConversation = true)
         (0 until declarations.length()).map { declarations.getJSONObject(it).getString("name") }.toSet()

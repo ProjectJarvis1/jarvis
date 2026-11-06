@@ -1,7 +1,7 @@
 import json
 from typing import Any, Optional, Union
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
@@ -96,7 +96,44 @@ def _with_details(result: dict[str, Any]) -> dict[str, Any]:
     return {**result, "content": text[:mcp_gateway.RESULT_LIMIT]}
 
 
-async def _call(name: str, arguments: dict[str, Any], user_id: str) -> dict[str, Any]:
+def _requires_confirmation(name: str) -> bool:
+    gw = mcp_gateway.gateway
+    if gw and gw.is_external(name):
+        return gw.tools[name].confirm
+    tool = get_tool(_ALIASES.get(name, name))
+    return bool(tool and tool.requires_confirmation)
+
+
+_UNCERTAIN_RETRY = ("이전 시도에서 이미 실행됐을 수 있어 다시 실행하지 않았습니다. "
+                    "다시 보내지 말고, 사용자에게 직접 확인해 달라고 안내하세요.")
+
+
+def _claim_dispatch(key: str, name: str) -> bool:
+    """쓰기 시작을 따로 커밋해 남긴다. 이미 시작 기록이 있으면 False(앞 시도가 실행됐을 수 있음)."""
+    from ..db import pool  # 요청 트랜잭션과 따로 바로 커밋해야 서버가 꺼져도 남는다
+    with pool.connection() as conn:
+        row = conn.execute(
+            """
+            INSERT INTO external_dispatches (request_key, tool) VALUES (%s, %s)
+            ON CONFLICT (request_key) DO UPDATE SET status = 'started', updated_at = now()
+                WHERE external_dispatches.status = 'failed'
+            RETURNING request_key
+            """,
+            (key, name),
+        ).fetchone()
+        conn.commit()
+    return row is not None
+
+
+def _finish_dispatch(key: str, definite_failure: bool) -> None:
+    from ..db import pool
+    with pool.connection() as conn:
+        conn.execute("UPDATE external_dispatches SET status = %s, updated_at = now() WHERE request_key = %s",
+                     ("failed" if definite_failure else "done", key))
+        conn.commit()
+
+
+async def _run(name: str, arguments: dict[str, Any], user_id: str) -> dict[str, Any]:
     gw = mcp_gateway.gateway
     native = _ALIASES.get(name, name)
     if gw and gw.is_external(name):
@@ -111,15 +148,26 @@ async def _call(name: str, arguments: dict[str, Any], user_id: str) -> dict[str,
     return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id))
 
 
+async def _call(name: str, arguments: dict[str, Any], user_id: str, request_key: str = "") -> dict[str, Any]:
+    if not (request_key and _requires_confirmation(name)):
+        return await _run(name, arguments, user_id)
+    if not await run_in_threadpool(_claim_dispatch, request_key, name):
+        return {"is_error": True, "uncertain": True, "error": _UNCERTAIN_RETRY}
+    result = await _run(name, arguments, user_id)
+    definite_failure = bool(result.get("is_error")) and not result.get("uncertain")
+    await run_in_threadpool(_finish_dispatch, request_key, definite_failure)
+    return result
+
+
 @router.post("")
-async def jsonrpc(body: JsonRpcRequest):
+async def jsonrpc(body: JsonRpcRequest, idempotency_key: str = Header("", alias="Idempotency-Key")):
     if body.method == "tools/list":
         return {"jsonrpc": "2.0", "id": body.id, "result": {"tools": await run_in_threadpool(app_tools)}}
     if body.method == "tools/call":
         name = body.params.get("name", "")
         arguments = body.params.get("arguments") or {}
         user_id = body.params.get("user_id") or "default"
-        result = await _call(name, arguments, user_id)
+        result = await _call(name, arguments, user_id, idempotency_key)
         if result.get("is_error") and result.get("error", "").startswith("unknown tool"):
             return JSONResponse(status_code=404, content={"jsonrpc": "2.0", "id": body.id,
                                                           "error": {"code": -32602, "message": result["error"]}})

@@ -174,7 +174,13 @@ class GeminiSessionViewModel : ViewModel() {
                                 openClawBridge.durableRequests.acknowledge("${it.id}:${it.revision}")
                             }
                             openClawBridge.durableRequests.recover(GeminiConfig.jarvisApiBase.trimEnd('/'), GeminiConfig.jarvisApiKey,
-                                taskManager::canRecover, taskManager::recover)
+                                taskManager::canRecover) { key, code, body ->
+                                // An outside-service write answers 200 even when it could not confirm the send;
+                                // record that as failed with its message, never as completed.
+                                val rpcError = ExternalTools.rpcFailure(body)
+                                if (code in 200..299 && rpcError != null) taskManager.recover(key, 409, rpcError)
+                                else taskManager.recover(key, code, body)
+                            }
                         }
                     } catch (e: Exception) {
                         if (e is kotlinx.coroutines.CancellationException) throw e

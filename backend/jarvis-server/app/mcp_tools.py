@@ -1,5 +1,6 @@
 import json
 import urllib.parse
+import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -50,8 +51,11 @@ def call_tool(name: str, arguments: dict[str, Any], user_id: str = "default") ->
     try:
         return tool.handler(arguments, user_id)
     except Exception as exc:
+        # 보낸 뒤 응답만 못 받았을 수 있는 쓰기(예: 슬랙 보내기 시간 초과)는 다시 실행하면 두 번 간다.
+        sent_maybe = isinstance(exc, (TimeoutError, OSError)) and not isinstance(exc, urllib.error.HTTPError)
         return {
             "is_error": True,
+            "uncertain": bool(tool.requires_confirmation and sent_maybe),
             "error": str(exc),
         }
 
