@@ -131,8 +131,19 @@ SHAPERS: dict[str, Callable[[Any], Any]] = {
     "notion_search": _shape_notion_search,
     "notion_markdown": _shape_notion_markdown,
 }
+def _build_notion_fetch(args: dict[str, Any]) -> dict[str, Any]:
+    return {"id": str(args["page_id"])}
+
+
+def _build_notion_create(args: dict[str, Any]) -> dict[str, Any]:
+    # 노션 원격 MCP 의 notion-create-pages. 부모를 안 주면 내 개인 페이지로 만든다.
+    return {"pages": [{"properties": {"title": str(args["title"])}, "content": str(args["content"])}]}
+
+
 BUILDERS: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
     "notion_append": _build_notion_append,
+    "notion_fetch": _build_notion_fetch,
+    "notion_create": _build_notion_create,
 }
 
 

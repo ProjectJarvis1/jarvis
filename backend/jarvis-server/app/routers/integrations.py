@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import HTMLResponse, RedirectResponse
 from psycopg.types.json import Jsonb
 
+from .. import notion_mcp_auth
 from ..auth import require_api_key
 from ..config import settings
 from ..db import get_conn
@@ -27,7 +28,7 @@ _SLACK_USER_SCOPES = (
     "channels:history", "groups:history", "im:history", "mpim:history",
     "channels:read", "groups:read", "users:read", "chat:write",
 )
-_PROVIDERS = ("google", "slack", "slack_user", "notion")
+_PROVIDERS = ("google", "slack", "slack_user", "notion", "notion_mcp")
 
 
 def _form_post(url: str, data: dict[str, Any], headers: Optional[dict[str, str]] = None) -> dict[str, Any]:
@@ -94,7 +95,7 @@ def status(user_id: str = "default"):
             )
             rows = cur.fetchall()
     by_provider = {row["provider"]: row for row in rows}
-    return {
+    result = {
         provider: {
             "connected": provider in by_provider,
             "scopes": by_provider.get(provider, {}).get("scopes", []),
@@ -106,6 +107,32 @@ def status(user_id: str = "default"):
         }
         for provider in _PROVIDERS
     }
+    # 앱 설정 화면이 쓰는 요약: 서비스별로 연결됐는지, 서버에 연결 준비(앱 키)가 됐는지.
+    result["services"] = {
+        "notion": {"connected": "notion_mcp" in by_provider, "ready": True},
+        "google": {"connected": "google" in by_provider,
+                   "ready": bool(settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri)},
+        "slack": {"connected": "slack" in by_provider or "slack_user" in by_provider,
+                  "ready": bool(settings.slack_client_id and settings.slack_client_secret and settings.slack_redirect_uri)},
+    }
+    return result
+
+
+_SERVICE_ROWS = {"notion": ("notion_mcp",), "google": ("google",), "slack": ("slack", "slack_user")}
+
+
+@router.delete("/{service}", dependencies=[Depends(require_api_key)])
+def disconnect(service: str, user_id: str = "default"):
+    """앱의 '연결 해제'. 저장한 토큰을 지운다(상대 서비스 쪽 권한은 그 서비스 설정에서 따로 거둔다)."""
+    rows = _SERVICE_ROWS.get(service)
+    if not rows:
+        raise HTTPException(404, "unknown integration provider")
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM user_integrations WHERE user_id = %s AND provider = ANY(%s)", (user_id, list(rows)))
+            deleted = cur.rowcount
+        conn.commit()
+    return {"disconnected": service, "rows": deleted}
 
 
 # 계정 연결 주소는 공개돼 있어서, 아무나 자기 계정을 Jarvis 에 연결하지 못하게 서명한 state 를 쓴다.
@@ -174,16 +201,11 @@ def connect(provider: str, state: str = Query(...)):
         return RedirectResponse("https://slack.com/oauth/v2/authorize?" + urllib.parse.urlencode(params))
 
     if provider == "notion":
-        if not settings.notion_client_id or not settings.notion_redirect_uri:
-            raise HTTPException(400, "NOTION_CLIENT_ID and NOTION_REDIRECT_URI are required")
-        params = {
-            "client_id": settings.notion_client_id,
-            "redirect_uri": settings.notion_redirect_uri,
-            "response_type": "code",
-            "owner": "user",
-            "state": state,
-        }
-        return RedirectResponse("https://api.notion.com/v1/oauth/authorize?" + urllib.parse.urlencode(params))
+        # 노션 공식 원격 MCP: 개발자 등록 없이 로그인과 페이지 선택만 하면 된다.
+        try:
+            return RedirectResponse(notion_mcp_auth.authorize_url(state))
+        except Exception as exc:
+            return _failed_html("Notion", str(exc))
 
     raise HTTPException(404, "unknown integration provider")
 
@@ -213,7 +235,7 @@ def callback(provider: str, code: str = Query(...), state: str = Query(...)):
             metadata={"token_type": data.get("token_type"), "expires_in": data.get("expires_in"),
                       "expires_at": time.time() + float(data.get("expires_in") or 3600)},
         )
-        return _connected_html("Google Calendar")
+        return _connected_html("구글 캘린더")
 
     if provider == "slack":
         data = _form_post(
@@ -243,45 +265,31 @@ def callback(provider: str, code: str = Query(...), state: str = Query(...)):
                 scopes=(authed.get("scope") or "").split(","),
                 metadata={"team": data.get("team"), "user_id": authed.get("id")},
             )
-        return _connected_html("Slack")
+        return _connected_html("슬랙")
 
     if provider == "notion":
-        if not settings.notion_client_id or not settings.notion_client_secret:
-            raise HTTPException(400, "NOTION_CLIENT_ID and NOTION_CLIENT_SECRET are required")
-        basic = base64.b64encode(
-            f"{settings.notion_client_id}:{settings.notion_client_secret}".encode("utf-8")
-        ).decode("ascii")
-        data = _form_post(
-            "https://api.notion.com/v1/oauth/token",
-            {
-                "grant_type": "authorization_code",
-                "code": code,
-                "redirect_uri": settings.notion_redirect_uri,
-            },
-            headers={"Authorization": f"Basic {basic}"},
-        )
-        if "access_token" not in data:
-            raise HTTPException(400, f"notion token exchange failed: {data}")
-        _upsert_integration(
-            user_id=user_id,
-            provider="notion",
-            access_token=data["access_token"],
-            metadata={"workspace_name": data.get("workspace_name"), "owner": data.get("owner")},
-        )
-        return _connected_html("Notion")
+        try:
+            notion_mcp_auth.finish(user_id, code, state)
+        except Exception as exc:
+            return _failed_html("Notion", str(exc))
+        return _connected_html("노션")
 
     raise HTTPException(404, "unknown integration provider")
 
 
-def _connected_html(provider_name: str) -> HTMLResponse:
-    return HTMLResponse(
-        f"""
-        <html>
-          <head><title>Jarvis {provider_name} Connected</title></head>
-          <body style="font-family: sans-serif; padding: 24px;">
-            <h2>{provider_name} 연결 완료</h2>
-            <p>Jarvis 앱으로 돌아가 테스트를 계속하세요.</p>
-          </body>
-        </html>
-        """
-    )
+_PAGE = """<!doctype html><html lang="ko"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Jarvis</title>
+<style>body{{margin:0;font-family:system-ui,sans-serif;background:#fff;color:#111;word-break:keep-all;overflow-wrap:anywhere}}
+main{{max-width:28rem;margin:0 auto;padding:clamp(2rem,10vw,4rem) 1.25rem}}h1{{font-size:clamp(1.4rem,5vw,1.8rem);margin:0 0 .75rem}}
+p{{line-height:1.6;color:#444}}@media (prefers-color-scheme:dark){{body{{background:#000;color:#f2f2f2}}p{{color:#bbb}}}}</style>
+</head><body><main><h1>{title}</h1><p>{body}</p></main></body></html>"""
+
+
+def _connected_html(name: str) -> HTMLResponse:
+    return HTMLResponse(_PAGE.format(title=f"{name} 연결됐어요", body="이 창을 닫고 Jarvis 앱으로 돌아가세요. 설정 화면에 연결됨으로 보입니다."))
+
+
+def _failed_html(name: str, reason: str) -> HTMLResponse:
+    import html
+    return HTMLResponse(_PAGE.format(title=f"{name} 연결에 실패했어요",
+                                     body=f"Jarvis 앱 설정에서 다시 시도해 주세요. ({html.escape(reason[:200])})"), status_code=502)

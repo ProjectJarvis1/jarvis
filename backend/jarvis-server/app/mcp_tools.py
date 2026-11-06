@@ -84,6 +84,9 @@ def _integration_token(user_id: str, provider: str) -> Optional[str]:
         return None
     if provider == "google":
         return _fresh_google_token(user_id, row)
+    if provider == "notion_mcp":
+        from .notion_mcp_auth import fresh_token
+        return fresh_token(user_id, row)
     return row["access_token_encrypted"]
 
 

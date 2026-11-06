@@ -19,26 +19,25 @@ import androidx.compose.ui.unit.dp
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 
 @Composable
-fun HomeScreen(viewModel: WearablesViewModel, activeTasks: Int, onTasks: () -> Unit, modifier: Modifier = Modifier) {
+fun HomeScreen(viewModel: WearablesViewModel, modifier: Modifier = Modifier) {
     val activity = LocalActivity.current
-    JarvisHome(false, false, activeTasks, { activity?.let(viewModel::startRegistration) },
-        viewModel::navigateToPhoneMode, viewModel::showMemory, onTasks, viewModel::showSettings, modifier)
+    JarvisHome(false, false, { activity?.let(viewModel::startRegistration) },
+        viewModel::navigateToPhoneMode, viewModel::showMemory, modifier)
 }
 
 /**
- * Home from the design canvas: connection pill, headline, spoken examples, running-work strip and an ask bar.
+ * Home: connection pill, headline, spoken examples and an ask bar. Settings live in the bottom bar.
  * [onGlasses] connects or starts the glasses; [onPhone] starts with the phone camera.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun JarvisHome(registered: Boolean, deviceReady: Boolean, activeTasks: Int, onGlasses: () -> Unit, onPhone: () -> Unit,
-    onRecords: () -> Unit, onTasks: () -> Unit, onSettings: () -> Unit, modifier: Modifier = Modifier) {
+fun JarvisHome(registered: Boolean, deviceReady: Boolean, onGlasses: () -> Unit, onPhone: () -> Unit,
+    onRecords: () -> Unit, modifier: Modifier = Modifier) {
     val onStart = if (deviceReady) onGlasses else onPhone
     Column(modifier.fillMaxSize().statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(start = 24.dp, end = 12.dp, top = 8.dp),
-            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 24.dp, end = 12.dp, top = 8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
             Text("Jarvis", style = MaterialTheme.typography.titleLarge)
-            IconButton(onClick = onSettings, modifier = Modifier.size(48.dp)) { Icon(Icons.Default.Settings, "설정") }
         }
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),
             horizontalAlignment = Alignment.CenterHorizontally) {
@@ -74,15 +73,6 @@ fun JarvisHome(registered: Boolean, deviceReady: Boolean, activeTasks: Int, onGl
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (activeTasks > 0) Surface(onClick = onTasks, shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
-                Row(Modifier.heightIn(min = 44.dp).padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                    JarvisDot()
-                    Text("작업 ${activeTasks}건 진행 중", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-                    Text("보기", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
             Surface(onClick = onStart, shape = RoundedCornerShape(32.dp), color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.fillMaxWidth()) {
                 Row(Modifier.heightIn(min = 64.dp).padding(start = 20.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),

@@ -456,25 +456,8 @@ fun StreamScreen(
             },
             isRecording = meetingRecordingUiState.isRecording,
             isRecordingProcessing = meetingRecordingUiState.isProcessing,
-            onToggleLive = {
-                if (webrtcUiState.isActive) {
-                    webrtcViewModel.stopSession()
-                } else {
-                    webrtcViewModel.startSession()
-                }
-            },
-            isLiveActive = webrtcUiState.isActive,
-            onShareLive = {
-                val intent = Intent(Intent.ACTION_SEND).apply {
-                    type = "text/plain"
-                    putExtra(Intent.EXTRA_TEXT, "Jarvis live view: ${webrtcUiState.viewerUrl}")
-                }
-                context.startActivity(Intent.createChooser(intent, "Share live view"))
-            },
-            canShareLive = webrtcUiState.viewerUrl.isNotEmpty(),
             onRecords = wearablesViewModel::showMemory,
             onStopStream = { requestLeave() },
-            tasks = { TaskBoardIconButton(geminiViewModel) },
             modifier = Modifier.fillMaxWidth().navigationBarsPadding(),
         )
     }

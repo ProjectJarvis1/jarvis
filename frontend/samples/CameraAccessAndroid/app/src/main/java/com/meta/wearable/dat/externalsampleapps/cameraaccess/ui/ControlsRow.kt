@@ -13,14 +13,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 
 /**
- * Live conversation controls from the design canvas: a voice level, what Jarvis is doing, and three round buttons —
- * session menu (meeting, live share, records, end), talk, and the task board.
+ * Live conversation controls: a voice level, what Jarvis is doing, and three round buttons. The session menu holds
+ * meeting recording and ending the camera; the middle button talks; the right one opens memories.
  */
 @Composable
 fun LiveControls(listening: String, onToggleAI: () -> Unit, isAIActive: Boolean, aiEnabled: Boolean,
     onToggleRecording: () -> Unit, isRecording: Boolean, isRecordingProcessing: Boolean,
-    onToggleLive: () -> Unit, isLiveActive: Boolean, onShareLive: () -> Unit, canShareLive: Boolean,
-    onRecords: () -> Unit, onStopStream: () -> Unit, tasks: @Composable () -> Unit, modifier: Modifier = Modifier) {
+    onRecords: () -> Unit, onStopStream: () -> Unit, modifier: Modifier = Modifier) {
     var more by remember { mutableStateOf(false) }
     Column(modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 28.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
@@ -39,12 +38,6 @@ fun LiveControls(listening: String, onToggleAI: () -> Unit, isAIActive: Boolean,
                     DropdownMenuItem(text = { Text(if (isRecording) "회의 녹음 종료" else if (isRecordingProcessing) "회의 정리 중" else "회의 녹음 시작") },
                         enabled = !isRecordingProcessing, onClick = { more = false; onToggleRecording() },
                         leadingIcon = { Icon(if (isRecording) Icons.Default.StopCircle else Icons.Default.MicNone, null) })
-                    DropdownMenuItem(text = { Text(if (isLiveActive) "실시간 공유 중단" else "실시간 공유 시작") },
-                        onClick = { more = false; onToggleLive() }, leadingIcon = { Icon(Icons.Default.Videocam, null) })
-                    if (canShareLive) DropdownMenuItem(text = { Text("시청 링크 공유") },
-                        onClick = { more = false; onShareLive() }, leadingIcon = { Icon(Icons.Default.Share, null) })
-                    DropdownMenuItem(text = { Text("기억 열기") }, onClick = { more = false; onRecords() },
-                        leadingIcon = { Icon(Icons.Default.Search, null) })
                     DropdownMenuItem(text = { Text("카메라 연결 종료") }, onClick = { more = false; onStopStream() },
                         leadingIcon = { Icon(Icons.Default.Close, null) })
                 }
@@ -53,7 +46,8 @@ fun LiveControls(listening: String, onToggleAI: () -> Unit, isAIActive: Boolean,
                 Icon(if (isAIActive) Icons.Default.Stop else Icons.Default.Mic, if (isAIActive) "대화 마치기" else "말하기",
                     Modifier.size(32.dp))
             }
-            tasks()
+            OutlinedIconButton(onClick = onRecords, modifier = Modifier.size(56.dp),
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) { Icon(Icons.Default.Search, "기억 열기") }
         }
     }
 }

@@ -13,13 +13,13 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.Wearables
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NonStreamScreen(viewModel: WearablesViewModel,
-    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus, activeTasks: Int, onTasks: () -> Unit,
+    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus,
     modifier: Modifier = Modifier) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var connectionHelp by remember { mutableStateOf(false) }
-    JarvisHome(true, state.hasActiveDevice, activeTasks,
+    JarvisHome(true, state.hasActiveDevice,
         { if (state.hasActiveDevice) viewModel.navigateToStreaming(onRequestWearablesPermission) else connectionHelp = true },
-        viewModel::navigateToPhoneMode, viewModel::showMemory, onTasks, viewModel::showSettings, modifier)
+        viewModel::navigateToPhoneMode, viewModel::showMemory, modifier)
     if (connectionHelp || state.isGettingStartedSheetVisible) {
         ModalBottomSheet(onDismissRequest = { connectionHelp = false; viewModel.hideGettingStartedSheet() }) {
             Column(Modifier.padding(24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
