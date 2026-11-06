@@ -14,8 +14,9 @@ object SettingsManager {
     }
 
     var geminiAPIKey: String
-        get() = prefs.getString("geminiAPIKey", null) ?: Secrets.geminiAPIKey
-        set(value) = prefs.edit().putString("geminiAPIKey", value).apply()
+        // Stored under a new name: a Google AI Studio key saved by an older build does not work on the gateway.
+        get() = prefs.getString("gatewayAPIKey", null) ?: Secrets.geminiAPIKey
+        set(value) = prefs.edit().putString("gatewayAPIKey", value).apply()
 
     var geminiSystemPrompt: String
         get() {

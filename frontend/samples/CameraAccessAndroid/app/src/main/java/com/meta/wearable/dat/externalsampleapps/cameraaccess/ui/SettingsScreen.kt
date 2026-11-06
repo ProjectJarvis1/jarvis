@@ -150,7 +150,7 @@ fun SettingsScreen(
                     if (advancedOpen) "고급 설정 접기" else "고급 설정 펼치기")
             }
             if (advancedOpen) {
-                MonoTextField(geminiAPIKey, { geminiAPIKey = it }, "Gemini API 키", "API 키 입력", secret = true)
+                MonoTextField(geminiAPIKey, { geminiAPIKey = it }, "Gemini 키 (마인드로직)", "게이트웨이 키 입력", secret = true)
                 MonoTextField(jarvisApiBase, { jarvisApiBase = it }, "Jarvis 서버 주소", "https://api.example.com",
                     keyboardType = KeyboardType.Uri)
                 MonoTextField(jarvisApiKey, { jarvisApiKey = it }, "Jarvis 서버 API 키", "API 키 입력", secret = true)

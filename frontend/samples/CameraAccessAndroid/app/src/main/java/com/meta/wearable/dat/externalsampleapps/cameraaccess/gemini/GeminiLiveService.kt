@@ -94,7 +94,7 @@ class GeminiLiveService {
         _connectionState.value = GeminiConnectionState.Connecting
         connectCallback = callback
 
-        val request = Request.Builder().url(url).build()
+        val request = Request.Builder().url(url).header(GeminiConfig.API_KEY_HEADER, GeminiConfig.apiKey).build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 dispatch(generation) {

@@ -3,9 +3,12 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 
 object GeminiConfig {
+    // Gemini Live through the Mindlogic API gateway. Same protocol as Google's socket; the gateway key goes in
+    // the x-goog-api-key header (never in the address, so it stays out of logs).
     const val WEBSOCKET_BASE_URL =
-        "wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
-    const val MODEL = "models/gemini-3.1-flash-live-preview"
+        "wss://factchat-cloud.mindlogic.ai/v1/gateway/gemini/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+    const val MODEL = "models/gemini-3.8-live"
+    const val API_KEY_HEADER = "x-goog-api-key"
 
     const val INPUT_AUDIO_SAMPLE_RATE = 16000
     const val OUTPUT_AUDIO_SAMPLE_RATE = 24000
@@ -57,7 +60,7 @@ object GeminiConfig {
 
     fun websocketURL(): String? {
         if (apiKey == "YOUR_GEMINI_API_KEY" || apiKey.isEmpty()) return null
-        return "$WEBSOCKET_BASE_URL?key=$apiKey"
+        return WEBSOCKET_BASE_URL
     }
 
     val isConfigured: Boolean
