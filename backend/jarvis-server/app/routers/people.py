@@ -122,7 +122,11 @@ def _decide_match(matches: List[PersonMatch]) -> tuple:
     top = matches[0]
     runner_up = matches[1].score if len(matches) > 1 else -1.0
 
-    if top.score >= _CONFIDENT_SCORE or (top.score - runner_up) >= _MIN_MARGIN:
+    # Both conditions, not either: measured on LFW (eval/face_eval.py, 2026-11-06), "score OR margin"
+    # let 1.0-1.4% of strangers be named outright once ~100 people were enrolled, because a low
+    # score with no close runner-up still passed. Requiring both cut that to 0% while 99% of
+    # enrolled people were still named directly; everyone in between gets a confirmation question.
+    if top.score >= _CONFIDENT_SCORE and (top.score - runner_up) >= _MIN_MARGIN:
         # A confident match off a single mediocre reference photo is exactly the case that
         # degrades over time -- prompt for a second photo while the person is still in frame.
         if top.face_count < 2:

@@ -295,6 +295,9 @@ class GeminiLiveService {
                 put("model", GeminiConfig.MODEL)
                 put("generationConfig", JSONObject().apply {
                     put("responseModalities", JSONArray().put("AUDIO"))
+                    // Without a pinned language the model auto-detects per utterance and heard Korean as
+                    // Spanish, German or Chinese (eval/speech_eval.py, 2026-11-06). ko-KR removed that.
+                    put("speechConfig", JSONObject().put("languageCode", "ko-KR"))
                 })
                 put("systemInstruction", JSONObject().apply {
                     put("parts", JSONArray().put(JSONObject().apply {
