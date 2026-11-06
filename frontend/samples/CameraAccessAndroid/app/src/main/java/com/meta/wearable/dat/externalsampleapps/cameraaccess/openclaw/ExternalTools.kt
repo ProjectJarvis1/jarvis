@@ -87,9 +87,12 @@ object ExternalTools {
         val body = listOf("text", "message", "title", "summary", "query").firstNotNullOfOrNull { key ->
             args.optString(key).takeIf { it.isNotBlank() }
         }
+        // Name the destination so the user can catch a wrong channel or page before approving.
+        val channel = args.keys().asSequence().firstOrNull { it.contains("channel") }?.let { args.optString(it) }?.takeIf { it.isNotBlank() }
+        val page = args.optString("page_title").takeIf { it.isNotBlank() }
         val headline = when {
-            name.startsWith("slack_") -> "슬랙에 이 메시지를 보낼까요?"
-            name.startsWith("notion_") -> "노션에 이 내용을 추가할까요?"
+            name.startsWith("slack_") -> if (channel != null) "슬랙 $channel 에 이 메시지를 보낼까요?" else "슬랙에 이 메시지를 보낼까요?"
+            name.startsWith("notion_") -> if (page != null) "노션 '$page' 페이지에 이 내용을 추가할까요?" else "노션에 이 내용을 추가할까요?"
             name.startsWith("gcal_") -> "구글 캘린더에 반영할까요?"
             else -> "${title(name) ?: name}, 실행할까요?"
         }

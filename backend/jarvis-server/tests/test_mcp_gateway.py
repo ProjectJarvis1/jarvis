@@ -169,3 +169,25 @@ def test_changed_account_token_restarts_connection(tmp_path, monkeypatch):
         await gw.stop()
 
     asyncio.run(run())
+
+
+def test_timed_out_write_is_marked_uncertain_not_retryable(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_TOKEN", "tok")
+    cfg = _config(tmp_path)
+    cfg["fake"].tools["slow_tool"].confirm = True  # 쓰기 도구처럼
+
+    class _Conn:
+        ready = asyncio.Event()
+
+        async def call(self, name, args):
+            raise g.SentRequestError(TimeoutError("늦음"))
+
+    async def run():
+        gw = g.McpGateway(cfg, lambda _: None)
+        gw.connections["fake"] = _Conn()
+        write = await gw.call("slow_tool", {})
+        assert write["is_error"] and write["uncertain"] and "다시 보내지 말고" in write["error"]
+        read = await gw.call("notion_search", {"query": "x"})
+        assert read["is_error"] and not read.get("uncertain")
+
+    asyncio.run(run())

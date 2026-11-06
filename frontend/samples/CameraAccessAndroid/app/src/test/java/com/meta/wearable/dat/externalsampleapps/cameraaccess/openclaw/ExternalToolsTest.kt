@@ -34,7 +34,8 @@ class ExternalToolsTest {
 
     @Test fun previewShowsWhatWillBeSent() {
         ExternalTools.load(body)
-        assertEquals("슬랙에 이 메시지를 보낼까요?\n내일 회의 10시로 변경", ExternalTools.preview("slack_send_message", """{"text":"내일 회의 10시로 변경","channel_id":"C1"}"""))
+        assertEquals("슬랙 C1 에 이 메시지를 보낼까요?\n내일 회의 10시로 변경", ExternalTools.preview("slack_send_message", """{"text":"내일 회의 10시로 변경","channel_id":"C1"}"""))
+        assertEquals("노션 '회의록' 페이지에 이 내용을 추가할까요?\n메모", ExternalTools.preview("notion_append_note", """{"page_id":"p1","page_title":"회의록","text":"메모"}"""))
         assertEquals("슬랙에 이 메시지를 보낼까요?", ExternalTools.preview("slack_send_message", "{}"))
     }
 

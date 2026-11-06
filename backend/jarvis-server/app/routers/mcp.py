@@ -121,8 +121,9 @@ async def jsonrpc(body: JsonRpcRequest):
         user_id = body.params.get("user_id") or "default"
         result = await _call(name, arguments, user_id)
         if result.get("is_error") and result.get("error", "").startswith("unknown tool"):
-            return {"jsonrpc": "2.0", "id": body.id, "error": {"code": -32602, "message": result["error"]}}
-        if result.get("is_error"):
+            return JSONResponse(status_code=404, content={"jsonrpc": "2.0", "id": body.id,
+                                                          "error": {"code": -32602, "message": result["error"]}})
+        if result.get("is_error") and not result.get("uncertain"):
             # 실패는 2xx 가 아니게 돌려준다. 앱이 끊긴 요청을 나중에 복구할 때 HTTP 코드만 보고 완료로 기록하지 않게.
             # (같은 키의 실패 응답은 저장하지 않으므로, 실패한 쓰기는 다시 시도할 수 있다.)
             return JSONResponse(status_code=422, content={"jsonrpc": "2.0", "id": body.id, "error": {

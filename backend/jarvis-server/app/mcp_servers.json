@@ -28,11 +28,12 @@
           "description": "사용자가 노션 페이지에 내용을 적어 달라고 할 때, notion_search로 찾은 페이지 끝에 문단을 덧붙입니다. 앱이 실행 전에 사용자 확인을 받습니다.",
           "parameters": {"type": "object", "properties": {
             "page_id": {"type": "string", "description": "notion_search 결과의 id"},
+            "page_title": {"type": "string", "description": "그 페이지의 제목(notion_search 결과의 title). 확인 카드에 보여 줍니다"},
             "text": {"type": "string", "description": "덧붙일 내용"}
-          }, "required": ["page_id", "text"]},
+          }, "required": ["page_id", "page_title", "text"]},
           "build": "notion_append",
           "confirm": true,
-          "preview": "노션 페이지에 이 내용을 추가할까요?\n{text}"
+          "preview": "노션 '{page_title}' 페이지에 이 내용을 추가할까요?\n{text}"
         }
       }
     },

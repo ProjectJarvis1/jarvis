@@ -318,7 +318,21 @@ class _Connection:
             raise RuntimeError(f"{self.cfg.name} 에 연결하지 못했습니다. {self.error or ''}".strip())
         future = asyncio.get_running_loop().create_future()
         await self._queue.put((name, arguments, future))
-        return await asyncio.wait_for(future, CALL_TIMEOUT_S + 2)
+        try:
+            # 실행 시간 제한은 연결 작업이 꺼낸 뒤에 건다. 여기서는 앞 요청을 기다리는 시간까지 넉넉히 둔다.
+            return await asyncio.wait_for(future, CALL_TIMEOUT_S * 3)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            raise SentRequestError(exc) from exc
+
+
+class SentRequestError(Exception):
+    """외부 서버에 요청을 넘긴 뒤 실패. 상대 쪽에서는 실행됐을 수도 있다."""
+
+    def __init__(self, cause: BaseException):
+        super().__init__(_short_error(cause))
+        self.cause = cause
 
 
 def _short_error(exc: BaseException) -> str:
@@ -419,7 +433,7 @@ class McpGateway:
                 return tool.preview.format(**arguments)
             except (KeyError, IndexError, ValueError):
                 pass
-        shown = "\n".join(f"{k}: {v}" for k, v in arguments.items() if k not in ("page_id", "channel_id"))
+        shown = "\n".join(f"{k}: {v}" for k, v in arguments.items() if k != "page_id")
         return f"{tool.title}을(를) 실행할까요?\n{shown}".strip()
 
     async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -436,6 +450,12 @@ class McpGateway:
         args = {**tool.fixed, **args}
         try:
             result = await self.connections[tool.server].call(tool.upstream, args)
+        except SentRequestError as exc:
+            if tool.confirm:
+                # 보냈는지 모르는 쓰기는 다시 실행하면 두 번 갈 수 있다. 성공 응답(200)으로 기록해 자동 재시도를 막는다.
+                return {"is_error": True, "uncertain": True,
+                        "error": f"{tool.title} 응답을 받지 못해 실행됐는지 확인하지 못했습니다. 다시 보내지 말고, 사용자에게 직접 확인해 달라고 안내하세요. ({exc})"}
+            return {"is_error": True, "error": f"{tool.title} 실패: {exc}"}
         except Exception as exc:
             return {"is_error": True, "error": f"{tool.title} 실패: {_short_error(exc)}"}
         text, is_error = _content_text(result)
