@@ -225,7 +225,7 @@ class GeminiLiveService {
         }
     }
 
-    fun sendTextMessage(text: String, isValid: () -> Boolean = { true }) {
+    fun sendTextMessage(text: String, isValid: () -> Boolean = { true }, onSent: () -> Unit = {}) {
         if (_connectionState.value != GeminiConnectionState.Ready) return
         val destination = webSocket ?: return
         sendExecutor.execute {
@@ -241,7 +241,7 @@ class GeminiLiveService {
                     put("turnComplete", true)
                 })
             }
-            destination.send(json.toString())
+            if (destination.send(json.toString())) onSent()
         }
     }
 

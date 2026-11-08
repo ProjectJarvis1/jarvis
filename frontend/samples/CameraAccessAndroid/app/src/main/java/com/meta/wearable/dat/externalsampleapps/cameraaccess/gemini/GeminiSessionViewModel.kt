@@ -125,11 +125,17 @@ class GeminiSessionViewModel : ViewModel() {
     // Proactive business-card offer: the phone reads the view itself; Jarvis asks before anything is saved.
     @Volatile private var pendingCardFrame: Pair<VisualMemoryFrameStore.VisualFrame, Long>? = null
     @Volatile private var cardOfferRunning = false
+    private var cardOfferJob: Job? = null
     /** Set by the conversation screen: no card offers while a meeting is being recorded. */
     var cardOfferPaused: () -> Boolean = { false }
     private val cardWatcher = BusinessCardWatcher(
         enabled = { SettingsManager.businessCardOfferEnabled && liveConversation && _uiState.value.isGeminiActive && !cardOfferPaused() },
-        onCard = { card, bitmap -> viewModelScope.launch { offerBusinessCard(card, bitmap) } },
+        onCard = { card, bitmap ->
+            viewModelScope.launch {
+                if (cardOfferJob?.isActive == true) return@launch
+                cardOfferJob = launch { offerBusinessCard(card, bitmap) }
+            }
+        },
     )
     private var stateObservationJob: Job? = null
     private var reconnectJob: Job? = null
@@ -584,6 +590,9 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     fun stopSession(userInitiated: Boolean) {
+        cardOfferJob?.cancel()
+        cardOfferJob = null
+        pendingCardFrame = null
         if (userInitiated) {
             userRequestedStop = true
         }
@@ -1098,9 +1107,11 @@ class GeminiSessionViewModel : ViewModel() {
             System.currentTimeMillis() - lastInputAt < 2_500L) return
         cardOfferRunning = true
         try {
-            pendingCardFrame = withContext(Dispatchers.Default) {
+            val encoded = withContext(Dispatchers.Default) {
                 VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "business_card_sighting")
-            } to SystemClock.elapsedRealtime()
+            }
+            if (!_uiState.value.isGeminiActive) return
+            pendingCardFrame = encoded to SystemClock.elapsedRealtime()
             val task = runCatching {
                 taskManager.submit("capture_current_view", JSONObject().put("reason", "명함 자동 감지").put("card_offer", true).toString(), "명함 사진")
             }.getOrElse { pendingCardFrame = null; return }
@@ -1112,9 +1123,10 @@ class GeminiSessionViewModel : ViewModel() {
                 delay(200L)
             }
             val captured = done?.takeIf { it.state == TaskState.COMPLETED } ?: return
+            if (!_uiState.value.isGeminiActive) return
             announcedTasks.add("${captured.id}:${captured.revision}")
-            val intro = if (!SettingsManager.businessCardOfferIntroShown) {
-                SettingsManager.businessCardOfferIntroShown = true
+            val firstTime = !SettingsManager.businessCardOfferIntroShown
+            val intro = if (firstTime) {
                 " 이번이 처음이니 질문 앞에 '명함이 보이면 이렇게 먼저 여쭤볼게요. 설정에서 끌 수 있어요.'라고 한 번만 덧붙이세요."
             } else ""
             val who = listOfNotNull(card.name?.let { "$it 님" }, card.org).joinToString(", ").ifBlank { "알 수 없음" }
@@ -1124,8 +1136,12 @@ class GeminiSessionViewModel : ViewModel() {
                     "get_task_result로 사진을 직접 확인하세요. 명함이 맞으면 사용자에게 '홍길동 님 명함이 보이네요. 저장할까요?'처럼 이름을 넣어 한 문장으로만 물어보세요.$intro " +
                     "명함이 아니면 아무 말도 하지 마세요. 사용자가 승인하면 이 사진(source_task_id, source_revision)으로 save_life_memory를 호출하고 labels에 business_card, document를 넣으세요. " +
                     "사용자가 거절하거나 다른 이야기를 하면 다시 묻지 마세요."
-            ) { _uiState.value.isGeminiActive && System.currentTimeMillis() - lastInputAt >= 2_500L }
-            cardWatcher.markOffered(card)
+                , isValid = { _uiState.value.isGeminiActive && System.currentTimeMillis() - lastInputAt >= 2_500L },
+            ) {
+                // Only a question that actually went out counts: a dropped one may be asked again soon.
+                cardWatcher.markOffered(card)
+                if (firstTime) SettingsManager.businessCardOfferIntroShown = true
+            }
         } finally {
             cardOfferRunning = false
         }
