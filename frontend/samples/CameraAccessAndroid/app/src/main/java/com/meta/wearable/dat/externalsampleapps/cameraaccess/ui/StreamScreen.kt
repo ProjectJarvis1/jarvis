@@ -92,6 +92,8 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.WakeWordMoni
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.WakeWordTrialLog
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingFollowups
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.BriefingSpeaker
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.MeetingBriefer
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingVoiceCommand
@@ -103,6 +105,8 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMod
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -270,9 +274,43 @@ fun StreamScreen(
         }
     }
 
+    // Meeting briefing: every minute, brief meetings 5 to 12 minutes away. Collected outside the lifecycle
+    // so it runs with the screen off; Jarvis says it in a conversation, otherwise the phone's own
+    // voice does over the glasses, and a notification keeps the full text either way.
+    val calendarPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
+    ) { }
+    LaunchedEffect(Unit) {
+        if (SettingsManager.meetingBriefingEnabled && !MeetingBriefer.hasCalendarPermission(context)) {
+            calendarPermission.launch(android.Manifest.permission.READ_CALENDAR)
+        }
+    }
+    val speaker = remember(context) { BriefingSpeaker(context.applicationContext) }
+    LaunchedEffect(Unit) {
+        val app = context.applicationContext
+        while (true) {
+            if (SettingsManager.meetingBriefingEnabled) {
+                val due = withContext(Dispatchers.IO) { runCatching { MeetingBriefer.due(app) }.getOrDefault(emptyList()) }
+                due.forEach { (meeting, brief) ->
+                    JarvisNotifications.post(app, meeting.key.hashCode(), "곧 시작: ${meeting.title}", brief.detail)
+                    geminiViewModel.announce(
+                        "[앱 알림] 곧 시작하는 일정 브리핑입니다. 아래 내용을 그대로 짧게 전해 주세요. " +
+                            "여기에 없는 내용은 덧붙이지 말고, 날짜는 기록된 날짜 그대로 말하세요.\n" + brief.spoken,
+                    ) {
+                        // No conversation to speak through: the phone reads it, unless a conversation is
+                        // running but busy, where a second voice would talk over it.
+                        if (!geminiViewModel.uiState.value.isGeminiActive) speaker.speak(brief.spoken)
+                    }
+                }
+            }
+            delay(60_000L)
+        }
+    }
+
     // Clean up on exit
     DisposableEffect(Unit) {
         onDispose {
+            speaker.release()
             StreamingService.stop(context.applicationContext, StreamingService.REASON_LISTEN)
             wakeWordMonitor.release()
             if (geminiUiState.isGeminiActive) {

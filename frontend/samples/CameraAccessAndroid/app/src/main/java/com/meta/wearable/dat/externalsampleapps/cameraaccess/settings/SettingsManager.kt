@@ -100,6 +100,11 @@ object SettingsManager {
         set(value) = prefs.edit().putBoolean("videoStreamingEnabled", value).apply()
 
     /** When a business card comes into view, Jarvis asks whether to save it (nothing is saved without a yes). */
+    /** Brief the user on the glasses a few minutes before a calendar meeting. */
+    var meetingBriefingEnabled: Boolean
+        get() = prefs.getBoolean("meetingBriefingEnabled", true)
+        set(value) = prefs.edit().putBoolean("meetingBriefingEnabled", value).apply()
+
     /** Keep listening for "자비스" with the screen off (a microphone foreground service). */
     var backgroundWakeWordEnabled: Boolean
         get() = prefs.getBoolean("backgroundWakeWordEnabled", true)

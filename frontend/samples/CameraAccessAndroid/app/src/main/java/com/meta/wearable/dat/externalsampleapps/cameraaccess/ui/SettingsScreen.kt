@@ -83,6 +83,7 @@ fun SettingsScreen(
     var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
     var cardOfferEnabled by remember { mutableStateOf(SettingsManager.businessCardOfferEnabled) }
     var backgroundWakeWordEnabled by remember { mutableStateOf(SettingsManager.backgroundWakeWordEnabled) }
+    var meetingBriefingEnabled by remember { mutableStateOf(SettingsManager.meetingBriefingEnabled) }
     var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
     var liveConversationEnabled by remember { mutableStateOf(SettingsManager.liveConversationEnabled) }
     var whisperSttEnabled by remember { mutableStateOf(SettingsManager.speechRecognizerProvider == "whisper") }
@@ -99,6 +100,7 @@ fun SettingsScreen(
         SettingsManager.videoStreamingEnabled = videoStreamingEnabled
         SettingsManager.businessCardOfferEnabled = cardOfferEnabled
         SettingsManager.backgroundWakeWordEnabled = backgroundWakeWordEnabled
+        SettingsManager.meetingBriefingEnabled = meetingBriefingEnabled
         SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
         SettingsManager.liveConversationEnabled = liveConversationEnabled
         SettingsManager.speechRecognizerProvider = if (whisperSttEnabled) "whisper" else "android"
@@ -113,6 +115,7 @@ fun SettingsScreen(
         videoStreamingEnabled = SettingsManager.videoStreamingEnabled
         cardOfferEnabled = SettingsManager.businessCardOfferEnabled
         backgroundWakeWordEnabled = SettingsManager.backgroundWakeWordEnabled
+        meetingBriefingEnabled = SettingsManager.meetingBriefingEnabled
         proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
         liveConversationEnabled = SettingsManager.liveConversationEnabled
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
@@ -120,7 +123,8 @@ fun SettingsScreen(
 
     // Tab navigation and system Back also persist edits, not only the toolbar Back button.
     LaunchedEffect(geminiAPIKey, systemPrompt, jarvisApiBase, jarvisApiKey, webrtcSignalingURL,
-        videoStreamingEnabled, cardOfferEnabled, backgroundWakeWordEnabled, proactiveNotificationsEnabled, liveConversationEnabled,
+        videoStreamingEnabled, cardOfferEnabled, backgroundWakeWordEnabled, meetingBriefingEnabled, proactiveNotificationsEnabled,
+        liveConversationEnabled,
         whisperSttEnabled) {
         save()
     }
@@ -158,6 +162,9 @@ fun SettingsScreen(
                 SettingSwitch("화면 꺼져도 '자비스' 듣기", "휴대폰을 주머니에 넣어도 불러서 대화할 수 있어요. 배터리를 더 써요.",
                     backgroundWakeWordEnabled) { backgroundWakeWordEnabled = it }
                 WakeWordTrialRows()
+                SettingSwitch("미팅 전 브리핑",
+                    "캘린더 일정 5~10분 전에 상대 정보와 지난 회의 내용을 글라스로 알려 줘요. 대화 화면이 열려 있어야 하고 캘린더 권한이 필요해요.",
+                    meetingBriefingEnabled) { meetingBriefingEnabled = it }
                 SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
                     videoStreamingEnabled) { videoStreamingEnabled = it }
                 SettingSwitch("명함 보이면 저장 제안", "명함이 보이면 Jarvis가 저장할지 먼저 물어요. 대답하기 전에는 저장하지 않아요.",
