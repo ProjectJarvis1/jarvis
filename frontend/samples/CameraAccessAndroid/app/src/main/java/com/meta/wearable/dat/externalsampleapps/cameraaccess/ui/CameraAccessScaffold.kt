@@ -40,7 +40,7 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
         }
     }
     LaunchedEffect(state.recentError) {
-        state.recentError?.let { snackbar.showSnackbar(it); viewModel.clearCameraPermissionError() }
+        state.recentError?.let { snackbar.showSnackbar(it, withDismissAction = true, duration = SnackbarDuration.Long); viewModel.clearCameraPermissionError() }
     }
     BackHandler(enabled = state.isMemoryVisible || state.isSettingsVisible) {
         viewModel.hideMemory(); viewModel.hideSettings()

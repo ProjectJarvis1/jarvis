@@ -26,6 +26,7 @@ import com.meta.wearable.dat.core.selectors.DeviceSelector
 import com.meta.wearable.dat.core.types.DeviceIdentifier
 import com.meta.wearable.dat.core.types.Permission
 import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.core.types.RegistrationError
 import com.meta.wearable.dat.core.types.RegistrationState
 import com.meta.wearable.dat.mockdevice.MockDeviceKit
 import kotlinx.collections.immutable.toImmutableList
@@ -75,6 +76,14 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
         _uiState.update {
           it.copy(registrationState = value, isGettingStartedSheetVisible = showGettingStartedSheet)
         }
+      }
+    }
+    // Registration happens inside the Meta AI app; when it fails there, say why and show the SDK's code
+    // so the cause can be looked up instead of guessed.
+    viewModelScope.launch {
+      Wearables.registrationErrorStream.collect { error ->
+        if (error == RegistrationError.ALREADY_REGISTERED || error == RegistrationError.ALREADY_UNREGISTERED) return@collect
+        setRecentError(registrationErrorMessage(error))
       }
     }
     // This automatically updates when devices are discovered, connected, or disconnected
@@ -199,6 +208,15 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
   fun clearCameraPermissionError() {
     _uiState.update { it.copy(recentError = null) }
+  }
+
+  private fun registrationErrorMessage(error: RegistrationError): String {
+    val guide = when (error) {
+      RegistrationError.META_AI_NOT_INSTALLED -> "Meta AI 앱이 없어요. 설치하고 글라스를 페어링한 뒤 다시 눌러 주세요."
+      RegistrationError.FAILED_TO_UNREGISTER -> "글라스 연결을 해제하지 못했어요. Meta AI 앱에서 직접 해제해 주세요."
+      else -> "Meta AI 앱에서 연결을 마치지 못했어요. Meta AI 앱을 최신으로 업데이트하고 개발자 모드가 켜져 있는지 확인해 주세요."
+    }
+    return "$guide (오류 코드 ${error.name})"
   }
 
   fun setRecentError(error: String) {
