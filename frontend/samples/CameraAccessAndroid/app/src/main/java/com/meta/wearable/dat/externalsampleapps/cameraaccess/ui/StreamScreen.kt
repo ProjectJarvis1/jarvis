@@ -77,6 +77,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -99,6 +101,9 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMod
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 @OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
@@ -126,8 +131,10 @@ fun StreamScreen(
     val meetingRecordingUiState by meetingRecordingViewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
+    // Wake word callbacks also fire with the screen off, when the lifecycle-collected states above are
+    // frozen, so they read the view models' live values.
     val currentStartWakeWordSession = rememberUpdatedState<(String) -> Unit>({ rawText ->
-        if (!meetingRecordingUiState.isRecording) {
+        if (!meetingRecordingViewModel.uiState.value.isRecording) {
             geminiViewModel.startSession(
                 wakeWordInitiated = true,
                 initialText = WakeWordMonitor.stripWakeWord(rawText),
@@ -137,17 +144,18 @@ fun StreamScreen(
     val currentHandleMeetingVoiceCommand = rememberUpdatedState<(MeetingVoiceCommand) -> Unit>({ command ->
         when (command) {
             MeetingVoiceCommand.START -> {
-                if (meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing) {
+                val meeting = meetingRecordingViewModel.uiState.value
+                if (meeting.isRecording || meeting.isProcessing) {
                     return@rememberUpdatedState
                 }
-                if (geminiUiState.isGeminiActive) {
+                if (geminiViewModel.uiState.value.isGeminiActive) {
                     geminiViewModel.stopSession()
                 }
                 meetingRecordingViewModel.startRecording()
                 Toast.makeText(context, "회의 시작하겠습니다.", Toast.LENGTH_SHORT).show()
             }
             MeetingVoiceCommand.STOP -> {
-                if (!meetingRecordingUiState.isRecording) {
+                if (!meetingRecordingViewModel.uiState.value.isRecording) {
                     return@rememberUpdatedState
                 }
                 meetingRecordingViewModel.stopAndProcess()
@@ -221,24 +229,35 @@ fun StreamScreen(
         }
     }
 
-    LaunchedEffect(geminiUiState.isGeminiActive, meetingRecordingUiState.isProcessing) {
-        if (!geminiUiState.isGeminiActive && !meetingRecordingUiState.isProcessing) {
-            wakeWordMonitor.start()
-        } else {
-            wakeWordMonitor.stop()
-        }
+    // Collected directly, not through the lifecycle-aware state: with the screen locked the wake word
+    // must still pause for a conversation and resume when it ends.
+    LaunchedEffect(geminiViewModel, meetingRecordingViewModel) {
+        combine(
+            geminiViewModel.uiState.map { it.isGeminiActive },
+            meetingRecordingViewModel.uiState.map { it.isProcessing },
+        ) { gemini, processing -> !gemini && !processing }
+            .distinctUntilChanged()
+            .collect { idle -> if (idle) wakeWordMonitor.start() else wakeWordMonitor.stop() }
     }
 
     // Hold the foreground service (and, when enabled, the microphone) for as long as this screen is
     // open, so "자비스" still works with the screen off. Re-applied whenever the screen comes back
     // from Settings: the microphone type can only be granted while the app is visible.
-    LaunchedEffect(isForeground) {
-        if (!isForeground) return@LaunchedEffect
+    // Also on every real return to the app (ON_RESUME), e.g. after granting the microphone in system settings.
+    val currentIsForeground = rememberUpdatedState(isForeground)
+    fun holdListening() {
+        if (!currentIsForeground.value) return
         val app = context.applicationContext
         WakeWordTrialLog.update(app) { it.started(System.currentTimeMillis(), WakeWordTrialLog.battery(app)) }
         if (!StreamingService.start(app, StreamingService.REASON_LISTEN, SettingsManager.backgroundWakeWordEnabled)) {
             WakeWordTrialLog.update(app) { it.copy(serviceNote = "백그라운드 대기 서비스를 시작하지 못했어요.") }
         }
+    }
+    LaunchedEffect(isForeground) { holdListening() }
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) holdListening() }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Clean up on exit
