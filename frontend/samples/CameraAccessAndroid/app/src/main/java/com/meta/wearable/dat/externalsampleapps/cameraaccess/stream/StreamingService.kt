@@ -40,6 +40,8 @@ class StreamingService : Service() {
     @Volatile private var withMicrophone = false
     /** The service is up in the foreground; set by the service itself. */
     @Volatile private var running = false
+    /** The running service actually holds the microphone type (asking is not getting). */
+    @Volatile private var micGranted = false
 
     /**
      * Holds the service for [reason]. [microphone] (null = leave as is) asks for background microphone
@@ -48,9 +50,12 @@ class StreamingService : Service() {
     fun start(context: Context, reason: String = REASON_STREAM, microphone: Boolean? = null): Boolean {
       val alreadyRunning = synchronized(reasons) {
         val micChanged = microphone != null && microphone != withMicrophone
+        // A visible caller may retry a microphone request that the last start could not fulfil
+        // (permission granted since, or the first start happened from the background).
+        val micRetry = microphone == true && !micGranted
         reasons += reason
         if (microphone != null) withMicrophone = microphone
-        running && !micChanged
+        running && !micChanged && !micRetry
       }
       // Joining a running service needs no new start: a start from a pocket would have to call
       // startForeground again, and Android 14 refuses the microphone type from the background.
@@ -72,7 +77,7 @@ class StreamingService : Service() {
       val empty = synchronized(reasons) {
         reasons -= reason
         if (reason == REASON_LISTEN) withMicrophone = false
-        reasons.isEmpty().also { if (it) running = false }
+        reasons.isEmpty().also { if (it) { running = false; micGranted = false } }
       }
       if (empty) {
         context.stopService(Intent(context, StreamingService::class.java).apply { `package` = context.packageName })
@@ -94,8 +99,6 @@ class StreamingService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     Log.d(TAG, "Service started")
 
-    val notification = createNotification()
-
     val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
     val microphone = withMicrophone && hasMicPermission()
     // Already in the foreground with the right microphone state: a second start (the glasses stream
@@ -116,6 +119,7 @@ class StreamingService : Service() {
       add(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
     }
     val granted = candidates.firstOrNull { type ->
+      val notification = createNotification(type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE != 0)
       runCatching { startForeground(NOTIFICATION_ID, notification, type) }
           .onFailure { Log.w(TAG, "Foreground type $type refused: ${it.message}") }
           .isSuccess
@@ -126,7 +130,7 @@ class StreamingService : Service() {
     }
     currentType = granted
     running = true
-    val micGranted = granted and ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE != 0
+    micGranted = granted and ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE != 0
     noteMicrophone(
         when {
           micGranted -> null
@@ -144,6 +148,7 @@ class StreamingService : Service() {
   override fun onDestroy() {
     Log.d(TAG, "Service destroyed")
     running = false
+    micGranted = false
     releaseWakeLock()
     super.onDestroy()
   }
@@ -166,7 +171,7 @@ class StreamingService : Service() {
     }
   }
 
-  private fun createNotification(): Notification {
+  private fun createNotification(listening: Boolean): Notification {
     val pendingIntent =
         PendingIntent.getActivity(
             this,
@@ -180,8 +185,11 @@ class StreamingService : Service() {
     return NotificationCompat.Builder(this, CHANNEL_ID)
         .setContentTitle("Jarvis 대기 중")
         .setContentText(
-            if (withMicrophone) "'자비스'라고 부르면 대답해요. 화면이 꺼져 있어도 들어요."
-            else "글라스와 연결돼 있어요.",
+            when {
+              listening -> "'자비스'라고 부르면 대답해요. 화면이 꺼져 있어도 들어요."
+              withMicrophone -> "백그라운드 듣기를 시작하지 못했어요. 앱에서 마이크 권한을 확인해 주세요."
+              else -> "글라스와 연결돼 있어요."
+            },
         )
         .setSmallIcon(R.drawable.ic_launcher_foreground)
         .setOngoing(true)

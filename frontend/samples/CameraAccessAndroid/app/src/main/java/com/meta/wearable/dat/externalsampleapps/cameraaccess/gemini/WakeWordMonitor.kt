@@ -53,6 +53,9 @@ class WakeWordMonitor(
         }
         mainHandler.post {
             if (isRunning || released || !wanted) return@post
+            // A detection that stopped the last session may never get its terminal callback.
+            wakeWordFired = false
+            consecutiveFailures = 0
             createRecognizer()
             listen()
         }
