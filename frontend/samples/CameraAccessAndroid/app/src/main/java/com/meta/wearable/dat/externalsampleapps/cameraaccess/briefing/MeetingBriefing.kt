@@ -65,8 +65,13 @@ object MeetingBriefing {
         // distinctive title word: "견적" alone would pull in another company's quote meeting.
         val names = attendeeNames(meeting)
         val titleWords = titleWords(meeting)
+        // With invited attendees, only they are "the other side"; a company search also returns their
+        // colleagues, who are not stated as attending. Without attendees, people found through the title
+        // are mentioned as unconfirmed.
+        val confirmed = names.isNotEmpty()
         val persons = people.filter { p ->
-            names.any { it == p.name } || titleWords.any { w -> p.name == w || (p.org.isNotBlank() && p.org.contains(w, ignoreCase = true)) }
+            if (confirmed) names.any { it == p.name }
+            else titleWords.any { w -> p.name == w || (p.org.isNotBlank() && p.org.contains(w, ignoreCase = true)) }
         }.distinctBy { listOf(it.name, it.org) }.take(3)
         val anchors = (names + persons.map { it.org }).filter { it.length >= 2 }.distinct()
         fun about(vararg texts: String) =
@@ -87,7 +92,11 @@ object MeetingBriefing {
         persons.take(2).forEach { p ->
             val who = listOf(p.org, p.role).filter { it.isNotBlank() }.joinToString(" ")
             val met = day(p.lastMetAt)?.let { " 마지막으로 만난 날은 ${it}이에요." } ?: ""
-            spoken += (if (who.isNotEmpty()) "상대는 $who ${p.name} 님이에요." else "${p.name} 님 정보가 있어요.") + met
+            spoken += when {
+                !confirmed -> "참석자는 확인되지 않았는데, 저장된 사람 중에 ${listOf(who, p.name).filter { it.isNotBlank() }.joinToString(" ")} 님이 있어요."
+                who.isNotEmpty() -> "상대는 $who ${p.name} 님이에요."
+                else -> "${p.name} 님 정보가 있어요."
+            } + met
             detail += "${p.name}: ${who.ifEmpty { "소속 정보 없음" }}" +
                 (day(p.lastMetAt)?.let { ", 마지막 만남 $it" } ?: "") + (p.notes.takeIf { it.isNotBlank() }?.let { ", 메모 ${it.take(80)}" } ?: "")
         }

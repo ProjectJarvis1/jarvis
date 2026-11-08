@@ -596,13 +596,13 @@ class GeminiSessionViewModel : ViewModel() {
      * playing, no tool running) so it never cuts into an exchange; with no ready conversation, or no
      * quiet moment in time, [fallback] runs instead (a phone notification).
      */
-    fun announce(text: String, waitMs: Long = 45_000L, fallback: () -> Unit) {
+    fun announce(text: String, waitMs: Long = 45_000L, stillWanted: () -> Boolean = { true }, fallback: () -> Unit) {
         viewModelScope.launch {
             // Local speech recognition does not report a question in progress, so only the live
             // conversation, whose input transcription moves lastInputAt, gets spoken notices.
             fun ready(): Boolean {
                 val state = _uiState.value
-                return liveConversation && state.isGeminiActive && state.connectionState == GeminiConnectionState.Ready
+                return stillWanted() && liveConversation && state.isGeminiActive && state.connectionState == GeminiConnectionState.Ready
             }
             // Quiet means: nobody spoke for 5s (long enough for a reply to start), nothing playing or
             // running, and no confirmation pending, whose "네" a new question would otherwise capture.
@@ -632,7 +632,7 @@ class GeminiSessionViewModel : ViewModel() {
                 if (System.currentTimeMillis() > deadline) break
                 delay(1_000L)
             }
-            fallback()
+            if (stillWanted()) fallback()
         }
     }
 

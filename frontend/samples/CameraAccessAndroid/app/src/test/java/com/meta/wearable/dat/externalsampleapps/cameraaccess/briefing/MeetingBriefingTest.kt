@@ -38,6 +38,8 @@ class MeetingBriefingTest {
         assertTrue(brief.spoken.contains("10월 2일 회의에서는 견적 조건을 논의했다."))
         assertTrue(brief.spoken.contains("견적서 보내기"))
         assertFalse(brief.spoken.contains("김철수"))      // semantic hit that never names anyone in the meeting
+        val colleague = MeetingBriefing.compose(meeting, listOf(PersonHit("김철수", "한빛산업", "개발팀장")), emptyList(), emptyList(), now)
+        assertFalse(colleague.spoken.contains("김철수"))  // same company, not invited
         assertFalse(brief.spoken.contains("주간 회의"))
     }
 
