@@ -28,14 +28,22 @@ object MeetingBriefer {
     fun hasCalendarPermission(context: Context) =
         context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
 
-    /** Briefings for meetings that are now 5 to 12 minutes away and were not briefed yet. Call off the main thread. */
+    /**
+     * Briefings for meetings that are now 5 to 12 minutes away and were not delivered yet. Call off the
+     * main thread, then [markDelivered] each one once its notification is posted: a poll cancelled midway
+     * (the screen closed during a slow search) leaves the meeting to be briefed on the next poll.
+     */
     fun due(context: Context, nowMs: Long = System.currentTimeMillis()): List<Pair<UpcomingMeeting, Brief>> {
         if (!hasCalendarPermission(context)) return emptyList()
-        val claimed = dedupe(context)
+        val delivered = dedupe(context)
         return upcoming(context, nowMs)
-            .filter { MeetingBriefing.isDue(it, nowMs) }
-            .filter { claimed.claim(it.key, nowMs).also { ok -> if (ok) save(context, claimed) } }
+            .filter { MeetingBriefing.isDue(it, nowMs) && !delivered.contains(it.key, nowMs) }
             .map { meeting -> meeting to brief(meeting, nowMs) }
+    }
+
+    fun markDelivered(context: Context, key: String) {
+        val delivered = dedupe(context)
+        if (delivered.claim(key, System.currentTimeMillis())) save(context, delivered)
     }
 
     private fun brief(meeting: UpcomingMeeting, nowMs: Long): Brief {

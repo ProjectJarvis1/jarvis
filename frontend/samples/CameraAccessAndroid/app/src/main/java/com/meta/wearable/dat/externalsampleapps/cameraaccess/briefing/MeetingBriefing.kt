@@ -41,14 +41,16 @@ object MeetingBriefing {
     /** Briefed once when the start is 5 to 12 minutes away; the scheduler polls every minute. */
     fun isDue(meeting: UpcomingMeeting, nowMs: Long): Boolean = meeting.beginMs - nowMs in LEAD_MIN_MS..LEAD_MAX_MS
 
-    /** Words a stored record must contain to be about this meeting. */
-    fun keys(meeting: UpcomingMeeting): List<String> {
-        val names = meeting.attendees.map { it.trim().removeSuffix("님").trim() }.filter { it.length >= 2 && '@' !in it }
-        val titleWords = meeting.title.split(Regex("""[\s,/()\[\]·:|-]+"""))
-            .map { it.trim().removeSuffix("님").removeSuffix("과").removeSuffix("와") }
-            .filter { it.length >= 2 && it.lowercase() !in STOP_WORDS && !it.all(Char::isDigit) }
-        return (names + titleWords).distinct()
-    }
+    /** Words to search the server with: attendee names, then distinctive title words. */
+    fun keys(meeting: UpcomingMeeting): List<String> = (attendeeNames(meeting) + titleWords(meeting)).distinct()
+
+    private fun attendeeNames(meeting: UpcomingMeeting) =
+        meeting.attendees.map { it.trim().removeSuffix("님").trim() }.filter { it.length >= 2 && '@' !in it }.distinct()
+
+    private fun titleWords(meeting: UpcomingMeeting) = meeting.title.split(Regex("""[\s,/()\[\]·:|-]+"""))
+        .map { it.trim().removeSuffix("님").removeSuffix("과").removeSuffix("와") }
+        .filter { it.length >= 2 && it.lowercase() !in STOP_WORDS && !it.all(Char::isDigit) }
+        .distinct()
 
     fun compose(
         meeting: UpcomingMeeting,
@@ -57,9 +59,19 @@ object MeetingBriefing {
         memories: List<MemoryHit>,
         nowMs: Long,
     ): Brief {
-        val keys = keys(meeting)
-        fun about(vararg texts: String) = keys.any { key -> texts.any { it.contains(key, ignoreCase = true) } }
-        val persons = people.filter { about(it.name, it.org) }.distinctBy { listOf(it.name, it.org) }.take(3)
+        // Search is by meaning, so a hit must name someone in this meeting. A person counts when their
+        // name is an attendee's, or a title word is their name or company. A past meeting or a note
+        // counts when it names an attendee or one of those companies, or, failing that, every
+        // distinctive title word: "견적" alone would pull in another company's quote meeting.
+        val names = attendeeNames(meeting)
+        val titleWords = titleWords(meeting)
+        val persons = people.filter { p ->
+            names.any { it == p.name } || titleWords.any { w -> p.name == w || (p.org.isNotBlank() && p.org.contains(w, ignoreCase = true)) }
+        }.distinctBy { listOf(it.name, it.org) }.take(3)
+        val anchors = (names + persons.map { it.org }).filter { it.length >= 2 }.distinct()
+        fun about(vararg texts: String) =
+            anchors.any { a -> texts.any { it.contains(a, ignoreCase = true) } } ||
+                (titleWords.isNotEmpty() && titleWords.all { w -> texts.any { it.contains(w, ignoreCase = true) } })
         val pastMeetings = meetings.filter { about(it.title, it.summary) }.sortedByDescending { it.startedAt }.take(2)
         val notes = memories.filter { about(it.text, it.peopleText) }.take(1)
 
@@ -97,12 +109,14 @@ object MeetingBriefing {
         return Brief(spoken.joinToString(" ").replace("자비스", ""), detail.joinToString("\n").replace("자비스", ""))
     }
 
+    /** Up to the first sentence end (". " or end of text; "1.5억" is not an end), at most about 90 characters. */
     private fun firstSentence(text: String): String {
         val t = text.trim().replace(Regex("""\s+"""), " ")
         if (t.isEmpty()) return ""
-        val end = Regex("""[.!?。]|다\s""").find(t)?.let { it.range.last + 1 } ?: t.length
-        val sentence = t.take(minOf(end, 90)).trim()
-        return if (sentence.endsWith(".") || sentence.endsWith("다")) sentence.trimEnd('.') + "." else "$sentence."
+        val end = Regex("""[.!?。](?=\s|$)""").find(t)?.range?.last?.plus(1) ?: t.length
+        var sentence = t.take(end)
+        if (sentence.length > 90) sentence = sentence.take(90).substringBeforeLast(' ', sentence.take(90)) + "…"
+        return if (sentence.last() in ".!?。…") sentence else "$sentence."
     }
 
     private fun day(iso: String): String? {
@@ -123,6 +137,12 @@ class BriefingDedupe(initial: Map<String, Long> = emptyMap(), private val keepMs
         if (key in seen) return false
         seen[key] = nowMs
         return true
+    }
+
+    @Synchronized
+    fun contains(key: String, nowMs: Long): Boolean {
+        seen.entries.removeIf { nowMs - it.value > keepMs }
+        return key in seen
     }
 
     @Synchronized

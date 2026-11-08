@@ -280,10 +280,16 @@ fun StreamScreen(
     val calendarPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
     ) { }
-    LaunchedEffect(Unit) {
-        if (SettingsManager.meetingBriefingEnabled && !MeetingBriefer.hasCalendarPermission(context)) {
-            calendarPermission.launch(android.Manifest.permission.READ_CALENDAR)
+    // Asked when the screen opens, and again the moment the switch is turned on in Settings.
+    DisposableEffect(Unit) {
+        fun askCalendar() {
+            if (SettingsManager.meetingBriefingEnabled && !MeetingBriefer.hasCalendarPermission(context)) {
+                calendarPermission.launch(android.Manifest.permission.READ_CALENDAR)
+            }
         }
+        askCalendar()
+        val unobserve = SettingsManager.observe("meetingBriefingEnabled") { askCalendar() }
+        onDispose { unobserve() }
     }
     val speaker = remember(context) { BriefingSpeaker(context.applicationContext) }
     LaunchedEffect(Unit) {
@@ -293,13 +299,18 @@ fun StreamScreen(
                 val due = withContext(Dispatchers.IO) { runCatching { MeetingBriefer.due(app) }.getOrDefault(emptyList()) }
                 due.forEach { (meeting, brief) ->
                     JarvisNotifications.post(app, meeting.key.hashCode(), "곧 시작: ${meeting.title}", brief.detail)
+                    MeetingBriefer.markDelivered(app, meeting.key)
                     geminiViewModel.announce(
                         "[앱 알림] 곧 시작하는 일정 브리핑입니다. 아래 내용을 그대로 짧게 전해 주세요. " +
                             "여기에 없는 내용은 덧붙이지 말고, 날짜는 기록된 날짜 그대로 말하세요.\n" + brief.spoken,
                     ) {
                         // No conversation to speak through: the phone reads it, unless a conversation is
                         // running but busy, where a second voice would talk over it.
-                        if (!geminiViewModel.uiState.value.isGeminiActive) speaker.speak(brief.spoken)
+                        // During a meeting recording only the notification is left: a voice would interrupt
+                        // the meeting and end up in its recording.
+                        if (!geminiViewModel.uiState.value.isGeminiActive && !meetingRecordingViewModel.uiState.value.isRecording) {
+                            speaker.speak(brief.spoken)
+                        }
                     }
                 }
             }

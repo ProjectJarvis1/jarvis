@@ -51,6 +51,18 @@ class MeetingBriefingTest {
     }
 
     @Test
+    fun sharedTopicWordAloneDoesNotLinkAnotherCompanysMeeting() {
+        val brief = MeetingBriefing.compose(meeting, emptyList(),
+            listOf(MeetingHit("다른회사 견적 회의", "2026-10-05T01:00:00Z", "다른회사는 견적을 3억으로 받았다.")), emptyList(), now)
+        assertFalse(brief.spoken.contains("다른회사"))
+        // With no attendees, every distinctive title word must appear.
+        val titleOnly = meeting.copy(attendees = emptyList())
+        val linked = MeetingBriefing.compose(titleOnly, emptyList(),
+            listOf(MeetingHit("한빛산업 견적 검토", "2026-10-05T01:00:00Z", "예산을 1.5억원으로 정했다. 납기는 다음 달.")), emptyList(), now)
+        assertTrue(linked.spoken.contains("10월 5일 회의에서는 예산을 1.5억원으로 정했다."))
+    }
+
+    @Test
     fun neverSpeaksTheWakeWord() {
         val brief = MeetingBriefing.compose(meeting.copy(title = "자비스 시연 미팅"), emptyList(), emptyList(), emptyList(), now)
         assertFalse(brief.spoken.contains("자비스"))
