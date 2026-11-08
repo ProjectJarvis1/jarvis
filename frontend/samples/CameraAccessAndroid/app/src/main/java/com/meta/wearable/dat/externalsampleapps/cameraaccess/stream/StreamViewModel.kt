@@ -172,7 +172,7 @@ class StreamViewModel(
                   streamingMode = StreamingMode.GLASSES,
                   streamSessionState = StreamState.STOPPED,
                   errorMessage =
-                      "글라스 영상이 시작되지 않았어요. 글라스와 Meta AI 앱 연결을 확인하고 다시 시도해 주세요. (오류 코드 START_TIMEOUT)",
+                      "[START_TIMEOUT] 글라스 영상이 시작되지 않았어요. 글라스와 Meta AI 앱 연결을 확인하고 다시 시도해 주세요.",
               )
             }
           }
