@@ -113,7 +113,9 @@ object MeetingBriefer {
     private fun searchPeople(query: String): List<PersonHit> = post("/people/search", JSONObject().put("query", query).put("top_k", 3))
         ?.let { arr -> (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.optJSONObject("person") } }
         ?.map { p ->
-            PersonHit(p.optString("name"), p.optNullable("org"), p.optNullable("role"), p.optNullable("last_met_at"), p.optNullable("notes_summary"))
+            val aliases = p.optJSONArray("aliases")
+            PersonHit(p.optString("name"), p.optNullable("org"), p.optNullable("role"), p.optNullable("last_met_at"),
+                p.optNullable("notes_summary"), (0 until (aliases?.length() ?: 0)).mapNotNull { aliases?.optString(it)?.takeIf(String::isNotBlank) })
         }.orEmpty()
 
     private fun searchMeetings(query: String): List<MeetingHit> = post("/meetings/search", JSONObject().put("query", query).put("top_k", 5))

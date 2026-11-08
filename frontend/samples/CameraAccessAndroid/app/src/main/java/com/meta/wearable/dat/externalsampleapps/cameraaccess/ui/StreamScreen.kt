@@ -323,17 +323,16 @@ fun StreamScreen(
                         "[앱 알림] 곧 시작하는 일정 브리핑입니다. 아래 내용을 그대로 짧게 전해 주세요. " +
                             "여기에 없는 내용은 덧붙이지 말고, 날짜는 기록된 날짜 그대로 말하세요.\n" + brief.spoken,
                         stillWanted = { SettingsManager.meetingBriefingEnabled },
-                        onSpoken = { MeetingBriefer.markDelivered(app, meeting.key); speaking.remove(meeting.key) },
+                        onSpoken = { MeetingBriefer.markDelivered(app, meeting.key) },
+                        onFinished = { speaking.remove(meeting.key) },
                     ) {
-                        speaking.remove(meeting.key)
                         // No conversation to speak through: the phone reads it, unless a conversation is
                         // running but busy, where a second voice would talk over it.
                         // During a meeting recording only the notification is left: a voice would interrupt
                         // the meeting and end up in its recording.
                         if (SettingsManager.meetingBriefingEnabled && !geminiViewModel.uiState.value.isGeminiActive &&
                             !meetingRecordingViewModel.uiState.value.isRecording) {
-                            speaker.speak(brief.spoken)
-                            MeetingBriefer.markDelivered(app, meeting.key)
+                            if (speaker.speak(brief.spoken)) MeetingBriefer.markDelivered(app, meeting.key)
                         }
                     }
                 }

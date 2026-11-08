@@ -601,9 +601,11 @@ class GeminiSessionViewModel : ViewModel() {
         waitMs: Long = 45_000L,
         stillWanted: () -> Boolean = { true },
         onSpoken: () -> Unit = {},
+        onFinished: () -> Unit = {},
         fallback: () -> Unit,
     ) {
         viewModelScope.launch {
+          try {
             // Local speech recognition does not report a question in progress, so only the live
             // conversation, whose input transcription moves lastInputAt, gets spoken notices.
             fun ready(): Boolean {
@@ -639,6 +641,10 @@ class GeminiSessionViewModel : ViewModel() {
                 delay(1_000L)
             }
             if (stillWanted()) fallback()
+          } finally {
+            // Always, delivered or cancelled, so the caller can clear its in-progress mark.
+            onFinished()
+          }
         }
     }
 

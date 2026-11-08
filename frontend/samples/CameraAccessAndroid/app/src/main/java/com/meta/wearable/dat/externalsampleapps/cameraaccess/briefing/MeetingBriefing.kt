@@ -14,7 +14,17 @@ data class UpcomingMeeting(
     val attendees: List<String> = emptyList(),
 )
 
-data class PersonHit(val name: String, val org: String = "", val role: String = "", val lastMetAt: String = "", val notes: String = "")
+data class PersonHit(
+    val name: String,
+    val org: String = "",
+    val role: String = "",
+    val lastMetAt: String = "",
+    val notes: String = "",
+    val aliases: List<String> = emptyList(),
+) {
+    /** The saved name and the other names the person goes by ("박부장"). */
+    val allNames: List<String> get() = (listOf(name) + aliases).filter { it.isNotBlank() }
+}
 data class MeetingHit(val title: String, val startedAt: String, val summary: String = "", val actionItems: List<String> = emptyList())
 data class MemoryHit(val text: String, val peopleText: String = "", val capturedAt: String = "")
 
@@ -70,11 +80,20 @@ object MeetingBriefing {
         // colleagues, who are not stated as attending. Without attendees, people found through the title
         // are mentioned as unconfirmed.
         val confirmed = names.isNotEmpty()
-        val persons = people.filter { p ->
-            if (confirmed) names.any { it == p.name }
-            else titleWords.any { w -> p.name == w || (p.org.isNotBlank() && p.org.contains(w, ignoreCase = true)) }
-        }.distinctBy { listOf(it.name, it.org) }.take(3)
-        val anchors = (names + persons.map { it.org }).filter { it.length >= 2 }.distinct()
+        val found = people.filter { p ->
+            if (confirmed) names.any { it in p.allNames }
+            else titleWords.any { w -> w in p.allNames || (p.org.isNotBlank() && p.org.contains(w, ignoreCase = true)) }
+        }.distinctBy { listOf(it.name, it.org) }
+        // Two saved people with one name: keep the one whose company is in the title; if that does not
+        // settle it, use neither, so another person's history is never read out as this one's.
+        val ambiguous = mutableListOf<String>()
+        val persons = found.groupBy { it.name }.flatMap { (name, same) ->
+            if (same.size == 1) same
+            else same.filter { p -> p.org.isNotBlank() && titleWords.any { p.org.contains(it, ignoreCase = true) } }
+                .takeIf { it.size == 1 } ?: run { ambiguous += name; emptyList() }
+        }.take(3)
+        val anchors = (names - ambiguous.toSet() + persons.flatMap { it.allNames } + persons.map { it.org })
+            .filter { it.length >= 2 }.distinct()
         fun about(vararg texts: String) =
             anchors.any { a -> texts.any { it.contains(a, ignoreCase = true) } } ||
                 (titleWords.isNotEmpty() && titleWords.all { w -> texts.any { it.contains(w, ignoreCase = true) } })
@@ -87,8 +106,9 @@ object MeetingBriefing {
         val spoken = mutableListOf("${minutes}분 뒤에 ${meeting.title} 일정이 있어요.")
         val detail = mutableListOf("${minutes}분 뒤 ${meeting.title}" + if (meeting.location.isNotBlank()) " (${meeting.location})" else "")
 
-        persons.groupBy { it.name }.filter { it.value.size > 1 }.keys.firstOrNull()?.let {
-            spoken += "$it 님이 여러 명 저장돼 있어서 회사를 확인해 주세요."
+        ambiguous.firstOrNull()?.let {
+            spoken += "$it 님은 같은 이름이 여러 명 저장돼 있어서 누구인지 확인하지 못했어요."
+            detail += "$it: 같은 이름이 여러 명 저장돼 있어 기록을 붙이지 않았어요."
         }
         persons.take(2).forEach { p ->
             val who = listOf(p.org, p.role).filter { it.isNotBlank() }.joinToString(" ")

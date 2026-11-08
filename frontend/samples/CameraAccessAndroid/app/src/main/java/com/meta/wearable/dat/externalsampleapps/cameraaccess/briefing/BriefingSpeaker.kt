@@ -17,6 +17,7 @@ class BriefingSpeaker(context: Context) {
     /** Set when the engine reported before its constructor returned (Android may do that on failure). */
     private var earlyStatus: Int? = null
     @Volatile private var ready = false
+    @Volatile private var failed = false
     private var pending: String? = null
     private val _speaking = MutableStateFlow(false)
     /** True while a briefing is being read; the wake word listener pauses so it does not hear it. */
@@ -37,6 +38,7 @@ class BriefingSpeaker(context: Context) {
         if (tts == null) { earlyStatus = status; return@synchronized }
         if (status != TextToSpeech.SUCCESS || tts.setLanguage(Locale.KOREAN) < TextToSpeech.LANG_AVAILABLE) {
             Log.w("BriefingSpeaker", "Korean speech unavailable (status $status)")
+            failed = true
             pending = null
             return@synchronized
         }
@@ -52,17 +54,24 @@ class BriefingSpeaker(context: Context) {
         pending = null
     }
 
-    fun speak(text: String) = synchronized(this) {
+    /** False when the phone cannot speak Korean (no engine or no voice), so the caller may retry later. */
+    fun speak(text: String): Boolean = synchronized(this) {
         val tts = engine
-        if (ready && tts != null) say(tts, text) else pending = text
+        when {
+            failed || tts == null -> false
+            ready -> say(tts, text)
+            else -> { pending = text; true }
+        }
     }
 
-    private fun say(tts: TextToSpeech, text: String) {
+    private fun say(tts: TextToSpeech, text: String): Boolean {
         val id = "brief-${System.nanoTime()}"
         // Marked before playback starts, so the listener is already paused for the first word.
         outstanding += id
         _speaking.value = true
-        if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) != TextToSpeech.SUCCESS) finished(id)
+        val ok = tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.SUCCESS
+        if (!ok) finished(id)
+        return ok
     }
 
     private fun finished(id: String?) = synchronized(this) {

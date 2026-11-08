@@ -50,7 +50,16 @@ class MeetingBriefingTest {
         assertTrue(empty.spoken.endsWith("이 일정과 관련된 지난 기록은 찾지 못했어요."))
         val twins = MeetingBriefing.compose(meeting,
             listOf(PersonHit("홍길동", "한빛산업"), PersonHit("홍길동", "다른상사")), emptyList(), emptyList(), now)
-        assertTrue(twins.spoken.contains("홍길동 님이 여러 명 저장돼 있어서 회사를 확인해 주세요."))
+        // The title names 한빛산업, so that one is used.
+        assertTrue(twins.spoken.contains("상대는 한빛산업 홍길동 님이에요."))
+        val unresolved = MeetingBriefing.compose(meeting.copy(title = "견적 미팅"),
+            listOf(PersonHit("홍길동", "가나상사"), PersonHit("홍길동", "다른상사")),
+            listOf(MeetingHit("다른상사 정산", "2026-10-01T01:00:00Z", "다른상사 미수금 정리.")), emptyList(), now)
+        assertTrue(unresolved.spoken.contains("홍길동 님은 같은 이름이 여러 명 저장돼 있어서 누구인지 확인하지 못했어요."))
+        assertFalse(unresolved.spoken.contains("다른상사"))
+        val alias = MeetingBriefing.compose(meeting.copy(title = "박부장 미팅", attendees = emptyList()),
+            listOf(PersonHit("박민수", "한빛산업", aliases = listOf("박부장"))), emptyList(), emptyList(), now)
+        assertTrue(alias.spoken.contains("박민수"))
     }
 
     @Test
