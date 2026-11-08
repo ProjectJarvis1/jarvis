@@ -593,21 +593,32 @@ class GeminiSessionViewModel : ViewModel() {
      */
     fun announce(text: String, waitMs: Long = 45_000L, fallback: () -> Unit) {
         viewModelScope.launch {
-            val deadline = System.currentTimeMillis() + waitMs
-            while (true) {
+            // Local speech recognition does not report a question in progress, so only the live
+            // conversation, whose input transcription moves lastInputAt, gets spoken notices.
+            fun ready(): Boolean {
                 val state = _uiState.value
-                if (!state.isGeminiActive || state.connectionState != GeminiConnectionState.Ready) break
-                // A pending confirmation counts as busy: a new question's "네" would otherwise approve it.
-                val awaitingUser = state.pendingContactAction != null || taskManager.snapshot().any {
+                return liveConversation && state.isGeminiActive && state.connectionState == GeminiConnectionState.Ready
+            }
+            // Quiet means: nobody spoke for 5s (long enough for a reply to start), nothing playing or
+            // running, and no confirmation pending, whose "네" a new question would otherwise capture.
+            fun quiet(): Boolean {
+                val awaitingUser = _uiState.value.pendingContactAction != null || taskManager.snapshot().any {
                     it.state in setOf(TaskState.QUEUED, TaskState.RUNNING, TaskState.WAITING_USER)
                 }
-                val busy = geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0 ||
-                    cardOfferRunning || awaitingUser || System.currentTimeMillis() - lastInputAt < 2_500L
-                if (!busy) {
+                return !geminiService.isModelSpeaking.value && !audioManager.hasPendingPlayback && inFlightToolCalls == 0 &&
+                    !cardOfferRunning && !awaitingUser && System.currentTimeMillis() - lastInputAt >= 5_000L
+            }
+            val deadline = System.currentTimeMillis() + waitMs
+            while (ready()) {
+                if (quiet()) {
                     val sent = java.util.concurrent.atomic.AtomicBoolean(false)
-                    geminiService.sendTextMessage(text, onSent = { sent.set(true) }, isValid = { _uiState.value.isGeminiActive })
-                    // The send is queued; a session that ends or a socket that fails drops it silently.
+                    val abandoned = java.util.concurrent.atomic.AtomicBoolean(false)
+                    // Checked again when the queued send actually runs, and void once we fall back.
+                    geminiService.sendTextMessage(text, onSent = { sent.set(true) },
+                        isValid = { !abandoned.get() && ready() && quiet() })
                     repeat(50) { if (!sent.get()) delay(200L) }
+                    if (sent.get()) return@launch
+                    abandoned.set(true)
                     if (sent.get()) return@launch
                     break
                 }
