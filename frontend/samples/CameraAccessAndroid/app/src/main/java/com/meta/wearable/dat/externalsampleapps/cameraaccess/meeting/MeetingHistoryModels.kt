@@ -12,6 +12,7 @@ data class MeetingHistoryItem(
     val decisions: List<String>,
     val actionItems: List<String>,
     val keywords: List<String>,
+    val followups: List<MeetingFollowup> = actionItems.map { MeetingFollowup(it) },
 )
 
 data class MeetingHistoryUiState(

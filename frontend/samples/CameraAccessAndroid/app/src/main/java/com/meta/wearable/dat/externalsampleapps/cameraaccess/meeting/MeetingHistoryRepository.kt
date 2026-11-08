@@ -139,6 +139,7 @@ class MeetingHistoryRepository {
             decisions = metadata.optJSONArray("decisions").toStringList(),
             actionItems = metadata.optJSONArray("action_items").toStringList(),
             keywords = metadata.optJSONArray("keywords").toStringList(),
+            followups = MeetingFollowups.parse(metadata.optJSONArray("followups"), metadata.optJSONArray("action_items").toStringList()),
         )
     }
 

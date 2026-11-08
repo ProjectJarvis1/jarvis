@@ -585,6 +585,18 @@ class GeminiSessionViewModel : ViewModel() {
         }
     }
 
+    /**
+     * Hands an app notice (a meeting's follow-ups, a meeting briefing) to the live conversation so Jarvis
+     * says it on the glasses. Same guard as server notifications; false when no conversation is ready,
+     * and the caller falls back to a phone notification.
+     */
+    fun announce(text: String): Boolean {
+        val state = _uiState.value
+        if (!state.isGeminiActive || state.connectionState != GeminiConnectionState.Ready) return false
+        geminiService.sendTextMessage(text, isValid = { _uiState.value.isGeminiActive })
+        return true
+    }
+
     fun stopSession() {
         stopSession(userInitiated = true)
     }

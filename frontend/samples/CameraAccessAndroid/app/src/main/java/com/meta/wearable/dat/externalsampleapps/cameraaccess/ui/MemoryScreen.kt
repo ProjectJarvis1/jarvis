@@ -80,6 +80,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingFollowupStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingFollowups
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingHistoryItem
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingHistoryViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.MemoryItem
@@ -610,20 +612,8 @@ private fun MeetingDetail(
                 body = meeting.markdownSummary ?: meeting.summary.orEmpty(),
             )
         }
-        if (meeting.actionItems.isNotEmpty()) {
-            item {
-                StructuredListCard(
-                    title = "Action Item",
-                    items = meeting.actionItems,
-                    icon = {
-                        Icon(
-                            imageVector = Icons.Default.TaskAlt,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    },
-                )
-            }
+        if (meeting.followups.isNotEmpty()) {
+            item { FollowupCard(meeting) }
         }
         if (meeting.decisions.isNotEmpty()) {
             item {
@@ -667,6 +657,114 @@ private fun MeetingDetail(
         }
         item { Spacer(Modifier.height(16.dp)) }
     }
+}
+
+/**
+ * The meeting's follow-ups, each with what to do next: mark it done, or put it in the calendar on the
+ * day the meeting named. Nothing is written or sent from here; the calendar and messaging apps open with
+ * the content filled in and the user saves or sends there.
+ */
+@Composable
+private fun FollowupCard(meeting: MeetingHistoryItem) {
+    val context = LocalContext.current
+    val start = remember(meeting.startedAt) { MeetingFollowups.parseStart(meeting.startedAt) }
+    var version by remember(meeting.id) { mutableStateOf(0) }
+    DetailCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.TaskAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Text("후속 할 일", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            meeting.followups.forEachIndexed { index, item ->
+                val steps = remember(version) { MeetingFollowupStatus.read(context, meeting.id, index) }
+                val done = MeetingFollowupStatus.Step.DONE in steps
+                val due = start?.let { MeetingFollowups.dueDate(item, it) }
+                Surface(Modifier.fillMaxWidth(), color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    shape = RoundedCornerShape(10.dp)) {
+                    Column(Modifier.padding(start = 4.dp, end = 12.dp, top = 4.dp, bottom = 4.dp)) {
+                        Row(verticalAlignment = Alignment.Top) {
+                            androidx.compose.material3.Checkbox(checked = done, onCheckedChange = {
+                                MeetingFollowupStatus.set(context, meeting.id, index, MeetingFollowupStatus.Step.DONE, it)
+                                version++
+                            })
+                            Column(Modifier.weight(1f).padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(item.task, style = MaterialTheme.typography.bodyMedium,
+                                    color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                                    textDecoration = if (done) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
+                                val meta = listOfNotNull(
+                                    item.owner.takeIf { it.isNotBlank() }?.let { "담당 $it" },
+                                    when {
+                                        due != null -> "${due.monthValue}월 ${due.dayOfMonth}일까지"
+                                        item.dueText.isNotBlank() -> "${item.dueText} (날짜 확인 필요)"
+                                        else -> null
+                                    },
+                                ).joinToString(", ")
+                                if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary)
+                                if (item.evidence.isNotBlank()) Text("\u201C${item.evidence}\u201D", style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                if (MeetingFollowupStatus.Step.CALENDAR_OPENED in steps) Text("일정 화면을 열었어요. 저장했는지는 캘린더에서 확인해 주세요.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                        if (!done) TextButton(onClick = {
+                            if (openFollowupCalendar(context, meeting, item, due)) {
+                                MeetingFollowupStatus.set(context, meeting.id, index, MeetingFollowupStatus.Step.CALENDAR_OPENED, true)
+                                version++
+                            }
+                        }, modifier = Modifier.padding(start = 40.dp)) { Text(if (due != null) "일정에 넣기" else "날짜 골라 일정에 넣기") }
+                    }
+                }
+            }
+            val draft = remember(meeting.id) { MeetingFollowups.draftMessage(meeting.decisions, meeting.followups, start) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                JarvisSecondaryButton("문자 초안", {
+                    if (openDraft(context, android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:"))
+                            .putExtra("sms_body", draft))) { MeetingFollowupStatus.markMessageDrafted(context, meeting.id); version++ }
+                }, Modifier.weight(1f))
+                JarvisSecondaryButton("메일 초안", {
+                    if (openDraft(context, android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("mailto:"))
+                            .putExtra(android.content.Intent.EXTRA_SUBJECT, "${meeting.title} 정리")
+                            .putExtra(android.content.Intent.EXTRA_TEXT, draft))) { MeetingFollowupStatus.markMessageDrafted(context, meeting.id); version++ }
+                }, Modifier.weight(1f))
+            }
+            val drafted = remember(version) { MeetingFollowupStatus.messageDrafted(context, meeting.id) }
+            Text(
+                if (drafted > 0) "${java.time.format.DateTimeFormatter.ofPattern("M월 d일 HH:mm").withZone(java.time.ZoneId.of("Asia/Seoul"))
+                    .format(java.time.Instant.ofEpochMilli(drafted))}에 초안을 열었어요. 받는 사람과 보내기는 문자나 메일 앱에서 직접 해요."
+                else "받는 사람을 고르고 보내기를 누르는 건 문자나 메일 앱에서 직접 해요.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+private fun openFollowupCalendar(context: android.content.Context, meeting: MeetingHistoryItem,
+    item: com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingFollowup, due: java.time.LocalDate?): Boolean {
+    val intent = android.content.Intent(android.content.Intent.ACTION_INSERT)
+        .setData(android.provider.CalendarContract.Events.CONTENT_URI)
+        .putExtra(android.provider.CalendarContract.Events.TITLE, item.task)
+        .putExtra(android.provider.CalendarContract.Events.DESCRIPTION, buildString {
+            append("${meeting.title}에서 정한 할 일")
+            if (item.evidence.isNotBlank()) append("\n\u201C${item.evidence}\u201D")
+            if (due == null) append("\n기한을 확인해 주세요.")
+        })
+    if (due != null) {
+        val begin = due.atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant().toEpochMilli()
+        intent.putExtra(android.provider.CalendarContract.EXTRA_EVENT_ALL_DAY, true)
+            .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
+            .putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, begin + 86_400_000L)
+    }
+    return openDraft(context, intent)
+}
+
+/** Opens another app with content filled in; false when no app can take it. */
+private fun openDraft(context: android.content.Context, intent: android.content.Intent): Boolean = try {
+    context.startActivity(intent)
+    true
+} catch (_: android.content.ActivityNotFoundException) {
+    android.widget.Toast.makeText(context, "열 수 있는 앱이 없어요.", android.widget.Toast.LENGTH_SHORT).show()
+    false
 }
 
 /** White card on the grey ground, the detail screens' only container. */

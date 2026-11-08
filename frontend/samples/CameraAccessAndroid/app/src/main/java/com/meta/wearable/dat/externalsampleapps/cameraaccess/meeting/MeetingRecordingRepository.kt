@@ -55,6 +55,11 @@ class MeetingRecordingRepository {
                 summary = summary.optString("summary"),
                 decisions = summary.optJSONArray("decisions")?.toStringList().orEmpty(),
                 actionItems = summary.optJSONArray("action_items")?.toStringList().orEmpty(),
+                followups = MeetingFollowups.parse(
+                    summary.optJSONArray("followups"),
+                    summary.optJSONArray("action_items")?.toStringList().orEmpty(),
+                ),
+                startedAt = startedAt,
             )
         }
     }
@@ -70,4 +75,6 @@ data class MeetingRecordingResult(
     val summary: String,
     val decisions: List<String>,
     val actionItems: List<String>,
+    val followups: List<MeetingFollowup> = actionItems.map { MeetingFollowup(it) },
+    val startedAt: String = "",
 )
