@@ -90,15 +90,18 @@ object MeetingBriefer {
         return result
     }
 
-    /** Attendee names, without the calendar's owner (the user). An email-only attendee has no usable name. */
+    /** Attendee names, without the user and without those who declined. An email-only attendee has no usable name. */
     private fun attendees(context: Context, eventId: Long, owner: String): List<String> {
         val names = mutableListOf<String>()
         runCatching {
             CalendarContract.Attendees.query(context.contentResolver, eventId,
-                arrayOf(CalendarContract.Attendees.ATTENDEE_NAME, CalendarContract.Attendees.ATTENDEE_EMAIL))?.use { c ->
+                arrayOf(CalendarContract.Attendees.ATTENDEE_NAME, CalendarContract.Attendees.ATTENDEE_EMAIL,
+                    CalendarContract.Attendees.ATTENDEE_STATUS))?.use { c ->
                 while (c.moveToNext()) {
                     val name = c.getString(0).orEmpty().trim()
                     val email = c.getString(1).orEmpty().trim()
+                    // Someone who declined is not coming; do not brief on them.
+                    if (c.getInt(2) == CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED) continue
                     if (owner.isNotBlank() && email.equals(owner, ignoreCase = true)) continue
                     if (name.isNotBlank() && '@' !in name) names += name
                 }

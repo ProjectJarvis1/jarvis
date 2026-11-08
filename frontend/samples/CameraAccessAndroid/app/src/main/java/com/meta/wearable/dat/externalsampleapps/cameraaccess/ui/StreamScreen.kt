@@ -296,24 +296,36 @@ fun StreamScreen(
             }
         }
         askCalendar()
-        val unobserve = SettingsManager.observe("meetingBriefingEnabled") { askCalendar() }
+        val unobserve = SettingsManager.observe("meetingBriefingEnabled") {
+            // Off also silences a briefing being read or queued.
+            if (!SettingsManager.meetingBriefingEnabled) speaker.stop()
+            askCalendar()
+        }
         onDispose { unobserve() }
     }
     LaunchedEffect(Unit) {
         val app = context.applicationContext
+        // Briefings whose spoken delivery is still waiting for a quiet moment; not started twice.
+        val speaking = java.util.Collections.synchronizedSet(mutableSetOf<String>())
         while (true) {
             if (SettingsManager.meetingBriefingEnabled) {
                 val due = withContext(Dispatchers.IO) { runCatching { MeetingBriefer.due(app) }.getOrDefault(emptyList()) }
                 due.forEach { (meeting, brief) ->
                     // Searching takes time: the switch may be off now, or the meeting already started.
                     if (!SettingsManager.meetingBriefingEnabled || meeting.beginMs - System.currentTimeMillis() < 60_000L) return@forEach
-                    JarvisNotifications.post(app, meeting.key.hashCode(), "곧 시작: ${meeting.title}", brief.detail)
-                    MeetingBriefer.markDelivered(app, meeting.key)
+                    if (!speaking.add(meeting.key)) return@forEach
+                    // Counted as delivered once something reached the user: the notification, Jarvis's
+                    // voice, or the phone's. If none did, the next poll tries again while it is still due.
+                    if (JarvisNotifications.post(app, meeting.key.hashCode(), "곧 시작: ${meeting.title}", brief.detail)) {
+                        MeetingBriefer.markDelivered(app, meeting.key)
+                    }
                     geminiViewModel.announce(
                         "[앱 알림] 곧 시작하는 일정 브리핑입니다. 아래 내용을 그대로 짧게 전해 주세요. " +
                             "여기에 없는 내용은 덧붙이지 말고, 날짜는 기록된 날짜 그대로 말하세요.\n" + brief.spoken,
                         stillWanted = { SettingsManager.meetingBriefingEnabled },
+                        onSpoken = { MeetingBriefer.markDelivered(app, meeting.key); speaking.remove(meeting.key) },
                     ) {
+                        speaking.remove(meeting.key)
                         // No conversation to speak through: the phone reads it, unless a conversation is
                         // running but busy, where a second voice would talk over it.
                         // During a meeting recording only the notification is left: a voice would interrupt
@@ -321,6 +333,7 @@ fun StreamScreen(
                         if (SettingsManager.meetingBriefingEnabled && !geminiViewModel.uiState.value.isGeminiActive &&
                             !meetingRecordingViewModel.uiState.value.isRecording) {
                             speaker.speak(brief.spoken)
+                            MeetingBriefer.markDelivered(app, meeting.key)
                         }
                     }
                 }

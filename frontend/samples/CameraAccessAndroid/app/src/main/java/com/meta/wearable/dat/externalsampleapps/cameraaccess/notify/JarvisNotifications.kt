@@ -15,7 +15,8 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 object JarvisNotifications {
     private const val CHANNEL_ID = "jarvis_assist"
 
-    fun post(context: Context, id: Int, title: String, text: String) {
+    /** False when nothing could be shown (notifications off for the app or this channel). */
+    fun post(context: Context, id: Int, title: String, text: String): Boolean {
         val app = context.applicationContext
         val manager = app.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
@@ -36,10 +37,15 @@ object JarvisNotifications {
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .build()
-        try {
-            NotificationManagerCompat.from(app).notify(id, notification)
+        val compat = NotificationManagerCompat.from(app)
+        val channelOn = manager.getNotificationChannel(CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE
+        if (!compat.areNotificationsEnabled() || !channelOn) return false
+        return try {
+            compat.notify(id, notification)
+            true
         } catch (e: SecurityException) {
             Log.w("JarvisNotifications", "Notification permission missing: ${e.message}")
+            false
         }
     }
 }

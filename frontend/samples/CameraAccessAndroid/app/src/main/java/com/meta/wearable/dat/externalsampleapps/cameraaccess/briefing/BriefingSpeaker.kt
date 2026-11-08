@@ -13,35 +13,51 @@ import kotlinx.coroutines.flow.StateFlow
  * media stream, which the glasses take over Bluetooth; it runs on the phone and costs nothing.
  */
 class BriefingSpeaker(context: Context) {
+    private var engine: TextToSpeech? = null
+    /** Set when the engine reported before its constructor returned (Android may do that on failure). */
+    private var earlyStatus: Int? = null
     @Volatile private var ready = false
     private var pending: String? = null
     private val _speaking = MutableStateFlow(false)
-    /** Utterances queued and not finished; the engine's isSpeaking can lag behind onDone. */
-    private val outstanding = mutableSetOf<String>()
     /** True while a briefing is being read; the wake word listener pauses so it does not hear it. */
     val speaking: StateFlow<Boolean> = _speaking
-    private val tts: TextToSpeech = TextToSpeech(context) { status ->
+    /** Utterances queued and not finished; the engine's isSpeaking can lag behind onDone. */
+    private val outstanding = mutableSetOf<String>()
+
+    init {
+        val created = runCatching { TextToSpeech(context) { status -> onInit(status) } }.getOrNull()
         synchronized(this) {
-            ready = status == TextToSpeech.SUCCESS &&
-                tts.setLanguage(Locale.KOREAN) >= TextToSpeech.LANG_AVAILABLE
-            if (!ready) Log.w("BriefingSpeaker", "Korean speech unavailable (status $status)")
-            tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
-                override fun onStart(utteranceId: String?) = Unit
-                override fun onDone(utteranceId: String?) = finished(utteranceId)
-                @Deprecated("Deprecated in Java")
-                override fun onError(utteranceId: String?) = finished(utteranceId)
-                override fun onStop(utteranceId: String?, interrupted: Boolean) = finished(utteranceId)
-            })
-            pending?.takeIf { ready }?.let { say(it) }
-            pending = null
+            engine = created
+            earlyStatus?.let { onInit(it) }
         }
     }
 
-    fun speak(text: String) = synchronized(this) {
-        if (ready) say(text) else pending = text
+    private fun onInit(status: Int) = synchronized(this) {
+        val tts = engine
+        if (tts == null) { earlyStatus = status; return@synchronized }
+        if (status != TextToSpeech.SUCCESS || tts.setLanguage(Locale.KOREAN) < TextToSpeech.LANG_AVAILABLE) {
+            Log.w("BriefingSpeaker", "Korean speech unavailable (status $status)")
+            pending = null
+            return@synchronized
+        }
+        tts.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+            override fun onStart(utteranceId: String?) = Unit
+            override fun onDone(utteranceId: String?) = finished(utteranceId)
+            @Deprecated("Deprecated in Java")
+            override fun onError(utteranceId: String?) = finished(utteranceId)
+            override fun onStop(utteranceId: String?, interrupted: Boolean) = finished(utteranceId)
+        })
+        ready = true
+        pending?.let { say(tts, it) }
+        pending = null
     }
 
-    private fun say(text: String) {
+    fun speak(text: String) = synchronized(this) {
+        val tts = engine
+        if (ready && tts != null) say(tts, text) else pending = text
+    }
+
+    private fun say(tts: TextToSpeech, text: String) {
         val id = "brief-${System.nanoTime()}"
         // Marked before playback starts, so the listener is already paused for the first word.
         outstanding += id
@@ -54,17 +70,19 @@ class BriefingSpeaker(context: Context) {
         if (outstanding.isEmpty()) _speaking.value = false
     }
 
-    /** Cuts a briefing short (a conversation or a recording started). */
+    /** Cuts the current and any queued briefing short (a conversation or a recording started, or the switch went off). */
     fun stop() = synchronized(this) {
         pending = null
-        if (ready) runCatching { tts.stop() }
+        if (ready) runCatching { engine?.stop() }
         outstanding.clear()
         _speaking.value = false
     }
 
-    fun release() {
-        runCatching { tts.shutdown() }
-        synchronized(this) { outstanding.clear() }
+    fun release() = synchronized(this) {
+        runCatching { engine?.shutdown() }
+        ready = false
+        pending = null
+        outstanding.clear()
         _speaking.value = false
     }
 }

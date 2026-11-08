@@ -48,7 +48,8 @@ object MeetingBriefing {
         meeting.attendees.map { it.trim().removeSuffix("님").trim() }.filter { it.length >= 2 && '@' !in it }.distinct()
 
     private fun titleWords(meeting: UpcomingMeeting) = meeting.title.split(Regex("""[\s,/()\[\]·:|-]+"""))
-        .map { it.trim().removeSuffix("님").removeSuffix("과").removeSuffix("와") }
+        // "홍길동님과" -> "홍길동": the particle comes off before the honorific.
+        .map { it.trim().removeSuffix("과").removeSuffix("와").removeSuffix("님") }
         .filter { it.length >= 2 && it.lowercase() !in STOP_WORDS && !it.all(Char::isDigit) }
         .distinct()
 

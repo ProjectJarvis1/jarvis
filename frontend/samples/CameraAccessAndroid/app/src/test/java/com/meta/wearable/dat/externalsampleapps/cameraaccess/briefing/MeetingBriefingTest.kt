@@ -19,6 +19,7 @@ class MeetingBriefingTest {
     @Test
     fun keysAreNamesAndDistinctTitleWords() {
         assertEquals(listOf("홍길동", "한빛산업", "견적"), MeetingBriefing.keys(meeting))
+        assertEquals(listOf("홍길동"), MeetingBriefing.keys(meeting.copy(title = "홍길동님과 미팅", attendees = emptyList())))
     }
 
     @Test
