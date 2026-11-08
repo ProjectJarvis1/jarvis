@@ -63,4 +63,19 @@ class BusinessCardTextTest {
         assertNull(seen.onFrame(c, 3_000))
         assertNull(seen.onFrame(c, 7_000))            // more than 3s apart
     }
+
+    @Test
+    fun emailDomainIsNotACompanyCue() {
+        assertNull(BusinessCardText.parse("주문 안내\n지금 주문하세요\norder@chicken.co.kr"))
+    }
+
+    @Test
+    fun coworkersSharingAnOfficeNumberAreDifferentCards() {
+        val a = BusinessCardText.parse("주식회사 한빛\n홍길동\nT. 02-555-1234\nM. 010-1111-2222")!!
+        val b = BusinessCardText.parse("주식회사 한빛\n김철수\nT. 02-555-1234\nM. 010-3333-4444")!!
+        val seen = CardSightings()
+        seen.onFrame(a, 1_000); assertEquals(a, seen.onFrame(a, 2_000)); seen.markOffered(a, 2_000)
+        assertNull(seen.onFrame(b, 3_000))
+        assertEquals(b, seen.onFrame(b, 4_000))      // second person still gets an offer
+    }
 }

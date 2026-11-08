@@ -225,7 +225,7 @@ class GeminiLiveService {
         }
     }
 
-    fun sendTextMessage(text: String, isValid: () -> Boolean = { true }, onSent: () -> Unit = {}) {
+    fun sendTextMessage(text: String, onSent: () -> Unit = {}, isValid: () -> Boolean = { true }) {
         if (_connectionState.value != GeminiConnectionState.Ready) return
         val destination = webSocket ?: return
         sendExecutor.execute {

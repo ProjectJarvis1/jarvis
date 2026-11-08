@@ -9,14 +9,25 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.card
  */
 object BusinessCardText {
     data class Card(val phones: Set<String>, val emails: Set<String>, val name: String?, val org: String?, val text: String) {
-        /** Same card when any normalized phone or email matches: OCR noise elsewhere does not matter. */
-        fun sameAs(other: Card): Boolean = phones.any { it in other.phones } || emails.any { it in other.emails }
+        /** Mobile numbers and emails belong to one person; office and fax numbers are shared by a company. */
+        val personal: Set<String> get() = phones.filter { MOBILE.matches(it) }.toSet() + emails
+
+        /**
+         * Same card when a personal contact matches, so OCR noise elsewhere does not matter. Coworkers share
+         * the office number, so that only counts when one of the cards shows nothing personal.
+         */
+        fun sameAs(other: Card): Boolean {
+            if (personal.isNotEmpty() && other.personal.isNotEmpty()) return personal.any { it in other.personal }
+            return phones.any { it in other.phones } || emails.any { it in other.emails }
+        }
     }
 
     private const val MAX_TEXT = 420
+    private val MOBILE = Regex("""01[016789]\d{7,8}""")
+    private val webRegex = Regex("""\S+@\S+|(?:https?://|www\.)\S+|\S+\.(?:com|co\.kr|kr|net|org|io)\S*""", RegexOption.IGNORE_CASE)
     private val phoneRegex = Regex("""(?:\+82[\s.-]?)?\(?0?\d{1,3}\)?[\s.-]?\d{3,4}[\s.-]?\d{4}""")
     private val emailRegex = Regex("""[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}""")
-    private val orgRegex = Regex("""주식회사|\(주\)|㈜|유한회사|그룹|은행|병원|대학교|연구소|재단|협회|법인|Inc\.?|Corp\.?|Co\.,?|Ltd\.?|LLC|Company""", RegexOption.IGNORE_CASE)
+    private val orgRegex = Regex("""주식회사|\(주\)|㈜|유한회사|그룹|은행|병원|대학교|연구소|재단|협회|법인|\bInc\b\.?|\bCorp\b\.?|\bCo\.,?(?=\s|$)|\bLtd\b\.?|\bLLC\b|\bCompany\b""", RegexOption.IGNORE_CASE)
     private val titleRegex = Regex("""대표|이사|부장|차장|과장|대리|팀장|실장|본부장|매니저|선임|책임|수석|연구원|변호사|변리사|교수|원장|CEO|CTO|Manager|Director""", RegexOption.IGNORE_CASE)
     private val labelWords = setOf("대표", "이사", "부장", "차장", "과장", "대리", "팀장", "실장", "주소", "전화", "휴대폰", "팩스", "메일", "이메일", "회사", "본사", "지사")
     private val nameRegex = Regex("""^[가-힣]{2,4}$|^[가-힣](?: [가-힣]){1,3}$""")
@@ -30,9 +41,11 @@ object BusinessCardText {
         val lines = text.lines().map { it.trim() }.filter { it.isNotEmpty() }
         if (lines.size < 3) return null
         val name = lines.firstOrNull { line -> nameRegex.matches(line) && line.replace(" ", "") !in labelWords }?.replace(" ", "")
-        val org = lines.firstOrNull { orgRegex.containsMatchIn(it) }
+        // Company and title words are looked for outside emails and web addresses (".co.kr" is not "Co.").
+        val plain = lines.map { webRegex.replace(it, " ").trim() }
+        val org = lines.indices.firstOrNull { orgRegex.containsMatchIn(plain[it]) }?.let { lines[it] }
         // A name-like line alone is too weak (a shop name on a flyer looks the same); it only labels the offer.
-        val strongCue = phones.size + emails.size >= 2 || org != null || titleRegex.containsMatchIn(text)
+        val strongCue = phones.size + emails.size >= 2 || org != null || plain.any { titleRegex.containsMatchIn(it) }
         if (!strongCue) return null
         return Card(phones, emails, name, org, text)
     }

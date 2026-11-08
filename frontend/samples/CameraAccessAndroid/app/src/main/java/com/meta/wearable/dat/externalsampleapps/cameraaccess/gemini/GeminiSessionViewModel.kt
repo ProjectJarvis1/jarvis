@@ -1136,12 +1136,14 @@ class GeminiSessionViewModel : ViewModel() {
                     "get_task_result로 사진을 직접 확인하세요. 명함이 맞으면 사용자에게 '홍길동 님 명함이 보이네요. 저장할까요?'처럼 이름을 넣어 한 문장으로만 물어보세요.$intro " +
                     "명함이 아니면 아무 말도 하지 마세요. 사용자가 승인하면 이 사진(source_task_id, source_revision)으로 save_life_memory를 호출하고 labels에 business_card, document를 넣으세요. " +
                     "사용자가 거절하거나 다른 이야기를 하면 다시 묻지 마세요."
-                , isValid = { _uiState.value.isGeminiActive && System.currentTimeMillis() - lastInputAt >= 2_500L },
-            ) {
-                // Only a question that actually went out counts: a dropped one may be asked again soon.
-                cardWatcher.markOffered(card)
-                if (firstTime) SettingsManager.businessCardOfferIntroShown = true
-            }
+                ,
+                onSent = {
+                    // Only a question that actually went out counts: a dropped one may be asked again soon.
+                    cardWatcher.markOffered(card)
+                    if (firstTime) SettingsManager.businessCardOfferIntroShown = true
+                },
+                isValid = { _uiState.value.isGeminiActive && System.currentTimeMillis() - lastInputAt >= 2_500L },
+            )
         } finally {
             cardOfferRunning = false
         }
