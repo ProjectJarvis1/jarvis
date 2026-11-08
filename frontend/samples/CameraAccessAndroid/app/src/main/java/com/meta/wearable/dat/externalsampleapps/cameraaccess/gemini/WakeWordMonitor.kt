@@ -21,7 +21,6 @@ class WakeWordMonitor(
     companion object {
         private const val TAG = "WakeWordMonitor"
         private const val WAKE_WORD = "자비스"
-        private const val RESTART_DELAY_MS = 150L
 
         fun stripWakeWord(text: String): String {
             return text
@@ -39,15 +38,21 @@ class WakeWordMonitor(
     private var released = false
     @Volatile
     private var wakeWordFired = false
+    private var consecutiveFailures = 0
+    /** Between start() and stop(); a late recognizer callback after stop() must not listen again. */
+    @Volatile
+    private var wanted = false
 
     fun start() {
-        if (isRunning || released) return
+        if (released) return
+        wanted = true
+        if (isRunning) return
         if (!SpeechRecognizer.isRecognitionAvailable(appContext)) {
-            onStatus?.invoke("Wake word recognition is unavailable on this device.")
+            onStatus?.invoke("이 휴대폰에서는 음성 인식을 쓸 수 없어 '자비스' 호출이 동작하지 않아요.")
             return
         }
         mainHandler.post {
-            if (isRunning || released) return@post
+            if (isRunning || released || !wanted) return@post
             createRecognizer()
             listen()
         }
@@ -55,6 +60,7 @@ class WakeWordMonitor(
 
     fun stop() {
         if (released) return
+        wanted = false
         isRunning = false
         mainHandler.removeCallbacksAndMessages(null)
         speechRecognizer?.cancel()
@@ -85,12 +91,12 @@ class WakeWordMonitor(
 
                 override fun onResults(results: android.os.Bundle?) {
                     handleRecognitionBundle(results)
-                    scheduleRestart()
+                    scheduleRestart(null)
                 }
 
                 override fun onError(error: Int) {
                     Log.d(TAG, "Wake word error=$error")
-                    scheduleRestart()
+                    scheduleRestart(error)
                 }
 
                 override fun onEvent(eventType: Int, params: android.os.Bundle?) = Unit
@@ -100,9 +106,10 @@ class WakeWordMonitor(
 
     private fun listen() {
         val recognizer = speechRecognizer ?: return
-        if (released) return
+        if (released || !wanted) return
 
         isRunning = true
+        WakeWordTrialLog.update(appContext) { it.listened() }
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.KOREAN.toLanguageTag())
@@ -115,7 +122,7 @@ class WakeWordMonitor(
             recognizer.startListening(intent)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to start wake word listener: ${e.message}")
-            scheduleRestart()
+            scheduleRestart(-1)
         }
     }
 
@@ -139,6 +146,9 @@ class WakeWordMonitor(
         val matched = texts.firstOrNull { isWakeWordText(it) } ?: return
         wakeWordFired = true
         Log.d(TAG, "Wake word detected from: $matched")
+        WakeWordTrialLog.update(appContext) {
+            it.detected(System.currentTimeMillis(), WakeWordTrialLog.screenOff(appContext))
+        }
         mainHandler.post {
             speechRecognizer?.cancel()
             onWakeWord(matched)
@@ -156,14 +166,28 @@ class WakeWordMonitor(
             normalized.contains("라비스")
     }
 
-    private fun scheduleRestart() {
-        if (released) return
+    /**
+     * Listens again after [error] (null = a normal result). Repeated real failures back off instead of
+     * restarting every 150ms, so a recognizer the system refuses in the background does not spin.
+     */
+    private fun scheduleRestart(error: Int?) {
+        if (released || !wanted) return
         isRunning = false
         wakeWordFired = false
+        if (WakeWordRetry.isNormal(error)) {
+            consecutiveFailures = 0
+        } else {
+            WakeWordTrialLog.update(appContext) { it.failed(error ?: -1, System.currentTimeMillis()) }
+            if (error == SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS) {
+                onStatus?.invoke("휴대폰이 백그라운드 마이크 사용을 막았어요. (오류 코드 9)")
+            }
+        }
+        val delay = WakeWordRetry.delayMs(error, consecutiveFailures)
+        if (!WakeWordRetry.isNormal(error)) consecutiveFailures++
         mainHandler.postDelayed({
-            if (!released) {
+            if (!released && wanted && !isRunning) {
                 listen()
             }
-        }, RESTART_DELAY_MS)
+        }, delay)
     }
 }

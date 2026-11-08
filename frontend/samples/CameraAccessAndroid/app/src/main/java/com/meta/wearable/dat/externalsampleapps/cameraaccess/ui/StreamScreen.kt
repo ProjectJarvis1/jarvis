@@ -87,6 +87,9 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessio
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.PendingContactAction
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.PendingContactActionType
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.WakeWordMonitor
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.WakeWordTrialLog
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingService
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingVoiceCommand
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingRecordingViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
@@ -226,9 +229,22 @@ fun StreamScreen(
         }
     }
 
+    // Hold the foreground service (and, when enabled, the microphone) for as long as this screen is
+    // open, so "자비스" still works with the screen off. Re-applied whenever the screen comes back
+    // from Settings: the microphone type can only be granted while the app is visible.
+    LaunchedEffect(isForeground) {
+        if (!isForeground) return@LaunchedEffect
+        val app = context.applicationContext
+        WakeWordTrialLog.update(app) { it.started(System.currentTimeMillis(), WakeWordTrialLog.battery(app)) }
+        if (!StreamingService.start(app, StreamingService.REASON_LISTEN, SettingsManager.backgroundWakeWordEnabled)) {
+            WakeWordTrialLog.update(app) { it.copy(serviceNote = "백그라운드 대기 서비스를 시작하지 못했어요.") }
+        }
+    }
+
     // Clean up on exit
     DisposableEffect(Unit) {
         onDispose {
+            StreamingService.stop(context.applicationContext, StreamingService.REASON_LISTEN)
             wakeWordMonitor.release()
             if (geminiUiState.isGeminiActive) {
                 geminiViewModel.stopSession()

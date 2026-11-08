@@ -63,6 +63,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ServiceConnections
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ServiceConnections.Service
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.WakeWordTrialLog
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -81,6 +82,7 @@ fun SettingsScreen(
     var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
     var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
     var cardOfferEnabled by remember { mutableStateOf(SettingsManager.businessCardOfferEnabled) }
+    var backgroundWakeWordEnabled by remember { mutableStateOf(SettingsManager.backgroundWakeWordEnabled) }
     var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
     var liveConversationEnabled by remember { mutableStateOf(SettingsManager.liveConversationEnabled) }
     var whisperSttEnabled by remember { mutableStateOf(SettingsManager.speechRecognizerProvider == "whisper") }
@@ -96,6 +98,7 @@ fun SettingsScreen(
         SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
         SettingsManager.videoStreamingEnabled = videoStreamingEnabled
         SettingsManager.businessCardOfferEnabled = cardOfferEnabled
+        SettingsManager.backgroundWakeWordEnabled = backgroundWakeWordEnabled
         SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
         SettingsManager.liveConversationEnabled = liveConversationEnabled
         SettingsManager.speechRecognizerProvider = if (whisperSttEnabled) "whisper" else "android"
@@ -109,6 +112,7 @@ fun SettingsScreen(
         webrtcSignalingURL = SettingsManager.webrtcSignalingURL
         videoStreamingEnabled = SettingsManager.videoStreamingEnabled
         cardOfferEnabled = SettingsManager.businessCardOfferEnabled
+        backgroundWakeWordEnabled = SettingsManager.backgroundWakeWordEnabled
         proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
         liveConversationEnabled = SettingsManager.liveConversationEnabled
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
@@ -116,7 +120,8 @@ fun SettingsScreen(
 
     // Tab navigation and system Back also persist edits, not only the toolbar Back button.
     LaunchedEffect(geminiAPIKey, systemPrompt, jarvisApiBase, jarvisApiKey, webrtcSignalingURL,
-        videoStreamingEnabled, cardOfferEnabled, proactiveNotificationsEnabled, liveConversationEnabled, whisperSttEnabled) {
+        videoStreamingEnabled, cardOfferEnabled, backgroundWakeWordEnabled, proactiveNotificationsEnabled, liveConversationEnabled,
+        whisperSttEnabled) {
         save()
     }
     var promptOpen by remember { mutableStateOf(false) }
@@ -150,6 +155,9 @@ fun SettingsScreen(
                 if (!liveConversationEnabled) SettingSwitch("기기 안 음성 인식(Whisper)",
                     if (whisperSttEnabled) "기기에서 음성을 인식해요. 속도는 기기에 따라 달라요." else "끄면 휴대폰의 한국어 음성 인식을 써요.",
                     whisperSttEnabled) { whisperSttEnabled = it }
+                SettingSwitch("화면 꺼져도 '자비스' 듣기", "휴대폰을 주머니에 넣어도 불러서 대화할 수 있어요. 배터리를 더 써요.",
+                    backgroundWakeWordEnabled) { backgroundWakeWordEnabled = it }
+                WakeWordTrialRows()
                 SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
                     videoStreamingEnabled) { videoStreamingEnabled = it }
                 SettingSwitch("명함 보이면 저장 제안", "명함이 보이면 Jarvis가 저장할지 먼저 물어요. 대답하기 전에는 저장하지 않아요.",
@@ -305,6 +313,38 @@ private fun ServiceConnectionsSection(onServer: (Boolean) -> Unit) {
             },
             dismissButton = { TextButton(onClick = { confirmDisconnect = null }) { Text("취소") } },
         )
+    }
+}
+
+/**
+ * The wake word trial record, folded under its switch: how often "자비스" was heard with the screen
+ * off, listening errors, and battery since the record started, so a pocket test needs no logcat.
+ */
+@Composable
+private fun WakeWordTrialRows() {
+    val context = LocalContext.current
+    var open by remember { mutableStateOf(false) }
+    var refresh by remember { mutableStateOf(0) }
+    JarvisRow("호출 시험 기록", subtitle = "화면이 꺼진 상태에서 몇 번 알아들었는지 봐요",
+        onClick = { open = !open; refresh++ }, trailing = { Chevron(open) })
+    if (!open) return
+    val lines = remember(refresh) {
+        WakeWordTrialLog.read(context).summary(System.currentTimeMillis(), WakeWordTrialLog.battery(context))
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        lines.forEach { Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        Text("갤럭시는 설정의 배터리에서 이 앱을 '제한 없음'으로 바꿔야 주머니에서도 계속 들어요.",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface)
+    }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
+        TextButton(onClick = {
+            runCatching {
+                context.startActivity(android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", context.packageName, null))
+                    .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+            }
+        }) { Text("앱 배터리 설정 열기") }
+        TextButton(onClick = { WakeWordTrialLog.reset(context); refresh++ }) { Text("기록 지우기") }
     }
 }
 
