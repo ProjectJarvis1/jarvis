@@ -18,7 +18,10 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.foundation.background
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
@@ -69,6 +72,7 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     onDebug: (() -> Unit)? = null,
     onDisconnect: (() -> Unit)? = null,
+    glassesStatus: String? = null,
 ) {
     var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
@@ -112,69 +116,68 @@ fun SettingsScreen(
         videoStreamingEnabled, proactiveNotificationsEnabled, liveConversationEnabled, whisperSttEnabled) {
         save()
     }
-    Column(modifier = modifier.fillMaxSize()) {
+    var promptOpen by remember { mutableStateOf(false) }
+    var serverOk by remember { mutableStateOf<Boolean?>(null) }
+    Column(modifier = modifier.fillMaxSize().background(Jarvis.extras.ground)) {
         TopAppBar(
             title = { Text("설정", style = MaterialTheme.typography.headlineMedium) },
-            navigationIcon = {
-                IconButton(onClick = { save(); onBack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "뒤로")
-                }
-            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = Jarvis.extras.ground),
         )
 
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp)
+                .padding(horizontal = 20.dp)
                 .navigationBarsPadding(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            ServiceConnectionsSection()
-
-            SectionHeader("대화")
-            SettingSwitch("실시간 대화", "말하는 동안 Jarvis가 듣고 답해요. 답하는 중에도 끼어들 수 있어요.",
-                liveConversationEnabled) { liveConversationEnabled = it }
-            SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
-                videoStreamingEnabled) { videoStreamingEnabled = it }
-            SettingSwitch("서버 알림 음성 안내", "Jarvis 서버에서 온 알림을 글라스 스피커로 읽어 줘요.",
-                proactiveNotificationsEnabled) { proactiveNotificationsEnabled = it }
-
-            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { advancedOpen = !advancedOpen },
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text("고급 설정", Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
-                Icon(if (advancedOpen) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    if (advancedOpen) "고급 설정 접기" else "고급 설정 펼치기")
+            JarvisGroup {
+                if (glassesStatus != null) JarvisRow("글라스", leading = { RowIcon(painterResource(com.meta.wearable.dat.externalsampleapps.cameraaccess.R.drawable.ic_jarvis_mark)) },
+                    trailing = { StatusText(glassesStatus, glassesStatus == "연결됨") })
+                JarvisRow("Jarvis 서버", icon = Icons.Outlined.Dns,
+                    trailing = { StatusText(when (serverOk) { true -> "연결됨"; false -> "연결 안 됨"; null -> "확인 중" }, serverOk == true) })
             }
-            if (advancedOpen) {
-                MonoTextField(geminiAPIKey, { geminiAPIKey = it }, "Gemini 키 (마인드로직)", "게이트웨이 키 입력", secret = true)
-                MonoTextField(jarvisApiBase, { jarvisApiBase = it }, "Jarvis 서버 주소", "https://api.example.com",
-                    keyboardType = KeyboardType.Uri)
-                MonoTextField(jarvisApiKey, { jarvisApiKey = it }, "Jarvis 서버 API 키", "API 키 입력", secret = true)
-                MonoTextField(webrtcSignalingURL, { webrtcSignalingURL = it }, "화면 공유 서버 주소",
-                    "비워 두면 Jarvis 서버를 씁니다", keyboardType = KeyboardType.Uri)
-                OutlinedTextField(
+
+            ServiceConnectionsSection(onServer = { serverOk = it })
+
+            JarvisGroup {
+                SettingSwitch("실시간 대화", "말하는 동안 Jarvis가 듣고 답해요. 답하는 중에도 끼어들 수 있어요.",
+                    liveConversationEnabled) { liveConversationEnabled = it }
+                if (!liveConversationEnabled) SettingSwitch("기기 안 음성 인식(Whisper)",
+                    if (whisperSttEnabled) "기기에서 음성을 인식해요. 속도는 기기에 따라 달라요." else "끄면 휴대폰의 한국어 음성 인식을 써요.",
+                    whisperSttEnabled) { whisperSttEnabled = it }
+                SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
+                    videoStreamingEnabled) { videoStreamingEnabled = it }
+                SettingSwitch("서버 알림 음성 안내", "Jarvis 서버에서 온 알림을 글라스 스피커로 읽어 줘요.",
+                    proactiveNotificationsEnabled) { proactiveNotificationsEnabled = it }
+            }
+
+            JarvisGroup {
+                JarvisRow("응답 지침", onClick = { promptOpen = !promptOpen }, trailing = { Chevron(promptOpen) })
+                if (promptOpen) OutlinedTextField(
                     value = systemPrompt,
                     onValueChange = { systemPrompt = it },
-                    label = { Text("응답 지침") },
-                    modifier = Modifier.fillMaxWidth().height(200.dp),
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = FontFamily.Monospace),
+                    modifier = Modifier.fillMaxWidth().height(220.dp).padding(horizontal = 14.dp),
+                    textStyle = MaterialTheme.typography.bodySmall,
                 )
-                if (!liveConversationEnabled) {
-                    SettingSwitch("기기 안 음성 인식(Whisper)",
-                        if (whisperSttEnabled) "기기에서 음성을 인식해요. 속도는 기기에 따라 달라요." else "끄면 휴대폰의 한국어 음성 인식을 써요.",
-                        whisperSttEnabled) { whisperSttEnabled = it }
-                }
-                if (onDisconnect != null) TextButton(onClick = { showDisconnectDialog = true }) { Text("글라스 앱 등록 해제") }
-                if (onDebug != null) TextButton(onClick = onDebug) { Text("개발 도구") }
-                TextButton(onClick = { showResetDialog = true }) {
-                    Text("기본값으로 초기화", color = MaterialTheme.colorScheme.error)
+                JarvisRow("고급 설정", onClick = { advancedOpen = !advancedOpen }, trailing = { Chevron(advancedOpen) })
+                if (advancedOpen) Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    MonoTextField(geminiAPIKey, { geminiAPIKey = it }, "Gemini 키 (마인드로직)", "게이트웨이 키 입력", secret = true)
+                    MonoTextField(jarvisApiBase, { jarvisApiBase = it }, "Jarvis 서버 주소", "https://api.example.com",
+                        keyboardType = KeyboardType.Uri)
+                    MonoTextField(jarvisApiKey, { jarvisApiKey = it }, "Jarvis 서버 API 키", "API 키 입력", secret = true)
+                    MonoTextField(webrtcSignalingURL, { webrtcSignalingURL = it }, "화면 공유 서버 주소",
+                        "비워 두면 Jarvis 서버를 씁니다", keyboardType = KeyboardType.Uri)
+                    if (onDisconnect != null) TextButton(onClick = { showDisconnectDialog = true }) { Text("글라스 앱 등록 해제") }
+                    if (onDebug != null) TextButton(onClick = onDebug) { Text("개발 도구") }
+                    TextButton(onClick = { showResetDialog = true }) {
+                        Text("기본값으로 초기화", color = MaterialTheme.colorScheme.error)
+                    }
                 }
             }
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 
@@ -202,7 +205,7 @@ fun SettingsScreen(
  * whenever the user comes back to the app, so a finished sign-in shows up without any extra step.
  */
 @Composable
-private fun ServiceConnectionsSection() {
+private fun ServiceConnectionsSection(onServer: (Boolean) -> Unit) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var states by remember { mutableStateOf<Map<Service, ServiceConnections.State>?>(null) }
@@ -219,60 +222,62 @@ private fun ServiceConnectionsSection() {
     }
     LaunchedEffect(reloads) {
         runCatching { ServiceConnections.status() }
-            .onSuccess { states = it; error = null }
-            .onFailure { error = "서버에 연결하지 못했어요. 고급 설정에서 서버 주소와 키를 확인해 주세요." }
+            .onSuccess { states = it; error = null; onServer(true) }
+            .onFailure { onServer(false); error = "서버에 연결하지 못했어요. 고급 설정에서 서버 주소와 키를 확인해 주세요." }
     }
 
-    SectionHeader("서비스 연결")
-    Text("연결한 서비스는 글라스에서 말로 찾을 수 있어요. 메시지를 보내거나 글을 쓰기 전에는 꼭 확인을 받아요.",
-        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    error?.let {
-        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
-        TextButton(onClick = { reloads++ }) { Text("다시 확인") }
-    }
-    Service.entries.forEach { service ->
-        val state = states?.get(service)
-        val status = when {
-            busy == service -> "처리 중…"
-            state == null -> if (error == null) "확인 중…" else "알 수 없음"
-            state.connected -> "연결됨"
-            !state.ready -> "서버에 ${service.label} 앱 키를 넣어야 연결할 수 있어요"
-            else -> "연결 안 됨"
+    JarvisGroup {
+        Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("서비스 연결", style = MaterialTheme.typography.titleSmall)
+            Text("연결한 서비스는 글라스에서 말로 찾을 수 있어요. 메시지를 보내거나 글을 쓰기 전에는 꼭 확인을 받아요.",
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            error?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { reloads++ }, modifier = Modifier.heightIn(min = 48.dp)) { Text("다시 확인") }
+            }
         }
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(44.dp)) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(painterResource(service.icon), null, Modifier.size(22.dp), tint = MaterialTheme.colorScheme.onSurface)
-                }
+        Service.entries.forEach { service ->
+            val state = states?.get(service)
+            val status = when {
+                busy == service -> "처리 중…"
+                state == null -> if (error == null) "확인 중…" else "알 수 없음"
+                state.connected -> "연결됨"
+                !state.ready -> "서버에 ${service.label} 앱 키를 넣어야 연결할 수 있어요"
+                else -> "연결 안 됨"
             }
-            Column(Modifier.weight(1f)) {
-                Text(service.label, style = MaterialTheme.typography.bodyLarge)
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (state?.connected == true) JarvisDot()
-                    Text(status, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
-            when {
-                state?.connected == true -> TextButton(onClick = { confirmDisconnect = service }, enabled = busy == null,
-                    modifier = Modifier.heightIn(min = 48.dp)) { Text("해제") }
-                else -> OutlinedButton(
-                    onClick = {
-                        busy = service
-                        scope.launch {
-                            runCatching { ServiceConnections.linkUrl(service) }
-                                .onSuccess { url ->
-                                    error = null
-                                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-                                }
-                                .onFailure { error = "${service.label} 연결 주소를 받지 못했어요. 잠시 뒤 다시 눌러 주세요." }
-                            busy = null
+            JarvisRow(service.label, subtitle = if (state?.connected == true) null else status,
+                leading = { RowIcon(painterResource(service.icon)) },
+                trailing = {
+                    if (state?.connected == true) Row(verticalAlignment = Alignment.CenterVertically) {
+                        StatusText("연결됨", true)
+                        TextButton(onClick = { confirmDisconnect = service }, enabled = busy == null,
+                            modifier = Modifier.heightIn(min = 48.dp)) {
+                            Text("해제", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                    },
-                    enabled = busy == null && state != null && state.ready,
-                    modifier = Modifier.heightIn(min = 48.dp),
-                ) { Text("연결") }
-            }
+                    } else Surface(
+                        onClick = {
+                            busy = service
+                            scope.launch {
+                                runCatching { ServiceConnections.linkUrl(service) }
+                                    .onSuccess { url ->
+                                        error = null
+                                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                                    }
+                                    .onFailure { error = "${service.label} 연결 주소를 받지 못했어요. 잠시 뒤 다시 눌러 주세요." }
+                                busy = null
+                            }
+                        },
+                        enabled = busy == null && state != null && state.ready,
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (busy == null && state?.ready == true) 1f else .4f),
+                        modifier = Modifier.heightIn(min = 48.dp).padding(vertical = 6.dp),
+                    ) {
+                        Box(Modifier.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
+                            Text("연결", style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = if (busy == null && state?.ready == true) 1f else .5f))
+                        }
+                    }
+                })
         }
     }
 
@@ -300,19 +305,36 @@ private fun ServiceConnectionsSection() {
 
 @Composable
 private fun SettingSwitch(title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(title, style = MaterialTheme.typography.bodyLarge)
-            Text(description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(title, style = MaterialTheme.typography.titleSmall)
+            Text(description, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 
+/** Grey tile holding a service or device mark, the leading item of a settings row. */
 @Composable
-private fun SectionHeader(title: String) {
-    Text(text = title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp))
+private fun RowIcon(painter: androidx.compose.ui.graphics.painter.Painter) {
+    Surface(shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.surfaceVariant, modifier = Modifier.size(36.dp)) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(painter, null, Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurface)
+        }
+    }
+}
+
+@Composable
+private fun StatusText(text: String, good: Boolean) {
+    Text(text, style = MaterialTheme.typography.labelMedium,
+        color = if (good) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
+}
+
+@Composable
+private fun Chevron(open: Boolean) {
+    Icon(if (open) Icons.Default.KeyboardArrowUp else Icons.AutoMirrored.Filled.KeyboardArrowRight,
+        if (open) "접기" else "펼치기", Modifier.size(20.dp), tint = MaterialTheme.colorScheme.outline)
 }
 
 @Composable

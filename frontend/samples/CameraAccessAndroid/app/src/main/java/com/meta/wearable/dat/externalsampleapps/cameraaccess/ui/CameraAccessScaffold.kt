@@ -4,6 +4,9 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.BookmarkBorder
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,16 +51,19 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
         bottomBar = {
             if (!state.isStreaming) Column {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                NavigationBar(containerColor = MaterialTheme.colorScheme.surface, tonalElevation = 0.dp) {
+                NavigationBar(containerColor = Jarvis.extras.card, tonalElevation = 0.dp) {
                     val labels = listOf("대화", "기억", "설정")
-                    val icons = listOf(Icons.Default.Mic, Icons.Default.Search, Icons.Default.Settings)
+                    // Filled when selected, outlined otherwise, as in the Figma tab bar.
+                    val icons = listOf(Icons.Filled.ChatBubble to Icons.Outlined.ChatBubbleOutline,
+                        Icons.Filled.Bookmark to Icons.Outlined.BookmarkBorder, Icons.Filled.Tune to Icons.Outlined.Tune)
                     labels.forEachIndexed { index, label ->
                         NavigationBarItem(selected = tab == index, onClick = {
                             viewModel.hideMemory(); viewModel.hideSettings()
                             if (index == 1) viewModel.showMemory()
                             if (index == 2) viewModel.showSettings()
-                        }, icon = { Icon(icons[index], null) }, label = { Text(label) },
-                            colors = NavigationBarItemDefaults.colors(indicatorColor = MaterialTheme.colorScheme.surface,
+                        }, icon = { Icon(if (tab == index) icons[index].first else icons[index].second, null, Modifier.size(22.dp)) },
+                            label = { Text(label, style = MaterialTheme.typography.labelMedium) },
+                            colors = NavigationBarItemDefaults.colors(indicatorColor = androidx.compose.ui.graphics.Color.Transparent,
                                 selectedIconColor = MaterialTheme.colorScheme.onSurface, selectedTextColor = MaterialTheme.colorScheme.onSurface,
                                 unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant, unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant))
                     }
@@ -73,13 +79,14 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
                     else HomeScreen(viewModel)
                 }
             }
-            if (state.isMemoryVisible) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            if (state.isMemoryVisible) Surface(Modifier.fillMaxSize(), color = Jarvis.extras.ground) {
                 MemoryScreen(onBack = viewModel::hideMemory)
             }
-            if (state.isSettingsVisible) Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
+            if (state.isSettingsVisible) Surface(Modifier.fillMaxSize(), color = Jarvis.extras.ground) {
                 SettingsScreen(onBack = viewModel::hideSettings,
                     onDebug = if (BuildConfig.DEBUG) viewModel::showDebugMenu else null,
-                    onDisconnect = if (state.isRegistered && activity != null) { { viewModel.startUnregistration(activity) } } else null)
+                    onDisconnect = if (state.isRegistered && activity != null) { { viewModel.startUnregistration(activity) } } else null,
+                    glassesStatus = when { state.hasActiveDevice -> "연결됨"; state.isRegistered -> "기다리는 중"; else -> "연결 안 됨" })
             }
             if (state.isDebugMenuVisible && BuildConfig.DEBUG) ModalBottomSheet(onDismissRequest = viewModel::hideDebugMenu) {
                 MockDeviceKitScreen(Modifier.fillMaxHeight(.9f))

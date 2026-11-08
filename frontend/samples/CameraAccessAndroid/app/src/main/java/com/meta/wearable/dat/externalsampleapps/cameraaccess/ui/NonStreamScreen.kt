@@ -19,15 +19,20 @@ fun NonStreamScreen(viewModel: WearablesViewModel,
     var connectionHelp by remember { mutableStateOf(false) }
     JarvisHome(true, state.hasActiveDevice,
         { if (state.hasActiveDevice) viewModel.navigateToStreaming(onRequestWearablesPermission) else connectionHelp = true },
-        viewModel::navigateToPhoneMode, modifier)
+        viewModel::navigateToPhoneMode, modifier, onHelp = { connectionHelp = true })
     if (connectionHelp || state.isGettingStartedSheetVisible) {
-        ModalBottomSheet(onDismissRequest = { connectionHelp = false; viewModel.hideGettingStartedSheet() }) {
-            Column(Modifier.padding(24.dp).navigationBarsPadding(), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text("글라스와 연결할게요", style = MaterialTheme.typography.headlineMedium)
-                Text("글라스를 착용하고 전원을 켠 뒤 Meta 앱에서 연결 상태와 카메라 권한을 확인해주세요.")
-                Text("연결을 기다리는 동안 휴대폰 카메라로 자비스를 사용할 수 있어요.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                Button(onClick = { connectionHelp = false; viewModel.hideGettingStartedSheet(); viewModel.navigateToPhoneMode() },
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)) { Text("휴대폰으로 먼저 시작") }
+        ModalBottomSheet(onDismissRequest = { connectionHelp = false; viewModel.hideGettingStartedSheet() },
+            containerColor = Jarvis.extras.card) {
+            Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 20.dp).navigationBarsPadding(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("글라스와 연결할게요", style = MaterialTheme.typography.headlineSmall)
+                Text("글라스를 착용하고 전원을 켠 뒤 Meta AI 앱에서 연결 상태와 카메라 권한을 확인해 주세요.",
+                    style = MaterialTheme.typography.bodyMedium)
+                Text("연결을 기다리는 동안 휴대폰 카메라로 자비스를 사용할 수 있어요.", style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(4.dp))
+                JarvisPrimaryButton("휴대폰으로 먼저 시작", { connectionHelp = false; viewModel.hideGettingStartedSheet(); viewModel.navigateToPhoneMode() },
+                    Modifier.fillMaxWidth())
             }
         }
     }

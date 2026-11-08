@@ -26,7 +26,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.OutlinedCard
 import androidx.compose.material.icons.filled.AutoStories
 import androidx.compose.material.icons.filled.CollectionsBookmark
 import androidx.compose.material.icons.filled.DeleteOutline
@@ -41,9 +40,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.TaskAlt
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.AssistChip
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -52,11 +49,18 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material.icons.filled.Badge
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.PhotoCamera
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -129,9 +133,11 @@ fun MemoryScreen(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
+        containerColor = Jarvis.extras.ground,
         topBar = {
             TopAppBar(
                 title = { Text(currentTitle, style = MaterialTheme.typography.headlineMedium) },
+                colors = androidx.compose.material3.TopAppBarDefaults.topAppBarColors(containerColor = Jarvis.extras.ground),
                 navigationIcon = {
                     IconButton(
                         onClick = {
@@ -206,100 +212,63 @@ fun MemoryScreen(
                 )
             }
             else -> {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding)
-                        .padding(horizontal = 24.dp),
-                ) {
-                    SummaryHeader(
-                        memoryCount = memoryUiState.memories.size,
-                        meetingCount = meetingUiState.meetings.size,
-                    )
-                    Spacer(modifier = Modifier.height(12.dp))
-                    TabRow(selectedTabIndex = selectedTab.ordinal) {
-                        RecordsTab.entries.forEach { tab ->
-                            Tab(
-                                selected = selectedTab == tab,
-                                onClick = { selectedTab = tab },
-                                text = {
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            imageVector = if (tab == RecordsTab.Memories) {
-                                                Icons.Default.AutoStories
-                                            } else {
-                                                Icons.Default.Groups2
-                                            },
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Text(tab.title)
-                                    }
-                                },
-                            )
-                        }
+                fun share(meeting: MeetingHistoryItem) {
+                    val intent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, meetingViewModel.shareText(meeting))
                     }
-                    Spacer(modifier = Modifier.height(12.dp))
-
+                    context.startActivity(Intent.createChooser(intent, "회의 공유"))
+                }
+                Column(Modifier.fillMaxSize().padding(padding).padding(horizontal = 20.dp)) {
+                    Text("기억과 회의를 한곳에서 찾아보세요.", style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(14.dp))
+                    // The switch stays put when the search box (memories only) comes and goes under it.
+                    JarvisSegmented(RecordsTab.entries.map { it.title }, selectedTab.ordinal, { selectedTab = RecordsTab.entries[it] })
+                    Spacer(Modifier.height(10.dp))
                     if (selectedTab == RecordsTab.Memories) {
-                        SearchBar(
-                            value = memoryUiState.query,
-                            onValueChange = memoryViewModel::updateQuery,
-                            onSearch = memoryViewModel::search,
-                        )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        SearchBar(value = memoryUiState.query, onValueChange = memoryViewModel::updateQuery, onSearch = memoryViewModel::search)
+                        Spacer(Modifier.height(4.dp))
                     }
-
                     when (selectedTab) {
-                        RecordsTab.Memories -> {
-                            RecordsState(
-                                isLoading = memoryUiState.isLoading,
-                                errorMessage = memoryUiState.errorMessage,
-                                emptyText = "저장된 기억이 없습니다.",
-                                isEmpty = memoryUiState.memories.isEmpty(),
-                            ) {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                ) {
-                                    items(memoryUiState.memories, key = { it.id }) { memory ->
-                                        MemoryCard(
-                                            memory = memory,
-                                            onClick = { selectedMemory = memory },
-                                        )
-                                    }
-                                }
+                        RecordsTab.Memories -> RecordsState(
+                            isLoading = memoryUiState.isLoading,
+                            errorMessage = memoryUiState.errorMessage,
+                            emptyText = "아직 저장된 기억이 없어요. 글라스에서 \"이거 기억해 줘\"라고 말해 보세요.",
+                            isEmpty = memoryUiState.memories.isEmpty(),
+                        ) {
+                            DayGroupedList(memoryUiState.memories, { it.capturedAt }, { it.id }) { memory ->
+                                JarvisRow(
+                                    title = memory.userNote ?: memory.text.lineSequence().firstOrNull().orEmpty(),
+                                    subtitle = "${memory.memoryTypeLabel()} · ${memory.capturedAtDisplay}",
+                                    icon = memory.typeIcon(),
+                                    iconTint = MaterialTheme.colorScheme.primary,
+                                    iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                    onClick = { selectedMemory = memory },
+                                )
                             }
                         }
-                        RecordsTab.Meetings -> {
-                            RecordsState(
-                                isLoading = meetingUiState.isLoading,
-                                errorMessage = meetingUiState.errorMessage,
-                                emptyText = "저장된 회의가 없습니다.",
-                                isEmpty = meetingUiState.meetings.isEmpty(),
-                            ) {
-                                LazyColumn(
-                                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                                ) {
-                                    items(meetingUiState.meetings, key = { it.id }) { meeting ->
-                                        MeetingCard(
-                                            meeting = meeting,
-                                            onClick = { selectedMeeting = meeting },
-                                            onShare = {
-                                                val shareText = meetingViewModel.shareText(meeting)
-                                                val intent = Intent(Intent.ACTION_SEND).apply {
-                                                    type = "text/plain"
-                                                    putExtra(Intent.EXTRA_TEXT, shareText)
-                                                }
-                                                context.startActivity(
-                                                    Intent.createChooser(intent, "회의 공유")
-                                                )
-                                            },
-                                        )
-                                    }
-                                }
+                        RecordsTab.Meetings -> RecordsState(
+                            isLoading = meetingUiState.isLoading,
+                            errorMessage = meetingUiState.errorMessage,
+                            emptyText = "아직 저장된 회의가 없어요. 대화 화면에서 회의 녹음을 시작해 보세요.",
+                            isEmpty = meetingUiState.meetings.isEmpty(),
+                        ) {
+                            DayGroupedList(meetingUiState.meetings, { it.startedAt }, { it.id }) { meeting ->
+                                JarvisRow(
+                                    title = meeting.title,
+                                    subtitle = listOfNotNull(meeting.timeDisplay, meeting.durationDisplay).joinToString(" · "),
+                                    icon = Icons.Default.Groups2,
+                                    iconTint = MaterialTheme.colorScheme.primary,
+                                    iconContainer = MaterialTheme.colorScheme.primaryContainer,
+                                    onClick = { selectedMeeting = meeting },
+                                    trailing = {
+                                        IconButton(onClick = { share(meeting) }) {
+                                            Icon(Icons.Default.Share, "회의 공유", Modifier.size(20.dp),
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    },
+                                )
                             }
                         }
                     }
@@ -368,45 +337,76 @@ fun MemoryScreen(
 }
 
 @Composable
-private fun SummaryHeader(
-    memoryCount: Int,
-    meetingCount: Int,
-) {
-    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("기억과 회의를 한곳에서 찾아보세요.", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            JarvisTag("불러온 기억 $memoryCount")
-            JarvisTag("불러온 회의 $meetingCount")
-        }
-    }
-}
-
-@Composable
 private fun SearchBar(
     value: String,
     onValueChange: (String) -> Unit,
     onSearch: () -> Unit,
 ) {
-    Row(
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
+        trailingIcon = if (value.isNotBlank()) { {
+            IconButton(onClick = onSearch) { Icon(Icons.AutoMirrored.Filled.ArrowForward, "검색", tint = MaterialTheme.colorScheme.primary) }
+        } } else null,
+        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch() }),
+        shape = RoundedCornerShape(12.dp),
+        placeholder = { Text("어떤 기억을 찾을까요?", maxLines = 1) },
+        singleLine = true,
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Jarvis.extras.card, unfocusedContainerColor = Jarvis.extras.card,
+            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+        ),
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        OutlinedTextField(
-            value = value,
-            onValueChange = onValueChange,
-            leadingIcon = { Icon(Icons.Default.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
-            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch() }),
-            shape = androidx.compose.foundation.shape.RoundedCornerShape(26.dp),
-            placeholder = { Text("어떤 기억을 찾을까요?", maxLines = 1) },
-            singleLine = true,
-            modifier = Modifier.weight(1f),
-        )
-        FilledIconButton(onClick = onSearch, modifier = Modifier.size(52.dp)) {
-            Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "검색")
+    )
+}
+
+/** Splits a list into 오늘 / 어제 / 이번 주 / 이전 by its KST timestamp and shows each part as one white group. */
+@Composable
+private fun <T> DayGroupedList(items: List<T>, timeOf: (T) -> String, keyOf: (T) -> String, row: @Composable (T) -> Unit) {
+    val groups = remember(items) { items.groupBy { dayGroup(timeOf(it)) }.toSortedMap(compareBy { DAY_ORDER.indexOf(it) }) }
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
+        groups.forEach { (day, rows) ->
+            item(key = "day-$day") {
+                Text(day, Modifier.padding(start = 4.dp, top = 14.dp, bottom = 8.dp), style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            item(key = "group-$day") {
+                JarvisGroup {
+                    rows.forEachIndexed { i, item ->
+                        androidx.compose.runtime.key(keyOf(item)) { row(item) }
+                        if (i < rows.lastIndex) HorizontalDivider(Modifier.padding(start = 62.dp, end = 14.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                }
+            }
         }
     }
+}
+
+private val DAY_ORDER = listOf("오늘", "어제", "이번 주", "이전")
+
+private fun dayGroup(iso: String): String {
+    val zone = java.time.ZoneId.of("Asia/Seoul")
+    val date = runCatching { java.time.OffsetDateTime.parse(iso).atZoneSameInstant(zone).toLocalDate() }
+        .recoverCatching { java.time.Instant.parse(iso).atZone(zone).toLocalDate() }.getOrNull() ?: return "이전"
+    val today = java.time.LocalDate.now(zone)
+    return when {
+        date == today -> "오늘"
+        date == today.minusDays(1) -> "어제"
+        !date.isBefore(today.minusDays(6)) -> "이번 주"
+        else -> "이전"
+    }
+}
+
+private fun MemoryItem.typeIcon(): androidx.compose.ui.graphics.vector.ImageVector = when (memoryTypeLabel()) {
+    "명함" -> Icons.Default.Badge
+    "문서" -> Icons.Default.Description
+    "사람" -> Icons.Default.Person
+    "장소" -> Icons.Default.Place
+    "음성 기억" -> Icons.Default.Mic
+    else -> Icons.Default.PhotoCamera
 }
 
 @Composable
@@ -425,78 +425,17 @@ private fun RecordsState(
         }
         errorMessage != null -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = errorMessage, color = MaterialTheme.colorScheme.error)
+                Text(text = errorMessage, Modifier.padding(horizontal = 24.dp), color = MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
         isEmpty -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text(text = emptyText, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(text = emptyText, Modifier.padding(horizontal = 24.dp), color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    style = MaterialTheme.typography.bodyMedium, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
             }
         }
         else -> content()
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
-private fun MemoryCard(
-    memory: MemoryItem,
-    onClick: () -> Unit,
-) {
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        colors = androidx.compose.material3.CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            MemoryThumbnail(filename = memory.imageFilename)
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                JarvisTag(memory.memoryTypeLabel())
-                JarvisTag(memory.capturedAtDisplay)
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top,
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(
-                        text = memory.userNote ?: memory.text.lineSequence().firstOrNull().orEmpty(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-            memory.aiInterpretation?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 3,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            Text(
-                text = "이 기억은 ${memory.recallHint()}로 다시 찾기 쉽습니다.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            if (memory.labels.isNotEmpty()) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    memory.labels.take(4).forEach { label ->
-                        JarvisTag(label)
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -506,7 +445,7 @@ private fun MemoryDetail(
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
@@ -552,7 +491,7 @@ private fun MemoryDetail(
             RecallExamplesCard(memory = memory)
         }
         item {
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+            DetailCard {
                 Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("기본 정보", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
                     MetadataRow("저장 시간", memory.capturedAtDisplay)
@@ -567,7 +506,7 @@ private fun MemoryDetail(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MemoryRecallHeader(memory: MemoryItem) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    DetailCard {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -611,7 +550,7 @@ private fun MemoryRecallHeader(memory: MemoryItem) {
 @Composable
 private fun RecallExamplesCard(memory: MemoryItem) {
     val examples = memory.recallExamples()
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    DetailCard {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -640,92 +579,25 @@ private fun RecallExamplesCard(memory: MemoryItem) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MeetingCard(
-    meeting: MeetingHistoryItem,
-    onClick: () -> Unit,
-    onShare: () -> Unit,
-) {
-    OutlinedCard(
-        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
-        shape = MaterialTheme.shapes.medium,
-        colors = androidx.compose.material3.CardDefaults.outlinedCardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-    ) {
-        Column(
-            modifier = Modifier.padding(horizontal = 18.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Top,
-            ) {
-                Column(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    Text(
-                        text = meeting.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        text = meeting.timeDisplay,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                IconButton(onClick = onShare) {
-                    Icon(Icons.Default.Share, contentDescription = "회의 공유")
-                }
-            }
-            meeting.durationDisplay?.let {
-                AssistChip(onClick = {}, label = { Text(it) })
-            }
-            meeting.summary?.let {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (meeting.decisions.isNotEmpty()) {
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    meeting.decisions.take(3).forEach { decision ->
-                        AssistChip(onClick = {}, label = { Text(decision) })
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalLayoutApi::class)
-@Composable
 private fun MeetingDetail(
     meeting: MeetingHistoryItem,
     modifier: Modifier = Modifier,
 ) {
     LazyColumn(
-        modifier = modifier.fillMaxSize().padding(horizontal = 24.dp),
+        modifier = modifier.fillMaxSize().padding(horizontal = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
-            ElevatedCard(modifier = Modifier.fillMaxWidth()) {
-                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(meeting.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                    MetadataRow("회의 시간", meeting.timeDisplay)
-                    meeting.durationDisplay?.let { MetadataRow("소요 시간", it) }
-                }
+            Column(Modifier.padding(top = 4.dp, bottom = 2.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(meeting.title, style = MaterialTheme.typography.headlineSmall.copy(lineBreak = androidx.compose.ui.text.style.LineBreak.Paragraph.copy(wordBreak = androidx.compose.ui.text.style.LineBreak.WordBreak.Phrase)))
+                Text(listOfNotNull(meeting.timeDisplay, meeting.durationDisplay?.let { "소요 시간 $it" }).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         item {
             MarkdownDetailCard(
                 title = "회의 요약",
+                skipHeading = meeting.title,
                 body = meeting.markdownSummary ?: meeting.summary.orEmpty(),
             )
         }
@@ -761,15 +633,15 @@ private fun MeetingDetail(
         }
         if (meeting.keywords.isNotEmpty()) {
             item {
-                ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+                DetailCard {
                     Column(
                         modifier = Modifier.padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
-                        Text("키워드", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                        Text("키워드", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             meeting.keywords.forEach { keyword ->
-                                AssistChip(onClick = {}, label = { Text(keyword) })
+                                JarvisTag("#$keyword")
                             }
                         }
                     }
@@ -778,9 +650,21 @@ private fun MeetingDetail(
         }
         if (meeting.transcript?.isNotBlank() == true) {
             item {
-                DetailSection("회의록 원문", meeting.transcript)
+                // The transcript is long; it opens on request, like the Figma "회의록 원문 보기" button.
+                var open by rememberSaveable(meeting.id) { mutableStateOf(false) }
+                if (open) DetailSection("회의록 원문", meeting.transcript)
+                else JarvisSecondaryButton("회의록 원문 보기", { open = true }, Modifier.fillMaxWidth())
             }
         }
+        item { Spacer(Modifier.height(16.dp)) }
+    }
+}
+
+/** White card on the grey ground, the detail screens' only container. */
+@Composable
+private fun DetailCard(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    Surface(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.medium, color = Jarvis.extras.card) {
+        Column(content = content)
     }
 }
 
@@ -789,12 +673,12 @@ private fun DetailSection(
     title: String,
     body: String,
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    DetailCard {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(body, style = MaterialTheme.typography.bodyMedium)
         }
     }
@@ -806,7 +690,7 @@ private fun IconDetailSection(
     body: String,
     icon: @Composable () -> Unit,
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    DetailCard {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -816,7 +700,7 @@ private fun IconDetailSection(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 icon()
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Text(body, style = MaterialTheme.typography.bodyMedium)
         }
@@ -829,7 +713,7 @@ private fun StructuredListCard(
     items: List<String>,
     icon: @Composable () -> Unit,
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    DetailCard {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -839,7 +723,7 @@ private fun StructuredListCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 icon()
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             items.forEach { item ->
                 Surface(
@@ -877,25 +761,31 @@ private fun MetadataRow(
 private fun MarkdownDetailCard(
     title: String,
     body: String,
+    // The screen header already shows the meeting title; a first heading that repeats it is dropped.
+    skipHeading: String? = null,
 ) {
-    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+    val byWord = androidx.compose.ui.text.style.LineBreak.Paragraph.copy(
+        wordBreak = androidx.compose.ui.text.style.LineBreak.WordBreak.Phrase)
+    DetailCard {
         Column(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-            body.lineSequence().forEach { line ->
+            Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            body.lineSequence()
+                .filterNot { it.trim().startsWith("# ") && it.trim().removePrefix("# ").trim() == skipHeading?.trim() }
+                .dropWhile { it.isBlank() }
+                .forEach { line ->
                 val trimmed = line.trim()
                 when {
                     trimmed.startsWith("# ") -> Text(
                         trimmed.removePrefix("# ").trim(),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge.copy(lineBreak = byWord),
                     )
                     trimmed.startsWith("## ") -> Text(
                         trimmed.removePrefix("## ").trim(),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
+                        Modifier.padding(top = 6.dp),
+                        style = MaterialTheme.typography.titleSmall.copy(lineBreak = byWord),
                     )
                     trimmed.startsWith("- ") -> Text(
                         "• ${trimmed.removePrefix("- ").trim()}",

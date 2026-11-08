@@ -1,53 +1,72 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
-import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
 /**
- * Live conversation controls: a voice level, what Jarvis is doing, and three round buttons. The session menu holds
- * meeting recording and ending the camera; the middle button talks; the right one opens memories.
+ * Live conversation controls, as in the Figma: what Jarvis is doing, then three labelled round buttons.
+ * 회의 녹음 starts a recording (the recording screen has its own stop), the middle one talks or stops listening,
+ * and 대화 마치기 leaves the conversation screen.
  */
 @Composable
 fun LiveControls(listening: String, onToggleAI: () -> Unit, isAIActive: Boolean, aiEnabled: Boolean,
-    onToggleRecording: () -> Unit, isRecording: Boolean, isRecordingProcessing: Boolean,
-    onRecords: () -> Unit, onStopStream: () -> Unit, modifier: Modifier = Modifier) {
-    var more by remember { mutableStateOf(false) }
-    Column(modifier.padding(start = 24.dp, end = 24.dp, top = 8.dp, bottom = 28.dp),
+    onStartRecording: () -> Unit, onEnd: () -> Unit, modifier: Modifier = Modifier) {
+    Column(modifier.padding(start = 20.dp, end = 20.dp, top = 8.dp, bottom = 20.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        if (isAIActive) Row(Modifier.height(32.dp), verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-            listOf(10, 20, 30, 16, 26, 12).forEach { h ->
-                Surface(Modifier.width(4.dp).height(h.dp), shape = RoundedCornerShape(2.dp), color = MaterialTheme.colorScheme.onSurface) {}
+        Text(listening, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.SpaceEvenly) {
+            SideControl("회의 녹음", Icons.Default.FiberManualRecord, MaterialTheme.colorScheme.error, onStartRecording, aiEnabled)
+            TalkControl(isAIActive, aiEnabled, onToggleAI)
+            SideControl("대화 마치기", Icons.Default.Close, MaterialTheme.colorScheme.onSurface, onEnd, true)
+        }
+    }
+}
+
+@Composable
+private fun SideControl(label: String, icon: ImageVector, tint: Color, onClick: () -> Unit, enabled: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Surface(onClick = onClick, enabled = enabled, shape = CircleShape, color = MaterialTheme.colorScheme.surfaceVariant,
+            modifier = Modifier.size(52.dp)) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(icon, label, Modifier.size(if (icon == Icons.Default.FiberManualRecord) 16.dp else 22.dp),
+                    tint = if (enabled) tint else tint.copy(alpha = .35f))
             }
         }
-        Text(listening, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(28.dp)) {
-            Box {
-                OutlinedIconButton(onClick = { more = true }, modifier = Modifier.size(56.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) { Icon(Icons.Default.MoreHoriz, "세션 메뉴") }
-                DropdownMenu(expanded = more, onDismissRequest = { more = false }) {
-                    DropdownMenuItem(text = { Text(if (isRecording) "회의 녹음 종료" else if (isRecordingProcessing) "회의 정리 중" else "회의 녹음 시작") },
-                        enabled = !isRecordingProcessing, onClick = { more = false; onToggleRecording() },
-                        leadingIcon = { Icon(if (isRecording) Icons.Default.StopCircle else Icons.Default.MicNone, null) })
-                    DropdownMenuItem(text = { Text("카메라 연결 종료") }, onClick = { more = false; onStopStream() },
-                        leadingIcon = { Icon(Icons.Default.Close, null) })
+        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** The main button: a blue gradient disc with a halo while listening, a plain mic otherwise. */
+@Composable
+private fun TalkControl(active: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val x = Jarvis.extras
+    val scheme = MaterialTheme.colorScheme
+    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Box(Modifier.size(84.dp), contentAlignment = Alignment.Center) {
+            if (active) Box(Modifier.fillMaxSize().clip(CircleShape).background(scheme.primaryContainer))
+            Surface(onClick = onClick, enabled = enabled, shape = CircleShape, color = Color.Transparent, modifier = Modifier.size(68.dp)) {
+                Box(Modifier.fillMaxSize().background(
+                    if (enabled) Brush.verticalGradient(listOf(x.gradientStart, x.gradientEnd))
+                    else Brush.verticalGradient(listOf(scheme.surfaceVariant, scheme.surfaceVariant)), CircleShape),
+                    contentAlignment = Alignment.Center) {
+                    Icon(if (active) Icons.Default.GraphicEq else Icons.Default.Mic, if (active) "듣기 멈추기" else "말하기",
+                        Modifier.size(30.dp), tint = if (enabled) x.onGradient else scheme.onSurfaceVariant)
                 }
             }
-            FilledIconButton(onClick = onToggleAI, enabled = aiEnabled, modifier = Modifier.size(80.dp), shape = CircleShape) {
-                Icon(if (isAIActive) Icons.Default.Stop else Icons.Default.Mic, if (isAIActive) "대화 마치기" else "말하기",
-                    Modifier.size(32.dp))
-            }
-            OutlinedIconButton(onClick = onRecords, modifier = Modifier.size(56.dp),
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline)) { Icon(Icons.Default.Search, "기억 열기") }
         }
+        Text(if (active) "듣는 중" else "말하기", style = MaterialTheme.typography.labelMedium,
+            color = if (active) scheme.primary else scheme.onSurfaceVariant)
     }
 }
