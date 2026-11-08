@@ -99,6 +99,15 @@ object SettingsManager {
         get() = prefs.getBoolean("videoStreamingEnabled", false)
         set(value) = prefs.edit().putBoolean("videoStreamingEnabled", value).apply()
 
+    /** When a business card comes into view, Jarvis asks whether to save it (nothing is saved without a yes). */
+    var businessCardOfferEnabled: Boolean
+        get() = prefs.getBoolean("businessCardOfferEnabled", true)
+        set(value) = prefs.edit().putBoolean("businessCardOfferEnabled", value).apply()
+
+    var businessCardOfferIntroShown: Boolean
+        get() = prefs.getBoolean("businessCardOfferIntroShown", false)
+        set(value) = prefs.edit().putBoolean("businessCardOfferIntroShown", value).apply()
+
     var proactiveNotificationsEnabled: Boolean
         get() = prefs.getBoolean("proactiveNotificationsEnabled", true)
         set(value) = prefs.edit().putBoolean("proactiveNotificationsEnabled", value).apply()

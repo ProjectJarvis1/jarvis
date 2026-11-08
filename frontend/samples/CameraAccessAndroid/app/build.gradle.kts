@@ -77,6 +77,7 @@ dependencies {
   implementation(libs.androidx.material3)
   implementation(libs.kotlinx.collections.immutable)
   implementation(libs.mwdat.core)
+  implementation(libs.mlkit.text.korean)
   implementation(libs.mwdat.camera)
   implementation(libs.mwdat.mockdevice)
   // VisionClaw additions

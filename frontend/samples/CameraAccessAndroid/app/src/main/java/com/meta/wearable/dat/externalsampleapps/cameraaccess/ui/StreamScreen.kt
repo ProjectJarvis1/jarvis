@@ -197,6 +197,10 @@ fun StreamScreen(
         streamViewModel.webrtcViewModel = webrtcViewModel
     }
 
+    LaunchedEffect(geminiViewModel, meetingRecordingViewModel) {
+        geminiViewModel.cardOfferPaused = { meetingRecordingViewModel.uiState.value.isRecording }
+    }
+
     // Start stream or phone camera
     LaunchedEffect(isPhoneMode) {
         if (isPhoneMode) {

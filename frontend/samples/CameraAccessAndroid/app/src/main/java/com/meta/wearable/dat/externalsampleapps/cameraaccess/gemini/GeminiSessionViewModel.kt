@@ -1,6 +1,9 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
 import android.graphics.Bitmap
+import android.os.SystemClock
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.card.BusinessCardText
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.card.BusinessCardWatcher
 import java.io.File
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.*
 import kotlinx.coroutines.Dispatchers
@@ -118,6 +121,15 @@ class GeminiSessionViewModel : ViewModel() {
             geminiService.sendVideoFrameBase64(it)
         },
         continuous = { SettingsManager.videoStreamingEnabled },
+    )
+    // Proactive business-card offer: the phone reads the view itself; Jarvis asks before anything is saved.
+    @Volatile private var pendingCardFrame: Pair<VisualMemoryFrameStore.VisualFrame, Long>? = null
+    @Volatile private var cardOfferRunning = false
+    /** Set by the conversation screen: no card offers while a meeting is being recorded. */
+    var cardOfferPaused: () -> Boolean = { false }
+    private val cardWatcher = BusinessCardWatcher(
+        enabled = { SettingsManager.businessCardOfferEnabled && liveConversation && _uiState.value.isGeminiActive && !cardOfferPaused() },
+        onCard = { card, bitmap -> viewModelScope.launch { offerBusinessCard(card, bitmap) } },
     )
     private var stateObservationJob: Job? = null
     private var reconnectJob: Job? = null
@@ -764,6 +776,7 @@ class GeminiSessionViewModel : ViewModel() {
 
     fun sendVideoFrameIfThrottled(bitmap: Bitmap) {
         VisualMemoryFrameStore.update(bitmap)
+        cardWatcher.offer(bitmap)
         // Keep the latest frame locally. Visual data is sent to Gemini only after an explicit
         // capture_current_view tool call so an older stream frame cannot answer a new question.
     }
@@ -958,7 +971,9 @@ class GeminiSessionViewModel : ViewModel() {
             else "아직 저장하지 않았습니다. 화면에 저장 확인 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 저장을 누르면 저장됩니다. 같은 확인을 다시 묻지 말고 한 문장으로만 안내한 뒤 기다리세요.", waitingForUser = true)
         }
         if (task.tool == "capture_current_view") {
-            val frame = VisualMemoryFrameStore.captureFreshVisual()
+            // A card offer keeps the exact frame the card was read from, even if the user looked away since.
+            val frame = (if (args["card_offer"]?.toString() == "true") takePendingCardFrame() else null)
+                ?: VisualMemoryFrameStore.captureFreshVisual()
                 ?: return TaskOutcome(error = "새 사진을 가져올 수 없습니다.")
             execution.checkCurrent()
             taskArtifacts.put(task.id, task.revision, frame)
@@ -1066,8 +1081,59 @@ class GeminiSessionViewModel : ViewModel() {
         }
     }
 
+    private fun takePendingCardFrame(): VisualMemoryFrameStore.VisualFrame? {
+        val (frame, at) = pendingCardFrame ?: return null
+        pendingCardFrame = null
+        return frame.takeIf { SystemClock.elapsedRealtime() - at < 30_000L }
+    }
+
+    /**
+     * A card was read the same way twice. Keep that frame as a photo task, then let Jarvis ask once.
+     * Saving still goes through save_life_memory and the usual approval, tied to this photo task.
+     */
+    private suspend fun offerBusinessCard(card: BusinessCardText.Card, bitmap: Bitmap) {
+        if (cardOfferRunning || !_uiState.value.isGeminiActive || geminiService.connectionState.value != GeminiConnectionState.Ready) return
+        val activeTask = taskManager.snapshot().any { it.state in setOf(TaskState.QUEUED, TaskState.RUNNING, TaskState.WAITING_USER) }
+        if (geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0 || activeTask ||
+            System.currentTimeMillis() - lastInputAt < 2_500L) return
+        cardOfferRunning = true
+        try {
+            pendingCardFrame = withContext(Dispatchers.Default) {
+                VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "business_card_sighting")
+            } to SystemClock.elapsedRealtime()
+            val task = runCatching {
+                taskManager.submit("capture_current_view", JSONObject().put("reason", "명함 자동 감지").put("card_offer", true).toString(), "명함 사진")
+            }.getOrElse { pendingCardFrame = null; return }
+            announcedTasks.add("${task.id}:${task.revision}")
+            var done: TaskRecord? = null
+            repeat(25) {
+                val now = taskManager.get(task.id)
+                if (now != null && now.state !in setOf(TaskState.QUEUED, TaskState.RUNNING)) { done = now; return@repeat }
+                delay(200L)
+            }
+            val captured = done?.takeIf { it.state == TaskState.COMPLETED } ?: return
+            announcedTasks.add("${captured.id}:${captured.revision}")
+            val intro = if (!SettingsManager.businessCardOfferIntroShown) {
+                SettingsManager.businessCardOfferIntroShown = true
+                " 이번이 처음이니 질문 앞에 '명함이 보이면 이렇게 먼저 여쭤볼게요. 설정에서 끌 수 있어요.'라고 한 번만 덧붙이세요."
+            } else ""
+            val who = listOfNotNull(card.name?.let { "$it 님" }, card.org).joinToString(", ").ifBlank { "알 수 없음" }
+            geminiService.sendTextMessage(
+                "[앱 알림: 사용자 발화가 아님] 글라스 시야에 명함으로 보이는 것이 있어 앱이 사진을 보관했습니다. " +
+                    "사진 작업 task_id=${captured.id}, revision=${captured.revision}. 휴대폰이 읽은 이름/회사(틀릴 수 있음): $who. " +
+                    "get_task_result로 사진을 직접 확인하세요. 명함이 맞으면 사용자에게 '홍길동 님 명함이 보이네요. 저장할까요?'처럼 이름을 넣어 한 문장으로만 물어보세요.$intro " +
+                    "명함이 아니면 아무 말도 하지 마세요. 사용자가 승인하면 이 사진(source_task_id, source_revision)으로 save_life_memory를 호출하고 labels에 business_card, document를 넣으세요. " +
+                    "사용자가 거절하거나 다른 이야기를 하면 다시 묻지 마세요."
+            ) { _uiState.value.isGeminiActive && System.currentTimeMillis() - lastInputAt >= 2_500L }
+            cardWatcher.markOffered(card)
+        } finally {
+            cardOfferRunning = false
+        }
+    }
+
     override fun onCleared() {
         super.onCleared()
+        cardWatcher.close()
         stopSession()
         visionExecutor.shutdownNow()
     }

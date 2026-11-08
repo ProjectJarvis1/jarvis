@@ -80,6 +80,7 @@ fun SettingsScreen(
     var jarvisApiKey by remember { mutableStateOf(SettingsManager.jarvisApiKey) }
     var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
     var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
+    var cardOfferEnabled by remember { mutableStateOf(SettingsManager.businessCardOfferEnabled) }
     var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
     var liveConversationEnabled by remember { mutableStateOf(SettingsManager.liveConversationEnabled) }
     var whisperSttEnabled by remember { mutableStateOf(SettingsManager.speechRecognizerProvider == "whisper") }
@@ -94,6 +95,7 @@ fun SettingsScreen(
         SettingsManager.jarvisApiKey = jarvisApiKey.trim()
         SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
         SettingsManager.videoStreamingEnabled = videoStreamingEnabled
+        SettingsManager.businessCardOfferEnabled = cardOfferEnabled
         SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
         SettingsManager.liveConversationEnabled = liveConversationEnabled
         SettingsManager.speechRecognizerProvider = if (whisperSttEnabled) "whisper" else "android"
@@ -106,6 +108,7 @@ fun SettingsScreen(
         jarvisApiKey = SettingsManager.jarvisApiKey
         webrtcSignalingURL = SettingsManager.webrtcSignalingURL
         videoStreamingEnabled = SettingsManager.videoStreamingEnabled
+        cardOfferEnabled = SettingsManager.businessCardOfferEnabled
         proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
         liveConversationEnabled = SettingsManager.liveConversationEnabled
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
@@ -113,7 +116,7 @@ fun SettingsScreen(
 
     // Tab navigation and system Back also persist edits, not only the toolbar Back button.
     LaunchedEffect(geminiAPIKey, systemPrompt, jarvisApiBase, jarvisApiKey, webrtcSignalingURL,
-        videoStreamingEnabled, proactiveNotificationsEnabled, liveConversationEnabled, whisperSttEnabled) {
+        videoStreamingEnabled, cardOfferEnabled, proactiveNotificationsEnabled, liveConversationEnabled, whisperSttEnabled) {
         save()
     }
     var promptOpen by remember { mutableStateOf(false) }
@@ -149,6 +152,8 @@ fun SettingsScreen(
                     whisperSttEnabled) { whisperSttEnabled = it }
                 SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
                     videoStreamingEnabled) { videoStreamingEnabled = it }
+                SettingSwitch("명함 보이면 저장 제안", "명함이 보이면 Jarvis가 저장할지 먼저 물어요. 대답하기 전에는 저장하지 않아요.",
+                    cardOfferEnabled) { cardOfferEnabled = it }
                 SettingSwitch("서버 알림 음성 안내", "Jarvis 서버에서 온 알림을 글라스 스피커로 읽어 줘요.",
                     proactiveNotificationsEnabled) { proactiveNotificationsEnabled = it }
             }
