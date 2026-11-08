@@ -79,8 +79,12 @@ class StreamingService : Service() {
         if (reason == REASON_LISTEN) withMicrophone = false
         reasons.isEmpty().also { if (it) { running = false; micGranted = false } }
       }
+      val intent = Intent(context, StreamingService::class.java).apply { `package` = context.packageName }
       if (empty) {
-        context.stopService(Intent(context, StreamingService::class.java).apply { `package` = context.packageName })
+        context.stopService(intent)
+      } else if (reason == REASON_LISTEN && micGranted) {
+        // Still held for the glasses stream: start again so it drops the microphone type.
+        runCatching { context.startForegroundService(intent) }
       }
     }
   }

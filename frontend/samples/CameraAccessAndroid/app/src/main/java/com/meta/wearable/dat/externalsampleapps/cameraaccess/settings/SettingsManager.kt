@@ -105,6 +105,13 @@ object SettingsManager {
         get() = prefs.getBoolean("backgroundWakeWordEnabled", true)
         set(value) = prefs.edit().putBoolean("backgroundWakeWordEnabled", value).apply()
 
+    /** Calls [onChange] whenever [key] is written; returns the call that stops observing. */
+    fun observe(key: String, onChange: () -> Unit): () -> Unit {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, changed -> if (changed == key) onChange() }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        return { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }
+
     var businessCardOfferEnabled: Boolean
         get() = prefs.getBoolean("businessCardOfferEnabled", true)
         set(value) = prefs.edit().putBoolean("businessCardOfferEnabled", value).apply()

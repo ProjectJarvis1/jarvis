@@ -243,21 +243,29 @@ fun StreamScreen(
     // Hold the foreground service (and, when enabled, the microphone) for as long as this screen is
     // open, so "자비스" still works with the screen off. Re-applied whenever the screen comes back
     // from Settings: the microphone type can only be granted while the app is visible.
-    // Also on every real return to the app (ON_RESUME), e.g. after granting the microphone in system settings.
-    val currentIsForeground = rememberUpdatedState(isForeground)
+    // Applied on every real return to the app (ON_RESUME, e.g. after granting the microphone in system
+    // settings) and the moment the switch changes in Settings; both happen with the app on screen.
+    // With the switch off the screen holds nothing, so phone mode keeps no service or wake lock.
     fun holdListening() {
-        if (!currentIsForeground.value) return
         val app = context.applicationContext
+        if (!SettingsManager.backgroundWakeWordEnabled) {
+            StreamingService.stop(app, StreamingService.REASON_LISTEN)
+            return
+        }
         WakeWordTrialLog.update(app) { it.started(System.currentTimeMillis(), WakeWordTrialLog.battery(app)) }
-        if (!StreamingService.start(app, StreamingService.REASON_LISTEN, SettingsManager.backgroundWakeWordEnabled)) {
+        if (!StreamingService.start(app, StreamingService.REASON_LISTEN, microphone = true)) {
             WakeWordTrialLog.update(app) { it.copy(serviceNote = "백그라운드 대기 서비스를 시작하지 못했어요.") }
         }
     }
-    LaunchedEffect(isForeground) { holdListening() }
     DisposableEffect(lifecycleOwner) {
+        holdListening()
         val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) holdListening() }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+        val unobserve = SettingsManager.observe("backgroundWakeWordEnabled") { holdListening() }
+        onDispose {
+            unobserve()
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
     }
 
     // Clean up on exit
