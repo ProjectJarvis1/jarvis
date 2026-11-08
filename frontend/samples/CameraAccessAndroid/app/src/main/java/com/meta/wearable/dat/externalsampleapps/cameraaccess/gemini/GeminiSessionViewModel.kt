@@ -1103,6 +1103,10 @@ class GeminiSessionViewModel : ViewModel() {
     private suspend fun offerBusinessCard(card: BusinessCardText.Card, bitmap: Bitmap) {
         if (cardOfferRunning || !_uiState.value.isGeminiActive || geminiService.connectionState.value != GeminiConnectionState.Ready) return
         val activeTask = taskManager.snapshot().any { it.state in setOf(TaskState.QUEUED, TaskState.RUNNING, TaskState.WAITING_USER) }
+        // A finished result the user has not heard yet comes first; submitting would steal its focus.
+        val focused = taskManager.focusTaskId?.let(taskManager::get)
+        if (focused != null && focused.state in setOf(TaskState.COMPLETED, TaskState.FAILED) &&
+            "${focused.id}:${focused.revision}" !in announcedTasks && System.currentTimeMillis() - focused.updatedAt < 30_000L) return
         if (geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0 || activeTask ||
             System.currentTimeMillis() - lastInputAt < 2_500L) return
         cardOfferRunning = true
