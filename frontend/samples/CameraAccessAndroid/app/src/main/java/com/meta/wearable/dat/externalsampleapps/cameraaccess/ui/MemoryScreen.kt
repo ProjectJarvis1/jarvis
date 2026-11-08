@@ -750,7 +750,8 @@ private fun openFollowupCalendar(context: android.content.Context, meeting: Meet
             if (due == null) append("\n기한을 확인해 주세요.")
         })
     if (due != null) {
-        val begin = due.atStartOfDay(java.time.ZoneId.of("Asia/Seoul")).toInstant().toEpochMilli()
+        // All-day events are stored at UTC midnight; a KST midnight would land on the day before.
+        val begin = due.atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
         intent.putExtra(android.provider.CalendarContract.EXTRA_EVENT_ALL_DAY, true)
             .putExtra(android.provider.CalendarContract.EXTRA_EVENT_BEGIN_TIME, begin)
             .putExtra(android.provider.CalendarContract.EXTRA_EVENT_END_TIME, begin + 86_400_000L)

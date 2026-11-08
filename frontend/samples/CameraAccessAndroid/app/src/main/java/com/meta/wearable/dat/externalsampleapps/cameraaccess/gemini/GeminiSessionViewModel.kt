@@ -587,14 +587,27 @@ class GeminiSessionViewModel : ViewModel() {
 
     /**
      * Hands an app notice (a meeting's follow-ups, a meeting briefing) to the live conversation so Jarvis
-     * says it on the glasses. Same guard as server notifications; false when no conversation is ready,
-     * and the caller falls back to a phone notification.
+     * says it on the glasses. It waits up to [waitMs] for a quiet moment (nobody speaking, no reply
+     * playing, no tool running) so it never cuts into an exchange; with no ready conversation, or no
+     * quiet moment in time, [fallback] runs instead (a phone notification).
      */
-    fun announce(text: String): Boolean {
-        val state = _uiState.value
-        if (!state.isGeminiActive || state.connectionState != GeminiConnectionState.Ready) return false
-        geminiService.sendTextMessage(text, isValid = { _uiState.value.isGeminiActive })
-        return true
+    fun announce(text: String, waitMs: Long = 45_000L, fallback: () -> Unit) {
+        viewModelScope.launch {
+            val deadline = System.currentTimeMillis() + waitMs
+            while (true) {
+                val state = _uiState.value
+                if (!state.isGeminiActive || state.connectionState != GeminiConnectionState.Ready) break
+                val busy = geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0 ||
+                    cardOfferRunning || System.currentTimeMillis() - lastInputAt < 2_500L
+                if (!busy) {
+                    geminiService.sendTextMessage(text, isValid = { _uiState.value.isGeminiActive })
+                    return@launch
+                }
+                if (System.currentTimeMillis() > deadline) break
+                delay(1_000L)
+            }
+            fallback()
+        }
     }
 
     fun stopSession() {

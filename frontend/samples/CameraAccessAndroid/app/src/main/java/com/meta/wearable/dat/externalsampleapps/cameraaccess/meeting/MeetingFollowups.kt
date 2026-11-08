@@ -38,29 +38,31 @@ object MeetingFollowups {
 
     /**
      * The calendar day a follow-up is due, or null when the meeting did not pin one down. Only
-     * unambiguous phrases resolve: an explicit date, 오늘/내일/모레, or a weekday ("금요일", "다음 주
-     * 금요일"). "다음 주" alone has no day, so it stays null and the user picks the date.
+     * unambiguous whole phrases resolve: an explicit date, 오늘/내일/모레, or a weekday ("금요일", "다음 주
+     * 금요일"). "다음 주" alone, "다다음 주 금요일" and anything else stay null, and the user picks the date.
      */
     fun dueDate(item: MeetingFollowup, meetingStart: ZonedDateTime): LocalDate? {
         parseIsoDate(item.dueAt)?.let { return it }
-        val text = item.dueText.ifBlank { return null }.replace(" ", "")
+        // Whole-phrase matches only: "다다음 주 금요일" or "다음 달 금요일" must not read as a nearer date.
+        val text = item.dueText.replace(" ", "").replace(DUE_SUFFIX, "").ifBlank { return null }
         val today = meetingStart.withZoneSameInstant(KST).toLocalDate()
-        Regex("""(\d{1,2})월(\d{1,2})일""").find(text)?.let { m ->
-            val month = m.groupValues[1].toInt()
-            val day = m.groupValues[2].toInt()
-            val date = runCatching { LocalDate.of(today.year, month, day) }.getOrNull() ?: return null
-            // "1월 5일" said in December means next year.
-            return if (date.isBefore(today.minusMonths(2))) date.plusYears(1) else date
+        EXPLICIT_DATE.matchEntire(text)?.let { m ->
+            val year = m.groupValues[1].toIntOrNull()
+            val date = runCatching { LocalDate.of(year ?: today.year, m.groupValues[2].toInt(), m.groupValues[3].toInt()) }
+                .getOrNull() ?: return null
+            // "1월 5일" said in December means next year; a stated year is kept as said.
+            return if (year == null && date.isBefore(today.minusMonths(2))) date.plusYears(1) else date
         }
-        when {
-            text.startsWith("오늘") -> return today
-            text.startsWith("내일") -> return today.plusDays(1)
-            text.startsWith("모레") -> return today.plusDays(2)
+        when (text) {
+            "오늘" -> return today
+            "내일" -> return today.plusDays(1)
+            "모레" -> return today.plusDays(2)
         }
-        val weekday = WEEKDAYS.entries.firstOrNull { text.contains(it.key) }?.value ?: return null
-        return when {
-            text.contains("다음주") -> today.with(TemporalAdjusters.next(DayOfWeek.MONDAY)).with(TemporalAdjusters.nextOrSame(weekday))
-            text.contains("이번주") -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
+        val m = WEEKDAY_PHRASE.matchEntire(text) ?: return null
+        val weekday = WEEKDAYS.getValue(m.groupValues[2])
+        return when (m.groupValues[1]) {
+            "다음주" -> today.with(TemporalAdjusters.next(DayOfWeek.MONDAY)).with(TemporalAdjusters.nextOrSame(weekday))
+            "이번주" -> today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY))
                 .with(TemporalAdjusters.nextOrSame(weekday)).takeIf { !it.isBefore(today) }
             else -> today.with(TemporalAdjusters.next(weekday))
         }
@@ -69,7 +71,7 @@ object MeetingFollowups {
     /** A follow-up message the user sends themselves: they choose the recipient and press send. */
     fun draftMessage(decisions: List<String>, items: List<MeetingFollowup>, meetingStart: ZonedDateTime?): String =
         buildString {
-            appendLine("안녕하세요. 오늘 회의 감사합니다.")
+            appendLine("안녕하세요. 회의에 함께해 주셔서 감사합니다.")
             appendLine("이야기 나눈 내용 정리해서 보내 드려요.")
             if (decisions.isNotEmpty()) {
                 appendLine()
@@ -99,10 +101,12 @@ object MeetingFollowups {
     fun parseStart(value: String): ZonedDateTime? =
         runCatching { OffsetDateTime.parse(value).atZoneSameInstant(KST) }.getOrNull()
 
-    private val WEEKDAYS = linkedMapOf(
-        "월요일" to DayOfWeek.MONDAY, "화요일" to DayOfWeek.TUESDAY, "수요일" to DayOfWeek.WEDNESDAY,
-        "목요일" to DayOfWeek.THURSDAY, "금요일" to DayOfWeek.FRIDAY, "토요일" to DayOfWeek.SATURDAY,
-        "일요일" to DayOfWeek.SUNDAY,
+    private val DUE_SUFFIX = Regex("""(까지|안에|전에|중에|중|쯤|에)$""")
+    private val EXPLICIT_DATE = Regex("""(?:(\d{4})년)?(\d{1,2})월(\d{1,2})일""")
+    private val WEEKDAY_PHRASE = Regex("""(이번주|다음주)?([월화수목금토일])요일""")
+    private val WEEKDAYS = mapOf(
+        "월" to DayOfWeek.MONDAY, "화" to DayOfWeek.TUESDAY, "수" to DayOfWeek.WEDNESDAY, "목" to DayOfWeek.THURSDAY,
+        "금" to DayOfWeek.FRIDAY, "토" to DayOfWeek.SATURDAY, "일" to DayOfWeek.SUNDAY,
     )
 }
 

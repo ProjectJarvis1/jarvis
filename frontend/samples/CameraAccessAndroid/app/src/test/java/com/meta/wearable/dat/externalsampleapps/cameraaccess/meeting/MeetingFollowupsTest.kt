@@ -26,6 +26,9 @@ class MeetingFollowupsTest {
         assertEquals(LocalDate.of(2026, 11, 20), due("11월 20일"))
         assertEquals(LocalDate.of(2027, 1, 5), due("1월 5일"))            // said in November: next year
         assertEquals(LocalDate.of(2026, 11, 14), due("", "2026-11-14"))
+        assertEquals(LocalDate.of(2027, 11, 20), due("2027년 11월 20일까지")) // a stated year is kept
+        assertNull(due("다다음 주 금요일"))   // unsupported qualifiers stay open
+        assertNull(due("다음 달 금요일"))
         assertNull(due("다음 주"))   // no day named: the user picks
         assertNull(due("이번 달"))
         assertNull(due(""))

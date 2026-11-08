@@ -330,16 +330,17 @@ fun StreamScreen(
                 val extra = listOfNotNull(item.owner.takeIf { it.isNotBlank() }?.let { "담당 $it" }, due).joinToString(", ")
                 "${i + 1}. ${item.task}" + if (extra.isNotEmpty()) " ($extra)" else ""
             }
-            val spoken = geminiViewModel.announce(
+            geminiViewModel.announce(
                 "[앱 알림] 방금 회의 정리가 끝났고 후속 할 일이 ${result.followups.size}개 있습니다.\n" +
                     lines.joinToString("\n") +
                     "\n사용자에게 할 일을 짧게 알려 주고, 일정에 넣거나 후속 문자를 보낼지 물어보세요. " +
                     "사용자가 분명히 승인하기 전에는 일정 등록이나 문자 발송을 하지 마세요. " +
-                    "기한이 정해지지 않은 항목은 날짜를 먼저 물어보세요. 전체 내용은 기억 탭의 회의 기록에 있다고 알려 주세요."
-            )
-            if (!spoken) JarvisNotifications.post(app, result.meetingId.hashCode(),
-                "회의 후속 할 일 ${result.followups.size}개",
-                lines.joinToString("\n") + "\n기억 탭의 회의 기록에서 일정에 넣거나 후속 문자를 보낼 수 있어요.")
+                    "기한이 정해지지 않은 항목은 날짜를 먼저 물어보세요. 전체 내용은 기억 탭의 회의 기록에 있다고 알려 주세요.",
+            ) {
+                JarvisNotifications.post(app, result.meetingId.hashCode(),
+                    "회의 후속 할 일 ${result.followups.size}개",
+                    lines.joinToString("\n") + "\n기억 탭의 회의 기록에서 일정에 넣거나 후속 문자를 보낼 수 있어요.")
+            }
         }
     }
 
