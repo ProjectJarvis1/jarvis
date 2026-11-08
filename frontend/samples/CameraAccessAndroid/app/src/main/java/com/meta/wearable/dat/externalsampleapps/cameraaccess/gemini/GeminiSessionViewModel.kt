@@ -1110,11 +1110,14 @@ class GeminiSessionViewModel : ViewModel() {
         if (geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0 || activeTask ||
             System.currentTimeMillis() - lastInputAt < 2_500L) return
         cardOfferRunning = true
+        val inputBefore = lastInputAt
+        val focusBefore = taskManager.focusTaskId
         try {
             val encoded = withContext(Dispatchers.Default) {
                 VisualMemoryFrameStore.bitmapToVisualFrame(bitmap, "business_card_sighting")
             }
-            if (!_uiState.value.isGeminiActive) return
+            // The user may have spoken or started something while the photo was encoded: theirs comes first.
+            if (!_uiState.value.isGeminiActive || lastInputAt != inputBefore || taskManager.focusTaskId != focusBefore) return
             pendingCardFrame = encoded to SystemClock.elapsedRealtime()
             val task = runCatching {
                 taskManager.submit("capture_current_view", JSONObject().put("reason", "명함 자동 감지").put("card_offer", true).toString(), "명함 사진")
