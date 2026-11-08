@@ -30,6 +30,8 @@ class MeetingFollowupsTest {
         assertNull(due("다다음 주 금요일"))   // unsupported qualifiers stay open
         assertNull(due("다음 달 금요일"))
         assertNull(due("다음 주"))   // no day named: the user picks
+        assertNull(due("내일 전에"))       // "before" and "around" are not "by"
+        assertNull(due("금요일쯤"))
         assertNull(due("이번 달"))
         assertNull(due(""))
     }

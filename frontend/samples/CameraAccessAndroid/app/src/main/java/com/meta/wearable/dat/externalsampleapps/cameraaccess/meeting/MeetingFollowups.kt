@@ -106,7 +106,9 @@ object MeetingFollowups {
     fun parseStart(value: String): ZonedDateTime? =
         runCatching { OffsetDateTime.parse(value).atZoneSameInstant(KST) }.getOrNull()
 
-    private val DUE_SUFFIX = Regex("""(까지|안에|전에|중에|중|쯤|에)$""")
+    // Only endings that mean "by that day"; "전에" (before) and "쯤" (around) change the date, so they stay
+    // in the text, the whole-phrase match fails, and the user picks the date.
+    private val DUE_SUFFIX = Regex("""(까지|안에|중에|중|에)$""")
     private val EXPLICIT_DATE = Regex("""(?:(\d{4})년)?(\d{1,2})월(\d{1,2})일""")
     private val WEEKDAY_PHRASE = Regex("""(이번주|다음주)?([월화수목금토일])요일""")
     private val WEEKDAYS = mapOf(

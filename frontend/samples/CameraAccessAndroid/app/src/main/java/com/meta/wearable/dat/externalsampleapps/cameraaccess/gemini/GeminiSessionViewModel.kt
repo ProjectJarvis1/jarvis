@@ -153,6 +153,8 @@ class GeminiSessionViewModel : ViewModel() {
     private var pendingSpeechJob: Job? = null
     private var usingFallbackAndroidStt: Boolean = false
     private var liveConversation: Boolean = true
+    /** The user spoke and the server has not finished answering (input transcription to turn complete). */
+    @Volatile private var awaitingReply = false
     private var sessionStartJob: Job? = null
     private var playbackCompletionJob: Job? = null
 
@@ -396,6 +398,7 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         geminiService.onTurnComplete = {
+            awaitingReply = false
             readyForCompletionNotice = true
             visualContextSentForTurn = false
             // Speech queued during this turn is what the server answers next: show it as the question.
@@ -420,6 +423,7 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         geminiService.onInputTranscription = transcription@{ text ->
+            awaitingReply = true
             if (liveConversation) visionExecutor.execute { speechVision.onHeardSpeech() }
             // Live mode does not interrupt (NO_INTERRUPTION): speech during an answer or tool work is
             // queued for the next turn, so it must not hold running tasks or wipe the current answer.
@@ -605,7 +609,9 @@ class GeminiSessionViewModel : ViewModel() {
                 val awaitingUser = _uiState.value.pendingContactAction != null || taskManager.snapshot().any {
                     it.state in setOf(TaskState.QUEUED, TaskState.RUNNING, TaskState.WAITING_USER)
                 }
-                return !geminiService.isModelSpeaking.value && !audioManager.hasPendingPlayback && inFlightToolCalls == 0 &&
+                // A reply that never completes stops counting after 30s, so one lost turn does not mute notices.
+                val replyPending = awaitingReply && System.currentTimeMillis() - lastInputAt < 30_000L
+                return !replyPending && !geminiService.isModelSpeaking.value && !audioManager.hasPendingPlayback && inFlightToolCalls == 0 &&
                     !cardOfferRunning && !awaitingUser && System.currentTimeMillis() - lastInputAt >= 5_000L
             }
             val deadline = System.currentTimeMillis() + waitMs
