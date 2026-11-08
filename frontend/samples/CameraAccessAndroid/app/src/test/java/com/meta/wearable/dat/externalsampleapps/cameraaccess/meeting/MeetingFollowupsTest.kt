@@ -32,6 +32,9 @@ class MeetingFollowupsTest {
         assertNull(due("다음 주"))   // no day named: the user picks
         assertNull(due("내일 전에"))       // "before" and "around" are not "by"
         assertNull(due("금요일쯤"))
+        assertNull(due("2026-11-20 전에", "2026-11-20"))  // due_at does not override "before"
+        assertEquals(LocalDate.of(2028, 1, 5), MeetingFollowups.dueDate(
+            MeetingFollowup("t", dueText = "1월 5일", evidence = "2028년 1월 5일까지 보내겠습니다"), start))
         assertNull(due("이번 달"))
         assertNull(due(""))
     }

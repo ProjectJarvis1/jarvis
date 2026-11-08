@@ -42,12 +42,17 @@ object MeetingFollowups {
      * 금요일"). "다음 주" alone, "다다음 주 금요일" and anything else stay null, and the user picks the date.
      */
     fun dueDate(item: MeetingFollowup, meetingStart: ZonedDateTime): LocalDate? {
+        // "전에" (before) and "쯤" (around) are not "by": the user confirms those dates, even when the
+        // server also filled due_at.
+        if (QUALIFIED.containsMatchIn(item.dueText)) return null
         parseIsoDate(item.dueAt)?.let { return it }
         // Whole-phrase matches only: "다다음 주 금요일" or "다음 달 금요일" must not read as a nearer date.
         val text = item.dueText.replace(" ", "").replace(DUE_SUFFIX, "").ifBlank { return null }
         val today = meetingStart.withZoneSameInstant(KST).toLocalDate()
         EXPLICIT_DATE.matchEntire(text)?.let { m ->
-            val year = m.groupValues[1].toIntOrNull()
+            // The server may shorten "2028년 1월 5일" to "1월 5일"; the quoted sentence still has the year.
+            val year = m.groupValues[1].toIntOrNull() ?: Regex("""(\d{4})년\s*${m.groupValues[2]}월\s*${m.groupValues[3]}일""")
+                .find(item.evidence)?.groupValues?.get(1)?.toIntOrNull()
             val date = runCatching { LocalDate.of(year ?: today.year, m.groupValues[2].toInt(), m.groupValues[3].toInt()) }
                 .getOrNull() ?: return null
             // "1월 5일" said in December means next year; a stated year is kept as said.
@@ -109,6 +114,7 @@ object MeetingFollowups {
     // Only endings that mean "by that day"; "전에" (before) and "쯤" (around) change the date, so they stay
     // in the text, the whole-phrase match fails, and the user picks the date.
     private val DUE_SUFFIX = Regex("""(까지|안에|중에|중|에)$""")
+    private val QUALIFIED = Regex("""전에?\s*$|쯤|경\s*$""")
     private val EXPLICIT_DATE = Regex("""(?:(\d{4})년)?(\d{1,2})월(\d{1,2})일""")
     private val WEEKDAY_PHRASE = Regex("""(이번주|다음주)?([월화수목금토일])요일""")
     private val WEEKDAYS = mapOf(

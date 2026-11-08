@@ -398,7 +398,8 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         geminiService.onTurnComplete = {
-            awaitingReply = false
+            // A question asked during this answer is still waiting for its own.
+            awaitingReply = _uiState.value.queuedTranscript.isNotBlank()
             readyForCompletionNotice = true
             visualContextSentForTurn = false
             // Speech queued during this turn is what the server answers next: show it as the question.
