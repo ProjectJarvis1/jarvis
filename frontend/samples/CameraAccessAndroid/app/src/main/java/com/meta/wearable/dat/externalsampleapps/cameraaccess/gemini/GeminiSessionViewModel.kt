@@ -402,6 +402,7 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         geminiService.onInputTranscription = transcription@{ text ->
+            if (liveConversation) visionExecutor.execute { speechVision.onHeardSpeech() }
             // Live mode does not interrupt (NO_INTERRUPTION): speech during an answer or tool work is
             // queued for the next turn, so it must not hold running tasks or wipe the current answer.
             val busy = liveConversation && (geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0)

@@ -37,4 +37,19 @@ class SpeechSyncedVisionTest {
         vision.onAudio(false, 6_600)                          // cadence tick, same frame: not resent
         assertEquals(listOf(5_000L), sent)
     }
+
+    @Test
+    fun serverHeardSpeechSendsAFrameWhenTheMicLevelNeverCrossedTheThreshold() {
+        val quiet = SpeechSyncedVision(
+            latestFrame = { "frame$frameAt" to frameAt },
+            send = { sent += it.removePrefix("frame").toLong() },
+            continuous = { false },
+        )
+        frameAt = 1_000; quiet.onAudio(false, 1_000)          // quiet mic, 연속 영상 off: nothing
+        assertEquals(emptyList<Long>(), sent)
+        frameAt = 1_100; quiet.onHeardSpeech(1_200)           // server transcribed speech: send now
+        frameAt = 1_500; quiet.onHeardSpeech(1_600)           // more text within 1s: no flood
+        frameAt = 2_300; quiet.onHeardSpeech(2_300)           // next second: newest frame
+        assertEquals(listOf(1_100L, 2_300L), sent)
+    }
 }

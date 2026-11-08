@@ -50,6 +50,16 @@ class SpeechSyncedVision(
         }
     }
 
+    /**
+     * The server transcribed user speech. A backstop for phones whose mic level never crosses the local
+     * speech threshold (Galaxy Note 10 sent no frame at all with 연속 영상 전송 off): if nothing went out
+     * within [intervalMs], send the newest frame now, while the server is still in the user's turn.
+     */
+    @Synchronized
+    fun onHeardSpeech(nowMs: Long = System.currentTimeMillis()) {
+        if (nowMs - lastSentAt >= intervalMs) sendLatest(nowMs, closing = true)
+    }
+
     @Synchronized
     fun reset() {
         speaking = false
