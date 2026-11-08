@@ -37,6 +37,9 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -565,7 +568,8 @@ private fun ContactActionConfirmCard(
         headline = if (isCall) "${action.query}에게 전화할까요?" else "${action.query}에게 문자를 보낼까요?",
         actionLabel = label, onAction = onConfirm, onCancel = onCancel,
         initial = action.query.trim().take(1).ifBlank { null },
-        body = if (isCall) null else action.message.orEmpty().ifBlank { null },
+        // The whole message is shown: it is exactly what will be sent.
+        lines = if (isCall) emptyList() else listOfNotNull(action.message?.takeIf { it.isNotBlank() }),
         hint = "\"확인\"이라고 말하거나 $label 버튼을 누르세요.",
     )
 }
@@ -602,7 +606,9 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
         actionLabel = action, onAction = onSave, onCancel = onCancel,
         initial = if (person) name.take(1) else null,
         facts = facts,
-        body = externalPreview.getOrNull(1) ?: saveContent,
+        // What goes to an outside service is shown in full; a note to keep may be clipped.
+        lines = listOfNotNull(externalPreview.getOrNull(1)),
+        body = saveContent,
         hint = "\"확인\"이라고 말하거나 $action 버튼을 누르세요.",
     )
 }
@@ -681,29 +687,33 @@ private fun MeetingModePanel(
         }
     }
     Column(modifier.padding(horizontal = 20.dp).padding(bottom = 12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Spacer(Modifier.weight(.6f))
-        if (isProcessing) {
-            CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 3.dp)
-            Spacer(Modifier.height(20.dp))
-            Text("회의록 정리 중", style = MaterialTheme.typography.headlineMedium)
-        } else {
-            Text(elapsedText, style = MaterialTheme.typography.displayLarge.copy(
-                fontFeatureSettings = "tnum"))
-            startedText?.let {
-                Text("회의 $it 시작", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        // The body scrolls; the stop and discard buttons stay pinned below it, reachable at any font size.
+        BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxWidth().heightIn(min = maxHeight).verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+                if (isProcessing) {
+                    CircularProgressIndicator(Modifier.size(40.dp), strokeWidth = 3.dp)
+                    Spacer(Modifier.height(20.dp))
+                    Text("회의록 정리 중", style = MaterialTheme.typography.headlineMedium)
+                } else {
+                    Text(elapsedText, style = MaterialTheme.typography.displayLarge.copy(fontFeatureSettings = "tnum"))
+                    startedText?.let {
+                        Text("회의 $it 시작", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    Spacer(Modifier.height(28.dp))
+                    LevelLine()
+                }
+                Spacer(Modifier.height(28.dp))
+                Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
+                    Text(if (isProcessing) "녹음 내용을 회의록으로 정리하고 있어요. 끝나면 기억 탭의 회의에서 요약, Action Item, 원문을 볼 수 있어요."
+                        else "회의 중 발화는 AI 명령으로 처리하지 않아요. 끝낼 때는 \"회의 녹음 종료\"라고 말하거나 아래 버튼을 누르세요.",
+                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp), style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
-            Spacer(Modifier.height(28.dp))
-            LevelLine()
         }
-        Spacer(Modifier.height(28.dp))
-        Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.surfaceVariant) {
-            Text(if (isProcessing) "녹음 내용을 회의록으로 정리하고 있어요. 끝나면 기억 탭의 회의에서 요약, Action Item, 원문을 볼 수 있어요."
-                else "회의 중 발화는 AI 명령으로 처리하지 않아요. 끝낼 때는 \"회의 녹음 종료\"라고 말하거나 아래 버튼을 누르세요.",
-                Modifier.padding(horizontal = 16.dp, vertical = 14.dp), style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-        }
-        Spacer(Modifier.weight(1f))
         if (isRecording) {
+            Spacer(Modifier.height(12.dp))
             JarvisStopButton("회의 녹음 종료", onStopRecording, Modifier.fillMaxWidth(), leading = Icons.Default.Stop)
             TextButton(onClick = onDiscard, modifier = Modifier.heightIn(min = 48.dp)) {
                 Text("버리고 종료", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
