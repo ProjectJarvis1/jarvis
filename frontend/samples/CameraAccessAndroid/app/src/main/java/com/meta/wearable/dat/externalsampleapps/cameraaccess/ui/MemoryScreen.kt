@@ -237,7 +237,8 @@ fun MemoryScreen(
                             emptyText = "아직 저장된 기억이 없어요. 글라스에서 \"이거 기억해 줘\"라고 말해 보세요.",
                             isEmpty = memoryUiState.memories.isEmpty(),
                         ) {
-                            DayGroupedList(memoryUiState.memories, { it.capturedAt }, { it.id }) { memory ->
+                            DayGroupedList(memoryUiState.memories, { it.capturedAt }, { it.id },
+                                byDay = !memoryUiState.isSearchResult) { memory ->
                                 JarvisRow(
                                     title = memory.userNote ?: memory.text.lineSequence().firstOrNull().orEmpty(),
                                     subtitle = "${memory.memoryTypeLabel()} · ${memory.capturedAtDisplay}",
@@ -362,10 +363,17 @@ private fun SearchBar(
     )
 }
 
-/** Splits a list into 오늘 / 어제 / 이번 주 / 이전 by its KST timestamp and shows each part as one white group. */
+/**
+ * Splits a list into 오늘 / 어제 / 이번 주 / 이전 by its KST timestamp and shows each part as one white group.
+ * Search results are not split ([byDay] false): they stay in the server's relevance order under one heading.
+ */
 @Composable
-private fun <T> DayGroupedList(items: List<T>, timeOf: (T) -> String, keyOf: (T) -> String, row: @Composable (T) -> Unit) {
-    val groups = remember(items) { items.groupBy { dayGroup(timeOf(it)) }.toSortedMap(compareBy { DAY_ORDER.indexOf(it) }) }
+private fun <T> DayGroupedList(items: List<T>, timeOf: (T) -> String, keyOf: (T) -> String, byDay: Boolean = true,
+    row: @Composable (T) -> Unit) {
+    val groups = remember(items, byDay) {
+        if (!byDay) mapOf("검색 결과" to items)
+        else items.groupBy { dayGroup(timeOf(it)) }.toSortedMap(compareBy { DAY_ORDER.indexOf(it) })
+    }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 24.dp)) {
         groups.forEach { (day, rows) ->
             item(key = "day-$day") {
@@ -395,7 +403,8 @@ private fun dayGroup(iso: String): String {
     return when {
         date == today -> "오늘"
         date == today.minusDays(1) -> "어제"
-        !date.isBefore(today.minusDays(6)) -> "이번 주"
+        // Calendar week starting Monday, not "the last seven days".
+        !date.isBefore(today.with(java.time.temporal.TemporalAdjusters.previousOrSame(java.time.DayOfWeek.MONDAY))) -> "이번 주"
         else -> "이전"
     }
 }

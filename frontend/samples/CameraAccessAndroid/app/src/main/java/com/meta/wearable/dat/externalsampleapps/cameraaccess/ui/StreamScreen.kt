@@ -359,10 +359,15 @@ fun StreamScreen(
     }
     val meetingActive = meetingRecordingUiState.isRecording || meetingRecordingUiState.isProcessing
     var confirmDiscard by remember { mutableStateOf(false) }
-    if (confirmDiscard) AlertDialog(onDismissRequest = { confirmDiscard = false },
+    // A recording ended another way (voice "회의 녹음 종료") is being saved; the discard question no longer applies.
+    LaunchedEffect(meetingRecordingUiState.isRecording) { if (!meetingRecordingUiState.isRecording) confirmDiscard = false }
+    if (confirmDiscard && meetingRecordingUiState.isRecording) AlertDialog(onDismissRequest = { confirmDiscard = false },
         title = { Text("녹음을 버릴까요?") },
         text = { Text("지금까지 녹음한 회의는 저장되지 않아요.") },
-        confirmButton = { TextButton(onClick = { confirmDiscard = false; meetingRecordingViewModel.cancelRecording() }) {
+        confirmButton = { TextButton(onClick = {
+            confirmDiscard = false
+            if (meetingRecordingViewModel.uiState.value.isRecording) meetingRecordingViewModel.cancelRecording()
+        }) {
             Text("버리기", color = MaterialTheme.colorScheme.error) } },
         dismissButton = { TextButton(onClick = { confirmDiscard = false }) { Text("계속 녹음") } })
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
@@ -504,6 +509,7 @@ private data class StatusChipInfo(
 @Composable
 private fun ConfirmSheet(headline: String, actionLabel: String, onAction: () -> Unit, onCancel: () -> Unit,
     initial: String? = null, facts: List<Pair<String, String>> = emptyList(), body: String? = null,
+    lines: List<String> = emptyList(),
     hint: String? = null, error: String? = null, actionEnabled: Boolean = true) {
     Surface(Modifier.fillMaxWidth(), color = Jarvis.extras.card, shape = RoundedCornerShape(20.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
@@ -515,7 +521,7 @@ private fun ConfirmSheet(headline: String, actionLabel: String, onAction: () -> 
                 }
             }
             Text(headline, style = MaterialTheme.typography.titleLarge)
-            if (facts.isNotEmpty() || body != null) Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
+            if (facts.isNotEmpty() || body != null || lines.isNotEmpty()) Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant) {
                 Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     facts.forEach { (label, value) ->
@@ -530,6 +536,8 @@ private fun ConfirmSheet(headline: String, actionLabel: String, onAction: () -> 
                         Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 6,
                             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     }
+                    // Changes being approved are shown in full, one per line: nothing approved is hidden.
+                    lines.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
                 }
             }
             error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
@@ -636,7 +644,7 @@ private fun RecordChangeCard(undo: Boolean, changeId: String, onApprove: () -> U
     }
     ConfirmSheet(
         headline = headline, actionLabel = action, onAction = onApprove, onCancel = onCancel,
-        body = lines.take(4).joinToString("\n").ifBlank { null },
+        lines = lines,
         error = failed,
         hint = if (loaded != null) "\"확인\"이라고 말하거나 $action 버튼을 누르세요." else null,
         actionEnabled = loaded != null,

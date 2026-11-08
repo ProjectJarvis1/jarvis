@@ -17,7 +17,7 @@ class MemoryViewModel : ViewModel() {
     val uiState: StateFlow<MemoryUiState> = _uiState.asStateFlow()
 
     fun loadRecent() {
-        runLoad { repository.recent() }
+        runLoad(searched = false) { repository.recent() }
     }
 
     fun updateQuery(query: String) {
@@ -30,7 +30,7 @@ class MemoryViewModel : ViewModel() {
             loadRecent()
             return
         }
-        runLoad { repository.search(query) }
+        runLoad(searched = true) { repository.search(query) }
     }
 
     fun clearError() {
@@ -78,12 +78,12 @@ class MemoryViewModel : ViewModel() {
         }
     }
 
-    private fun runLoad(block: () -> List<MemoryItem>) {
+    private fun runLoad(searched: Boolean, block: () -> List<MemoryItem>) {
         _uiState.update { it.copy(isLoading = true, errorMessage = null) }
         viewModelScope.launch {
             try {
                 val memories = withContext(Dispatchers.IO) { block() }
-                _uiState.update { it.copy(isLoading = false, memories = memories) }
+                _uiState.update { it.copy(isLoading = false, memories = memories, isSearchResult = searched) }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
