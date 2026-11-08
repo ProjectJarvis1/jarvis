@@ -38,7 +38,7 @@ object MeetingBriefer {
         val delivered = dedupe(context)
         return upcoming(context, nowMs)
             .filter { MeetingBriefing.isDue(it, nowMs) && !delivered.contains(it.key, nowMs) }
-            .map { meeting -> meeting to brief(meeting, nowMs) }
+            .map { meeting -> meeting to brief(meeting) }
     }
 
     fun markDelivered(context: Context, key: String) {
@@ -46,13 +46,14 @@ object MeetingBriefer {
         if (delivered.claim(key, System.currentTimeMillis())) save(context, delivered)
     }
 
-    private fun brief(meeting: UpcomingMeeting, nowMs: Long): Brief {
+    private fun brief(meeting: UpcomingMeeting): Brief {
         val keys = MeetingBriefing.keys(meeting)
         val query = (listOf(meeting.title) + meeting.attendees).joinToString(" ").trim()
         val people = keys.take(4).flatMap { key -> searchPeople(key) }
         val meetings = if (query.isBlank()) emptyList() else searchMeetings(query)
         val memories = if (query.isBlank()) emptyList() else searchMemories(query)
-        return MeetingBriefing.compose(meeting, people, meetings, memories, nowMs)
+        // "N분 뒤" counted after the searches, not from when the poll began.
+        return MeetingBriefing.compose(meeting, people, meetings, memories, System.currentTimeMillis())
     }
 
     /** Timed events starting in the next 15 minutes, skipping all-day, canceled and declined ones. */

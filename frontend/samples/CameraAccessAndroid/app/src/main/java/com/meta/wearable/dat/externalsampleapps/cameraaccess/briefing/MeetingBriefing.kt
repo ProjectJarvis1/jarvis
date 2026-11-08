@@ -72,7 +72,9 @@ object MeetingBriefing {
         fun about(vararg texts: String) =
             anchors.any { a -> texts.any { it.contains(a, ignoreCase = true) } } ||
                 (titleWords.isNotEmpty() && titleWords.all { w -> texts.any { it.contains(w, ignoreCase = true) } })
-        val pastMeetings = meetings.filter { about(it.title, it.summary) }.sortedByDescending { it.startedAt }.take(2)
+        // Only meetings that already happened; a scheduled one is not "지난 회의".
+        val pastMeetings = meetings.filter { about(it.title, it.summary) && (epochMs(it.startedAt)?.let { t -> t < nowMs } ?: false) }
+            .sortedByDescending { it.startedAt }.take(2)
         val notes = memories.filter { about(it.text, it.peopleText) }.take(1)
 
         val minutes = ((meeting.beginMs - nowMs) / 60_000L).coerceAtLeast(1)
@@ -105,8 +107,8 @@ object MeetingBriefing {
             spoken += "이 일정과 관련된 지난 기록은 찾지 못했어요."
             detail += "관련된 지난 기록 없음"
         }
-        // The wake word in Jarvis's own voice would start a new conversation.
-        return Brief(spoken.joinToString(" ").replace("자비스", ""), detail.joinToString("\n").replace("자비스", ""))
+        // The wake word in Jarvis's own voice would start a new conversation; the notification keeps the text as is.
+        return Brief(spoken.joinToString(" ").replace("자비스", ""), detail.joinToString("\n"))
     }
 
     /** Up to the first sentence end (". " or end of text; "1.5억" is not an end), at most about 90 characters. */
@@ -118,6 +120,9 @@ object MeetingBriefing {
         if (sentence.length > 90) sentence = sentence.take(90).substringBeforeLast(' ', sentence.take(90)) + "…"
         return if (sentence.last() in ".!?。…") sentence else "$sentence."
     }
+
+    private fun epochMs(iso: String): Long? = runCatching { OffsetDateTime.parse(iso).toInstant().toEpochMilli() }.getOrNull()
+        ?: runCatching { Instant.parse(iso).toEpochMilli() }.getOrNull()
 
     private fun day(iso: String): String? {
         if (iso.isBlank()) return null

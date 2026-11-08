@@ -169,6 +169,7 @@ fun StreamScreen(
             }
         }
     })
+    val speaker = remember(context) { BriefingSpeaker(context.applicationContext) }
     val wakeWordMonitor = remember(context) {
         WakeWordMonitor(
             context = context.applicationContext,
@@ -238,10 +239,17 @@ fun StreamScreen(
     // Collected directly, not through the lifecycle-aware state: with the screen locked the wake word
     // must still pause for a conversation and resume when it ends.
     LaunchedEffect(geminiViewModel, meetingRecordingViewModel) {
+        // A briefing read aloud by the phone pauses it too: its own words ("회의 시작" in a title) must not
+        // be taken as a voice command. A conversation or a recording cuts the briefing short.
+        // Recording keeps it on: "회의 녹음 종료" is heard through it.
         combine(
             geminiViewModel.uiState.map { it.isGeminiActive },
-            meetingRecordingViewModel.uiState.map { it.isProcessing },
-        ) { gemini, processing -> !gemini && !processing }
+            meetingRecordingViewModel.uiState.map { it.isRecording to it.isProcessing },
+            speaker.speaking,
+        ) { gemini, (recording, processing), speaking ->
+            if (gemini || recording) speaker.stop()
+            !gemini && !processing && !speaking
+        }
             .distinctUntilChanged()
             .collect { idle -> if (idle) wakeWordMonitor.start() else wakeWordMonitor.stop() }
     }
@@ -291,13 +299,14 @@ fun StreamScreen(
         val unobserve = SettingsManager.observe("meetingBriefingEnabled") { askCalendar() }
         onDispose { unobserve() }
     }
-    val speaker = remember(context) { BriefingSpeaker(context.applicationContext) }
     LaunchedEffect(Unit) {
         val app = context.applicationContext
         while (true) {
             if (SettingsManager.meetingBriefingEnabled) {
                 val due = withContext(Dispatchers.IO) { runCatching { MeetingBriefer.due(app) }.getOrDefault(emptyList()) }
                 due.forEach { (meeting, brief) ->
+                    // Searching takes time: the switch may be off now, or the meeting already started.
+                    if (!SettingsManager.meetingBriefingEnabled || meeting.beginMs - System.currentTimeMillis() < 60_000L) return@forEach
                     JarvisNotifications.post(app, meeting.key.hashCode(), "곧 시작: ${meeting.title}", brief.detail)
                     MeetingBriefer.markDelivered(app, meeting.key)
                     geminiViewModel.announce(
@@ -308,7 +317,8 @@ fun StreamScreen(
                         // running but busy, where a second voice would talk over it.
                         // During a meeting recording only the notification is left: a voice would interrupt
                         // the meeting and end up in its recording.
-                        if (!geminiViewModel.uiState.value.isGeminiActive && !meetingRecordingViewModel.uiState.value.isRecording) {
+                        if (SettingsManager.meetingBriefingEnabled && !geminiViewModel.uiState.value.isGeminiActive &&
+                            !meetingRecordingViewModel.uiState.value.isRecording) {
                             speaker.speak(brief.spoken)
                         }
                     }

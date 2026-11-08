@@ -6,7 +6,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MeetingBriefingTest {
-    private val now = 1_762_650_000_000L
+    private val now = java.time.Instant.parse("2026-11-09T05:00:00Z").toEpochMilli()
     private val meeting = UpcomingMeeting("e1:1", "한빛산업 견적 미팅", now + 10 * 60_000L, attendees = listOf("홍길동", "me@example.com"))
 
     @Test
@@ -63,9 +63,17 @@ class MeetingBriefingTest {
     }
 
     @Test
-    fun neverSpeaksTheWakeWord() {
-        val brief = MeetingBriefing.compose(meeting.copy(title = "자비스 시연 미팅"), emptyList(), emptyList(), emptyList(), now)
+    fun neverSpeaksTheWakeWordButKeepsTheNotificationText() {
+        val brief = MeetingBriefing.compose(meeting.copy(title = "자비스테크 시연 미팅"), emptyList(), emptyList(), emptyList(), now)
         assertFalse(brief.spoken.contains("자비스"))
+        assertTrue(brief.detail.contains("자비스테크 시연 미팅"))
+    }
+
+    @Test
+    fun scheduledMeetingsAreNotPastMeetings() {
+        val brief = MeetingBriefing.compose(meeting, listOf(PersonHit("홍길동", "한빛산업")),
+            listOf(MeetingHit("한빛산업 후속 미팅", "2099-01-01T01:00:00Z", "계약을 마무리한다.")), emptyList(), now)
+        assertFalse(brief.spoken.contains("계약"))
     }
 
     @Test
