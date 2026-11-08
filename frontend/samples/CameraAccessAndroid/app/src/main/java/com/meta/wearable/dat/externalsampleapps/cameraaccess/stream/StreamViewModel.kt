@@ -48,6 +48,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessio
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.VisualMemoryFrameStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.PhoneCameraManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.glassesErrorMessage
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -145,7 +146,7 @@ class StreamViewModel(
     created.onFailure { error, _ ->
       Log.e(TAG, "Failed to create glasses session: ${error.description}")
       _uiState.update {
-        it.copy(streamSessionState = StreamState.STOPPED, errorMessage = "글라스 연결을 시작하지 못했어요. Meta AI 앱 연결을 확인해 주세요.")
+        it.copy(streamSessionState = StreamState.STOPPED, errorMessage = glassesErrorMessage(error, "글라스 연결을 시작하지 못했어요. Meta AI 앱 연결을 확인해 주세요."))
       }
     }
     val session = created.getOrNull() ?: return
@@ -154,7 +155,7 @@ class StreamViewModel(
         viewModelScope.launch {
           session.errors.collect { error ->
             Log.e(TAG, "Glasses session error: ${error.description}")
-            _uiState.update { it.copy(errorMessage = "글라스 연결에 문제가 생겼어요: ${error.description}") }
+            _uiState.update { it.copy(errorMessage = glassesErrorMessage(error)) }
           }
         }
     startTimeoutJob =
@@ -171,7 +172,7 @@ class StreamViewModel(
                   streamingMode = StreamingMode.GLASSES,
                   streamSessionState = StreamState.STOPPED,
                   errorMessage =
-                      "Glasses stream did not start. Reconnect the glasses/Meta AI app, then try Start Streaming again.",
+                      "글라스 영상이 시작되지 않았어요. 글라스와 Meta AI 앱 연결을 확인하고 다시 시도해 주세요. (오류 코드 START_TIMEOUT)",
               )
             }
           }
@@ -187,7 +188,7 @@ class StreamViewModel(
               .onSuccess { added -> attachGlassesStream(added) }
               .onFailure { error, _ ->
                 Log.e(TAG, "Failed to add glasses camera: ${error.description}")
-                _uiState.update { it.copy(errorMessage = "글라스 카메라를 켜지 못했어요. 카메라 권한을 확인해 주세요.") }
+                _uiState.update { it.copy(errorMessage = glassesErrorMessage(error, "글라스 카메라를 켜지 못했어요. 카메라 권한을 확인해 주세요.")) }
               }
         }
   }
@@ -206,7 +207,7 @@ class StreamViewModel(
         viewModelScope.launch {
           stream.errorStream.collect { error ->
             Log.e(TAG, "Glasses stream error: ${error.description}")
-            _uiState.update { it.copy(errorMessage = "글라스 영상에 문제가 생겼어요: ${error.description}") }
+            _uiState.update { it.copy(errorMessage = glassesErrorMessage(error, "글라스 영상에 문제가 생겼어요.")) }
           }
         }
     streamStateJob =

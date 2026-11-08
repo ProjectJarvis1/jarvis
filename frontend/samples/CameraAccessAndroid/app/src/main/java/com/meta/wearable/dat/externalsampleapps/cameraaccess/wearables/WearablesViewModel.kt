@@ -118,7 +118,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
                       com.meta.wearable.dat.core.types.DeviceCompatibility.DEVICE_UPDATE_REQUIRED
               ) {
                 val deviceName = metadata.name.ifEmpty { deviceId }
-                setRecentError("Device '$deviceName' requires an update to work with this app")
+                setRecentError("글라스 '$deviceName'의 소프트웨어 업데이트가 필요해요. Meta AI 앱에서 업데이트해 주세요. (오류 코드 DEVICE_UPDATE_REQUIRED)")
               }
             }
           }
@@ -151,7 +151,7 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
       // Handle the result
       result.onFailure { error, _ ->
-        setRecentError("Permission check error: ${error.description}")
+        setRecentError(glassesErrorMessage(error, "글라스 카메라 권한을 확인하지 못했어요."))
         return@launch
       }
 
