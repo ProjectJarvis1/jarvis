@@ -52,5 +52,7 @@ class MeetingFollowupsTest {
         assertTrue(text.contains("- 다음 달 시범 도입"))
         assertTrue(text.contains("- 견적서 보내기 (김대리, 11월 13일까지)"))
         assertTrue(text.contains("- 자료 공유\n"))
+        val later = MeetingFollowups.draftMessage(emptyList(), listOf(MeetingFollowup("계약", dueText = "2027년 11월 20일")), start)
+        assertTrue(later.contains("2027년 11월 20일까지"))
     }
 }

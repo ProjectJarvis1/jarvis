@@ -597,11 +597,19 @@ class GeminiSessionViewModel : ViewModel() {
             while (true) {
                 val state = _uiState.value
                 if (!state.isGeminiActive || state.connectionState != GeminiConnectionState.Ready) break
+                // A pending confirmation counts as busy: a new question's "네" would otherwise approve it.
+                val awaitingUser = state.pendingContactAction != null || taskManager.snapshot().any {
+                    it.state in setOf(TaskState.QUEUED, TaskState.RUNNING, TaskState.WAITING_USER)
+                }
                 val busy = geminiService.isModelSpeaking.value || audioManager.hasPendingPlayback || inFlightToolCalls > 0 ||
-                    cardOfferRunning || System.currentTimeMillis() - lastInputAt < 2_500L
+                    cardOfferRunning || awaitingUser || System.currentTimeMillis() - lastInputAt < 2_500L
                 if (!busy) {
-                    geminiService.sendTextMessage(text, isValid = { _uiState.value.isGeminiActive })
-                    return@launch
+                    val sent = java.util.concurrent.atomic.AtomicBoolean(false)
+                    geminiService.sendTextMessage(text, onSent = { sent.set(true) }, isValid = { _uiState.value.isGeminiActive })
+                    // The send is queued; a session that ends or a socket that fails drops it silently.
+                    repeat(50) { if (!sent.get()) delay(200L) }
+                    if (sent.get()) return@launch
+                    break
                 }
                 if (System.currentTimeMillis() > deadline) break
                 delay(1_000L)

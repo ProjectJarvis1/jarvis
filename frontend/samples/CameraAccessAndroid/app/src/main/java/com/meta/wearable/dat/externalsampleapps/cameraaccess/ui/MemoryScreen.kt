@@ -694,7 +694,7 @@ private fun FollowupCard(meeting: MeetingHistoryItem) {
                                 val meta = listOfNotNull(
                                     item.owner.takeIf { it.isNotBlank() }?.let { "담당 $it" },
                                     when {
-                                        due != null -> "${due.monthValue}월 ${due.dayOfMonth}일까지"
+                                        due != null && start != null -> MeetingFollowups.dueLabel(due, start)
                                         item.dueText.isNotBlank() -> "${item.dueText} (날짜 확인 필요)"
                                         else -> null
                                     },

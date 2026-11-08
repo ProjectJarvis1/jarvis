@@ -325,7 +325,8 @@ fun StreamScreen(
             if (result.followups.isEmpty()) return@collect
             val start = MeetingFollowups.parseStart(result.startedAt)
             val lines = result.followups.take(8).mapIndexed { i, item ->
-                val due = start?.let { MeetingFollowups.dueDate(item, it) }?.let { "${it.monthValue}월 ${it.dayOfMonth}일까지" }
+                // Full date for the model, so it never proposes the wrong year.
+                val due = start?.let { s -> MeetingFollowups.dueDate(item, s)?.let { "${it.year}년 ${it.monthValue}월 ${it.dayOfMonth}일까지" } }
                     ?: item.dueText.takeIf { it.isNotBlank() }
                 val extra = listOfNotNull(item.owner.takeIf { it.isNotBlank() }?.let { "담당 $it" }, due).joinToString(", ")
                 "${i + 1}. ${item.task}" + if (extra.isNotEmpty()) " ($extra)" else ""

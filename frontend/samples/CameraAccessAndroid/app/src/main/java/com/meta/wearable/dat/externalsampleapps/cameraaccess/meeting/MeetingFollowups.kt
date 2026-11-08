@@ -82,7 +82,7 @@ object MeetingFollowups {
                 appendLine()
                 appendLine("할 일")
                 items.forEach { item ->
-                    val due = meetingStart?.let { dueDate(item, it) }?.let { "${it.monthValue}월 ${it.dayOfMonth}일까지" }
+                    val due = meetingStart?.let { start -> dueDate(item, start)?.let { dueLabel(it, start) } }
                         ?: item.dueText.takeIf { it.isNotBlank() }
                     val extra = listOfNotNull(item.owner.takeIf { it.isNotBlank() }, due).joinToString(", ")
                     appendLine("- ${item.task}" + if (extra.isNotEmpty()) " ($extra)" else "")
@@ -91,6 +91,11 @@ object MeetingFollowups {
             appendLine()
             append("빠진 내용이 있으면 편하게 말씀해 주세요.")
         }
+
+    /** "11월 13일까지", with the year when it is not the meeting's year ("2027년 11월 20일까지"). */
+    fun dueLabel(date: LocalDate, meetingStart: ZonedDateTime): String =
+        (if (date.year != meetingStart.withZoneSameInstant(KST).year) "${date.year}년 " else "") +
+            "${date.monthValue}월 ${date.dayOfMonth}일까지"
 
     fun parseIsoDate(value: String): LocalDate? {
         if (value.isBlank()) return null
