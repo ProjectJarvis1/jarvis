@@ -133,6 +133,14 @@ fun StreamScreen(
     val streamUiState by streamViewModel.uiState.collectAsStateWithLifecycle()
     val geminiUiState by geminiViewModel.uiState.collectAsStateWithLifecycle()
     val taskRecords by geminiViewModel.taskRecords.collectAsStateWithLifecycle()
+    var showTaskList by rememberSaveable { mutableStateOf(false) }
+    if (showTaskList) TaskListSheet(taskRecords, remember(geminiViewModel) { TaskListHandlers(
+        approvable = geminiViewModel::approvable,
+        approve = geminiViewModel::approveFromList,
+        control = { task, action -> geminiViewModel.controlTask(task.id, task.revision, action) },
+        edit = { task, args -> geminiViewModel.editTask(task.id, task.revision, args) },
+        delete = { task -> geminiViewModel.deleteTask(task.id) },
+    ) }, onDismiss = { showTaskList = false })
     val webrtcUiState by webrtcViewModel.uiState.collectAsStateWithLifecycle()
     val meetingRecordingUiState by meetingRecordingViewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -591,13 +599,19 @@ fun StreamScreen(
                     }
                 }
             }
-            val working = (geminiUiState.toolCallStatus as? ToolCallStatus.Executing)?.displayText ?: geminiUiState.taskSummary
+            val working = (geminiUiState.toolCallStatus as? ToolCallStatus.Executing)?.displayText
+                ?: com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListRules.summary(taskRecords)
             if (working.isNotBlank()) item {
-                Surface(shape = RoundedCornerShape(12.dp), color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .6f)) {
-                    Row(Modifier.heightIn(min = 40.dp).padding(horizontal = 14.dp, vertical = 10.dp),
+                // Tapping the count line opens every kept task, to approve, fix, resume or delete it.
+                Surface(onClick = { showTaskList = true }, shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = .6f)) {
+                    Row(Modifier.heightIn(min = 48.dp).padding(horizontal = 14.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         JarvisDot()
-                        Text(working, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        Text(working, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer)
+                        if (taskRecords.isNotEmpty()) Text("목록", style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
                     }
                 }
             }

@@ -90,6 +90,9 @@ sealed class ToolCallStatus {
         get() = this is Executing
 }
 
+/** What the user calls a tool, for the task list and status line. */
+fun toolLabel(name: String): String = name.userFacingToolLabel()
+
 private fun String.userFacingToolLabel(): String = when (this) {
     "capture_current_view" -> "현재 시야 캡처"
     "save_life_memory", "save_memory" -> "기억 저장"

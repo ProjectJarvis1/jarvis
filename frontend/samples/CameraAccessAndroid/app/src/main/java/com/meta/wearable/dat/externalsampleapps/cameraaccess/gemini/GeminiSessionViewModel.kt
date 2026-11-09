@@ -273,8 +273,44 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     fun editTask(id: String, revision: Int, args: String) {
-        runCatching { taskManager.editDraft(id, revision, args) }
-            .onFailure { _uiState.value = _uiState.value.copy(errorMessage = it.message) }
+        runCatching {
+            taskManager.editDraft(id, revision, args)
+            // A call or text waiting on screen follows the edit, or its next "응" would hit the old revision.
+            val pending = _uiState.value.pendingContactAction
+            if (pending != null && pending.id.substringBefore(':') == id) {
+                val edited = taskManager.get(id) ?: return@runCatching
+                setPendingContactAction(pending.copy(id = "$id:${edited.revision}",
+                    message = runCatching { JSONObject(args).optString("message") }.getOrNull()?.takeIf { it.isNotBlank() } ?: pending.message))
+            }
+        }.onFailure { _uiState.value = _uiState.value.copy(errorMessage = it.message) }
+    }
+
+    /** True when the list may approve this record with [controlTask]; calls and texts go through [approveFromList]. */
+    fun approvable(task: TaskRecord) = needsReview(task.tool)
+
+    /** The approve button in the task list. A tap there is the user's confirmation, as on the card. */
+    fun approveFromList(task: TaskRecord) {
+        if (task.tool !in setOf("call_contact", "text_contact")) { controlTask(task.id, task.revision, "approve"); return }
+        val args = parseTaskArgs(task.argsJson)
+        setPendingContactAction(PendingContactAction(
+            type = if (task.tool == "call_contact") PendingContactActionType.CALL else PendingContactActionType.TEXT,
+            id = "${task.id}:${task.revision}",
+            query = args["query"]?.toString().orEmpty(),
+            message = args["message"]?.toString(),
+        ))
+        confirmPendingContactAction()
+    }
+
+    /** Removes a record from the list, with its kept photo; work that may still go out is refused by [TaskManager.delete]. */
+    fun deleteTask(id: String) {
+        viewModelScope.launch {
+            try {
+                taskManager.delete(id)
+                clearInvalidContactPrompt()
+                runCatching { taskArtifacts.remove(id) }
+                taskManager.persist()
+            } catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.message) }
+        }
     }
 
     fun proposeCalendar(title: String, start: String, evidence: String) {

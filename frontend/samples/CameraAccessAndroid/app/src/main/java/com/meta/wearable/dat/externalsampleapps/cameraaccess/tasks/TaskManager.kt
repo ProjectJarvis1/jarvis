@@ -197,6 +197,25 @@ class TaskManager(
         records.getValue(id)
     }
 
+    /**
+     * Removes a record the user no longer wants from the list. Work that is queued, running or waiting on the
+     * network stays: it may still reach the outside. A record whose outside result is unknown can go only
+     * because the user asked after checking it. A result another live task still reads stays too.
+     */
+    fun delete(id: String): TaskRecord = synchronized(lock) {
+        val task = records[id] ?: error("작업을 찾을 수 없어요.")
+        require(TaskListRules.deletable(task)) { "진행 중인 작업은 지울 수 없어요. 먼저 멈추거나 끝날 때까지 기다려 주세요." }
+        val terminal = setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED)
+        require(records.values.none { it.id != id && it.sourceTaskId == id && it.state !in terminal }) {
+            "이 결과를 쓰는 작업이 아직 남아 있어요."
+        }
+        jobs.remove(id)?.cancel()
+        records.remove(id)
+        if (focusTaskId == id) focusTaskId = null
+        publish()
+        task
+    }
+
     /** Session exit stops hardware/read work, but preserves records and uncertain write outcomes. */
     fun suspendActive() = synchronized(lock) {
         records.values.toList().filter { it.state in setOf(TaskState.QUEUED, TaskState.RUNNING) }.forEach {

@@ -29,6 +29,11 @@ class TaskArtifacts(private val directory: File, private val protectedKeys: () -
         temp.writeText(gson.toJson(frame))
         check(temp.renameTo(target))
     }
+    /** Drops every saved photo of a task the user deleted. */
+    suspend fun remove(id: String) = withContext(Dispatchers.IO) {
+        require(id.matches(Regex("[a-zA-Z0-9-]+")))
+        directory.listFiles().orEmpty().filter { it.name.startsWith("$id-") }.forEach { it.delete() }
+    }
     suspend fun get(id: String, revision: Int): VisualFrame? = withContext(Dispatchers.IO) {
         val target = file(id, revision)
         if (!target.exists()) return@withContext null
