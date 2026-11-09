@@ -211,7 +211,8 @@ private fun detail(task: TaskRecord, args: JSONObject?): String? {
             task.tool == "call_contact" -> arg("query")?.let { "받는 사람 $it" }
             // What goes to an outside service is shown exactly as the card shows it, before any approval.
             ExternalTools.isExternal(task.tool) -> ExternalTools.preview(task.tool, task.argsJson)
-            task.tool == "save_person" -> listOfNotNull(arg("name"), arg("org"), arg("role"), arg("notes_summary")).joinToString("\n")
+            task.tool == "save_person" -> listOfNotNull(arg("name"), arg("org"), arg("role"), arg("notes_summary"),
+                if (args?.optBoolean("include_face") == true) "얼굴 사진도 함께 저장해요" else null).joinToString("\n")
             task.tool == "create_calendar_event" -> listOfNotNull(arg("title"), arg("start_at"), arg("location")).joinToString("\n")
             task.tool in setOf("apply_record_change", "undo_record_change") -> "대화 화면의 확인 카드에서 바뀌는 내용을 보고 승인해 주세요."
             else -> TaskListRules.mainField(task)?.let(::arg) ?: arg("query")

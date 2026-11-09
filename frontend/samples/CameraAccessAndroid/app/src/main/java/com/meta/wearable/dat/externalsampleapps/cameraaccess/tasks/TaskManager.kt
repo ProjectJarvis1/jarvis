@@ -205,8 +205,9 @@ class TaskManager(
     fun delete(id: String): TaskRecord = synchronized(lock) {
         val task = records[id] ?: error("작업을 찾을 수 없어요.")
         require(TaskListRules.deletable(task)) { "진행 중인 작업은 지울 수 없어요. 먼저 멈추거나 끝날 때까지 기다려 주세요." }
-        val terminal = setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED)
-        require(records.values.none { it.id != id && it.sourceTaskId == id && it.state !in terminal }) {
+        // A failed task can still be retried from the list, so its source stays as long as it does.
+        val done = setOf(TaskState.COMPLETED, TaskState.CANCELLED)
+        require(records.values.none { it.id != id && it.sourceTaskId == id && it.state !in done }) {
             "이 결과를 쓰는 작업이 아직 남아 있어요."
         }
         jobs.remove(id)?.cancel()
