@@ -600,7 +600,8 @@ fun StreamScreen(
                 }
             }
             val working = (geminiUiState.toolCallStatus as? ToolCallStatus.Executing)?.displayText
-                ?: com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListRules.summary(taskRecords)
+                ?: (com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListRules.summary(taskRecords) +
+                    if (geminiViewModel.taskStorageError != null) " · 기록 저장 오류" else "")
             if (working.isNotBlank()) item {
                 // Tapping the count line opens every kept task, to approve, fix, resume or delete it.
                 Surface(onClick = { showTaskList = true }, shape = RoundedCornerShape(12.dp),

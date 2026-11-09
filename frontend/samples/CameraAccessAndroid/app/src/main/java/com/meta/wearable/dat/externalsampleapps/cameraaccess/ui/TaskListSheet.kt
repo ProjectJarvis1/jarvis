@@ -32,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.toolLabel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListAction
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListRules
@@ -110,17 +111,22 @@ private fun TaskRow(task: TaskRecord, handlers: TaskListHandlers) {
         Text("${toolLabel(task.tool)} · ${whenLabel(task.updatedAt)}", style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
         detail(task, args)?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            // Nothing awaiting approval is clipped: the user approves exactly what they read.
+            Text(it, style = MaterialTheme.typography.bodyMedium,
+                maxLines = if (task.state == TaskState.WAITING_USER) Int.MAX_VALUE else 3, overflow = TextOverflow.Ellipsis)
         }
 
+        // Approved by voice while the edit box was open: the draft is gone, so is the edit.
+        if (mode == RowMode.EDIT && field == null) mode = RowMode.VIEW
         when (mode) {
-            RowMode.EDIT -> {
+            RowMode.EDIT -> if (field != null) {
                 OutlinedTextField(draft, { draft = it }, Modifier.fillMaxWidth(), minLines = 2, maxLines = 6,
                     label = { Text(fieldLabel(field)) })
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton({ mode = RowMode.VIEW }) { Text("그만두기") }
                     TextButton({
-                        args?.let { handlers.edit(task, JSONObject(it.toString()).put(field, draft.trim()).toString()) }
+                        val current = TaskListRules.editableField(task)
+                        if (current != null && args != null) handlers.edit(task, JSONObject(args.toString()).put(current, draft.trim()).toString())
                         mode = RowMode.VIEW
                     }, enabled = draft.isNotBlank()) { Text("고친 내용 저장") }
                 }
@@ -200,9 +206,14 @@ private fun fieldLabel(field: String?) = when (field) {
 private fun detail(task: TaskRecord, args: JSONObject?): String? {
     fun arg(key: String) = args?.optString(key)?.takeIf { it.isNotBlank() && it != "null" }
     return when (task.state) {
-        TaskState.WAITING_USER, TaskState.HELD -> when (task.tool) {
-            "text_contact" -> listOfNotNull(arg("query")?.let { "받는 사람 $it" }, arg("message")).joinToString("\n")
-            "call_contact" -> arg("query")?.let { "받는 사람 $it" }
+        TaskState.WAITING_USER, TaskState.HELD -> when {
+            task.tool == "text_contact" -> listOfNotNull(arg("query")?.let { "받는 사람 $it" }, arg("message")).joinToString("\n")
+            task.tool == "call_contact" -> arg("query")?.let { "받는 사람 $it" }
+            // What goes to an outside service is shown exactly as the card shows it, before any approval.
+            ExternalTools.isExternal(task.tool) -> ExternalTools.preview(task.tool, task.argsJson)
+            task.tool == "save_person" -> listOfNotNull(arg("name"), arg("org"), arg("role"), arg("notes_summary")).joinToString("\n")
+            task.tool == "create_calendar_event" -> listOfNotNull(arg("title"), arg("start_at"), arg("location")).joinToString("\n")
+            task.tool in setOf("apply_record_change", "undo_record_change") -> "대화 화면의 확인 카드에서 바뀌는 내용을 보고 승인해 주세요."
             else -> TaskListRules.mainField(task)?.let(::arg) ?: arg("query")
         }
         TaskState.OUTCOME_UNKNOWN -> task.error ?: "보냈는지 확인되지 않았어요. 받는 쪽에서 직접 확인해 주세요."

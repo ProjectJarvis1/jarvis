@@ -164,6 +164,8 @@ class GeminiSessionViewModel : ViewModel() {
     var streamingMode: StreamingMode = StreamingMode.GLASSES
 
     val taskRecords get() = taskManager.tasks
+    /** Set while kept tasks could not be written to disk; they may be lost on restart. */
+    val taskStorageError: String? get() = taskManager.storageError
 
     /** Every finished piece of user speech (live, queued during an answer, or local recognition) goes through here. */
     private fun onUserSpeech(text: String, at: Long) {
@@ -286,7 +288,9 @@ class GeminiSessionViewModel : ViewModel() {
     }
 
     /** True when the list may approve this record with [controlTask]; calls and texts go through [approveFromList]. */
-    fun approvable(task: TaskRecord) = needsReview(task.tool)
+    fun approvable(task: TaskRecord) =
+        // A record change is approved on the server's preview, which only its card on the conversation screen loads.
+        needsReview(task.tool) && task.tool !in setOf("apply_record_change", "undo_record_change")
 
     /** The approve button in the task list. A tap there is the user's confirmation, as on the card. */
     fun approveFromList(task: TaskRecord) {
