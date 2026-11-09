@@ -332,8 +332,10 @@ class GeminiLiveService {
                         put("targetTokens", 80000)
                     })
                 })
-                put("inputAudioTranscription", JSONObject())
-                put("outputAudioTranscription", JSONObject())
+                // Auto-detect wrote short Korean replies in other languages ("네" -> "de", "전화해" in Hindi):
+                // 4 of 12 short phrases, 0 with ko-KR pinned (scratch check through the gateway, 2026-11-09).
+                put("inputAudioTranscription", JSONObject().put("languageCodes", JSONArray().put("ko-KR")))
+                put("outputAudioTranscription", JSONObject().put("languageCodes", JSONArray().put("ko-KR")))
             })
         }
         // Send directly (not via sendExecutor) to ensure it's the first message
