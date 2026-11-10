@@ -8,6 +8,8 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+
 import android.Manifest.permission.BLUETOOTH
 import android.Manifest.permission.BLUETOOTH_CONNECT
 import android.Manifest.permission.BLUETOOTH_SCAN
@@ -23,8 +25,11 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
 import androidx.activity.viewModels
@@ -92,6 +97,9 @@ class MainActivity : ComponentActivity() {
     // Initialize settings with app context
     SettingsManager.init(this)
     com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.init(this)
+    lifecycleScope.launch {
+      com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.validate()
+    }
 
     // Keep screen on while streaming
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -110,6 +118,17 @@ class MainActivity : ComponentActivity() {
       // Records live on the server per account, so the app starts at sign-in until there is one.
       val user by com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.user
           .collectAsState()
+      // Signing out (or a rejected session) starts a fresh activity, so the next account never inherits
+      // the previous one's in-memory tasks; on-device records are kept per user (JarvisAccount.dataDir).
+      var wasSignedIn by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(user != null) }
+      androidx.compose.runtime.LaunchedEffect(user) {
+        if (user == null && wasSignedIn) {
+          startActivity(android.content.Intent(this@MainActivity, MainActivity::class.java)
+              .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK or android.content.Intent.FLAG_ACTIVITY_CLEAR_TASK))
+          finish()
+        }
+        wasSignedIn = user != null
+      }
       if (user == null) {
         com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.SignInScreen()
       } else {

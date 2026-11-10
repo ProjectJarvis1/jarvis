@@ -51,7 +51,9 @@ async def require_api_key(
     """Router dependency (name kept from the single-key days). Async so the user it sets
     stays in the request's context for the endpoint that follows."""
     from starlette.concurrency import run_in_threadpool
-    user = await run_in_threadpool(resolve_user, authorization, x_api_key)
+    # The idempotency middleware already checked these headers and holds a pooled connection;
+    # looking the session up again would need a second connection from the same pool.
+    user = current_user.get() or await run_in_threadpool(resolve_user, authorization, x_api_key)
     if user is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="로그인이 필요합니다.")
     current_user.set(user)

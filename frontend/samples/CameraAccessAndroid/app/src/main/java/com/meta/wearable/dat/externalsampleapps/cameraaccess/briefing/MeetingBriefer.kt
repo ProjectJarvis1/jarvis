@@ -1,5 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+
 import android.Manifest
 import android.content.ContentUris
 import android.content.Context
@@ -22,7 +24,7 @@ import org.json.JSONObject
 object MeetingBriefer {
     private const val TAG = "MeetingBriefer"
     private const val PREFS = "meeting_briefing"
-    private val client = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+    private val client = OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard).connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
     @Volatile private var dedupe: BriefingDedupe? = null
 
     fun hasCalendarPermission(context: Context) =

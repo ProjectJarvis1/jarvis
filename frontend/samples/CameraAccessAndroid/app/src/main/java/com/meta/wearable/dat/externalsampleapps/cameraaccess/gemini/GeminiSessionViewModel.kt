@@ -1,5 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+
 import android.graphics.Bitmap
 import android.os.SystemClock
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.card.BusinessCardText
@@ -78,7 +80,7 @@ class GeminiSessionViewModel : ViewModel() {
 
     private val geminiService = GeminiLiveService()
     private val openClawBridge = OpenClawBridge()
-    private val recordClient = okhttp3.OkHttpClient.Builder()
+    private val recordClient = okhttp3.OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard)
         .connectTimeout(10, java.util.concurrent.TimeUnit.SECONDS)
         .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS).build()
     private var toolCallRouter: ToolCallRouter? = null
@@ -86,11 +88,11 @@ class GeminiSessionViewModel : ViewModel() {
     private val calendarActionManager = CalendarActionManager()
     private val audioManager = AudioManager()
     private val eventClient = OpenClawEventClient()
-    private val taskArtifacts by lazy { TaskArtifacts(File(AppContextProvider.require().filesDir, "task-artifacts")) {
+    private val taskArtifacts by lazy { TaskArtifacts(File(JarvisAccount.dataDir(AppContextProvider.require()), "task-artifacts")) {
         taskManager.snapshot().filter { it.state !in setOf(TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED) }
             .mapNotNull { task -> task.sourceTaskId?.let { "$it-${task.sourceRevision}" } }.toSet()
     } }
-    private val taskStore by lazy { FileTaskStore(File(AppContextProvider.require().filesDir, "tasks/history.json")) }
+    private val taskStore by lazy { FileTaskStore(File(JarvisAccount.dataDir(AppContextProvider.require()), "tasks/history.json")) }
     private val taskManager by lazy { TaskManager(viewModelScope, taskStore, ::executeManagedTask) }
     suspend fun fullTaskResult(task: TaskRecord): String? = taskStore.fullResult(task)
     @Volatile private var lastInputAt = 0L

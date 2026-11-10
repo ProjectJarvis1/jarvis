@@ -36,7 +36,9 @@ class DurableRequestsTest {
             online = true
             val restored = DurableRequests(directory, client)
             var completed = false
-            restored.recover("http://localhost", "other-account", { true }) { _, _, _ -> fail("wrong identity") }
+            // Another account keeps its own outbox folder (JarvisAccount.dataDir); a new session of the same
+            // user (different token) still recovers its queued write.
+            restored.recover("http://other-server", "secret-key", { true }) { _, _, _ -> fail("wrong server") }
             restored.recover("http://localhost", "secret-key", { false }) { _, _, _ -> fail("cancelled revision") }
             assertTrue(keys.isEmpty())
             restored.recover("http://localhost", "secret-key", { it == "task:1" }) { key, code, _ ->

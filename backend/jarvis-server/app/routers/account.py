@@ -1,4 +1,5 @@
 """Sign in with Google, sign out, and delete the account (Google Play requires in-app deletion)."""
+import hashlib
 import logging
 import secrets
 from pathlib import Path
@@ -119,6 +120,9 @@ def delete_account():
         for table in _USER_TABLES:
             conn.execute(f"DELETE FROM {table}")
         conn.execute("DELETE FROM user_integrations WHERE user_id = %s", (user,))
+        # Saved replies to retried writes hold copies of the saved records (owner as in idempotency.py).
+        conn.execute("DELETE FROM request_receipts WHERE owner = %s",
+                     (hashlib.sha256(b"user:" + user.encode()).hexdigest(),))
         conn.execute("DELETE FROM app_users WHERE id = %s", (user,))  # sessions cascade
         conn.commit()
     _delete_files(files)

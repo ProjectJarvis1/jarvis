@@ -46,13 +46,22 @@ def _row_to_memory(row: dict) -> MemoryOut:
     return MemoryOut(**{k: row[k] for k in _MEMORY_FIELDS})
 
 
+def _user_image_dir() -> Path:
+    """Each user's photos sit in their own folder, chosen by the server from the signed-in user.
+    Photos saved before sign-in existed stay in the shared folder and belong to the admin user."""
+    from ..auth import ADMIN_USER, user_id
+    user = user_id()
+    return _IMAGE_DIR if user == ADMIN_USER else _IMAGE_DIR / "users" / user
+
+
 def _save_memory_image(image_base64: str, mime_type: str) -> dict:
     raw_base64 = image_base64.split(",", 1)[-1]
     image_bytes = base64.b64decode(raw_base64, validate=True)
     extension = _IMAGE_EXTENSIONS.get(mime_type, ".jpg")
-    _IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+    folder = _user_image_dir()
+    folder.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4()}{extension}"
-    path = _IMAGE_DIR / filename
+    path = folder / filename
     path.write_bytes(image_bytes)
     return {
         "image_path": str(path),
@@ -334,12 +343,9 @@ def recent_memories(body: MemoryRecentRequest) -> List[MemoryOut]:
 def memory_image(filename: str):
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="invalid filename")
-    path = _IMAGE_DIR / filename
-    # Files share one folder; serve only photos whose memory this user can see (row level security).
-    with get_conn() as conn:
-        owned = conn.execute("SELECT 1 FROM memories WHERE metadata->>'image_filename' = %s LIMIT 1",
-                             (filename,)).fetchone()
-    if not owned or not path.exists() or not path.is_file():
+    # Only the signed-in user's own folder is searched; record metadata is user-editable and not trusted here.
+    path = _user_image_dir() / filename
+    if not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="image not found")
     return FileResponse(path)
 

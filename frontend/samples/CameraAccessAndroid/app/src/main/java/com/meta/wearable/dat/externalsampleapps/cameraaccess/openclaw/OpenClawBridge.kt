@@ -1,5 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+
 // NOTE: This file replaces the original OpenClaw integration with a typed
 // HTTP client for the **Jarvis Memory API**. Class name `OpenClawBridge` is
 // preserved so the existing wiring in GeminiSessionViewModel / GeminiLiveService
@@ -56,18 +58,18 @@ class OpenClawBridge {
         _lastToolCallStatus.value = status
     }
 
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard)
         .readTimeout(60, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .build()
 
-    val durableRequests by lazy { DurableRequests(File(AppContextProvider.require().filesDir, "outbox"), client) }
+    val durableRequests by lazy { DurableRequests(File(JarvisAccount.dataDir(AppContextProvider.require()), "outbox"), client) }
     private val writeTools = setOf("save_person", "save_meeting", "save_memory", "save_life_memory", "save_need", "prepare_record_change", "apply_record_change", "undo_record_change")
 
     private fun isWrite(toolName: String) = toolName in writeTools || ExternalTools.requiresConfirmation(toolName)
 
-    private val externalToolsCache by lazy { File(AppContextProvider.require().filesDir, "external_tools.json") }
-    private val externalToolsSeen by lazy { File(AppContextProvider.require().filesDir, "external_tools_seen.json") }
+    private val externalToolsCache by lazy { File(JarvisAccount.dataDir(AppContextProvider.require()), "external_tools.json") }
+    private val externalToolsSeen by lazy { File(JarvisAccount.dataDir(AppContextProvider.require()), "external_tools_seen.json") }
 
     /**
      * Refreshes the outside-service tool list before a Live session. Waits at most [timeoutMs] so the
@@ -121,7 +123,7 @@ class OpenClawBridge {
     }
 
     // The memory server answers /health in 1.5–9s through the tunnel; 5s marked a working server as down.
-    private val pingClient = OkHttpClient.Builder()
+    private val pingClient = OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard)
         .readTimeout(15, TimeUnit.SECONDS)
         .connectTimeout(10, TimeUnit.SECONDS)
         .build()

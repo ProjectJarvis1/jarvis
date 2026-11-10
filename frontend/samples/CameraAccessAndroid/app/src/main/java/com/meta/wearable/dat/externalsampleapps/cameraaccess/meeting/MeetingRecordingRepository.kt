@@ -1,5 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import java.io.File
 import java.util.concurrent.TimeUnit
@@ -11,7 +13,7 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONObject
 
 class MeetingRecordingRepository {
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard)
         .connectTimeout(15, TimeUnit.SECONDS)
         .writeTimeout(120, TimeUnit.SECONDS)
         .readTimeout(180, TimeUnit.SECONDS)

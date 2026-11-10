@@ -1,5 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
 import java.util.concurrent.TimeUnit
@@ -26,7 +28,7 @@ object ServiceConnections {
     /** [ready] is false when the server has no sign-in app registered for this service yet. */
     data class State(val connected: Boolean, val ready: Boolean)
 
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard)
         .connectTimeout(8, TimeUnit.SECONDS).readTimeout(15, TimeUnit.SECONDS).build()
 
     private fun base() = GeminiConfig.jarvisApiBase.trimEnd('/')

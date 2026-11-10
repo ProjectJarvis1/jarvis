@@ -1,5 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
@@ -26,8 +28,9 @@ class DurableRequests(private val directory: File, private val client: OkHttpCli
     private val capabilities = mutableMapOf<String, Long>()
     private val retryAfter = mutableMapOf<String, Pair<Int, Long>>()
     private fun lock(key: String) = synchronized(monitor) { locks.getOrPut(key) { Mutex() } }
-    private fun identity(base: String, apiKey: String) = MessageDigest.getInstance("SHA-256")
-        .digest("$base\n$apiKey".toByteArray()).joinToString("") { "%02x".format(it) }
+    // Owner of a queued write: server plus signed-in user. Not the session token, which changes on every sign-in.
+    private fun identity(base: String, @Suppress("UNUSED_PARAMETER") apiKey: String) = MessageDigest.getInstance("SHA-256")
+        .digest("$base\n${JarvisAccount.userId}".toByteArray()).joinToString("") { "%02x".format(it) }
     private fun file(key: String): File {
         require(key.matches(Regex("[a-zA-Z0-9:-]{1,100}")))
         return File(directory, "$key.json")

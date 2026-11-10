@@ -43,6 +43,39 @@ object JarvisAccount {
         }
     }
 
+    /** Server user id; local task history, results and the outbox live under [dataDir] per user. */
+    val userId: String get() = if (::prefs.isInitialized) prefs.getString("uid", null).orEmpty() else ""
+
+    /** This user's folder for on-device records, so another account on the same phone never sees them. */
+    fun dataDir(context: Context): java.io.File =
+        java.io.File(context.filesDir, "users/" + userId.ifBlank { "signed-out" }.replace(Regex("[^A-Za-z0-9_-]"), "_"))
+
+    /**
+     * Added to every OkHttp client that talks to the Jarvis server: a 401 for the session it sent means
+     * the session is gone (expired, signed out elsewhere, account deleted), so the app returns to sign-in.
+     */
+    val sessionGuard = okhttp3.Interceptor { chain ->
+        val request = chain.request()
+        val response = chain.proceed(request)
+        val sent = request.header("Authorization")
+        if (response.code == 401 && sent != null && sent.isNotEmpty() && sent == authorization) {
+            android.os.Handler(android.os.Looper.getMainLooper()).post { if (authorization == sent) onUnauthorized() }
+        }
+        response
+    }
+
+    /** Checks a session restored from storage once at start-up; an offline phone keeps it. */
+    suspend fun validate() {
+        if (!isSignedIn) return
+        val sent = authorization
+        val code = runCatching {
+            withContext(Dispatchers.IO) {
+                client.newCall(Request.Builder().url(base() + "/auth/me").header("Authorization", sent).build()).execute().use { it.code }
+            }
+        }.getOrNull()
+        if (code == 401 && authorization == sent) clearLocal()
+    }
+
     val isSignedIn: Boolean get() = ::prefs.isInitialized && prefs.getString("token", null) != null
 
     /** Header value for Jarvis server calls; empty when signed out, which the server answers with 401. */
@@ -79,7 +112,7 @@ object JarvisAccount {
             check(response.isSuccessful) { serverMessage(text) ?: "로그인하지 못했습니다(${response.code})." }
             val json = JSONObject(text)
             val user = json.getJSONObject("user")
-            prefs.edit().putString("token", json.getString("token"))
+            prefs.edit().putString("token", json.getString("token")).putString("uid", user.getString("id"))
                 .putString("email", user.optString("email")).putString("name", user.optString("name")).apply()
             User(user.optString("email"), user.optString("name")).also { _user.value = it }
         }

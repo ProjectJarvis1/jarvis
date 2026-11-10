@@ -1,5 +1,7 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.memory
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiConfig
@@ -15,7 +17,7 @@ import okhttp3.Request
 import org.json.JSONObject
 
 class MemoryRepository {
-    private val client = OkHttpClient.Builder()
+    private val client = OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard)
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .build()
