@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from ..agent_service import confirm_pending_action, run_agent_query
 from ..auth import require_api_key
+from ..auth import user_id as current_user_id
 
 
 router = APIRouter(
@@ -15,7 +16,6 @@ router = APIRouter(
 
 
 class AgentQueryRequest(BaseModel):
-    user_id: str = "default"
     text: str
     timezone: str = "Asia/Seoul"
     image_id: Optional[str] = None
@@ -23,7 +23,6 @@ class AgentQueryRequest(BaseModel):
 
 
 class AgentConfirmRequest(BaseModel):
-    user_id: str = "default"
     pending_action_id: str
     approved: bool = True
 
@@ -31,7 +30,7 @@ class AgentConfirmRequest(BaseModel):
 @router.post("/query")
 def query(body: AgentQueryRequest):
     return run_agent_query(
-        user_id=body.user_id,
+        user_id=current_user_id(),
         text=body.text,
         timezone=body.timezone,
         image_id=body.image_id,
@@ -42,7 +41,7 @@ def query(body: AgentQueryRequest):
 @router.post("/confirm")
 def confirm(body: AgentConfirmRequest):
     return confirm_pending_action(
-        user_id=body.user_id,
+        user_id=current_user_id(),
         pending_action_id=body.pending_action_id,
         approved=body.approved,
     )

@@ -40,6 +40,7 @@ def ensure_schema() -> None:
     steps += [(path.stem, path.read_text()) for path in sorted((root / "migrations").glob("*.sql"))]
     with pool.connection() as conn:
         # All application instances apply startup migrations under one transaction lock.
+        conn.execute("RESET ROLE")  # a reused connection may still be jarvis_app, which cannot run DDL
         conn.execute("SELECT pg_advisory_xact_lock(728104602)")
         conn.execute("CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())")
         applied = {row["version"] for row in conn.execute("SELECT version FROM schema_migrations").fetchall()}
@@ -50,12 +51,23 @@ def ensure_schema() -> None:
         conn.commit()
 
 
+def _bind_user(conn) -> None:
+    """Row level security reads app.user_id. Set on every checkout: pooled connections keep the
+    previous request's value otherwise. No user means '' and therefore no rows."""
+    from .auth import current_user
+    # The owner role may bypass row level security, so requests run as jarvis_app (migration 005).
+    conn.execute("SELECT set_config('role', 'jarvis_app', false), set_config('app.user_id', %s, false)",
+                 (current_user.get() or "",))
+
+
 @contextmanager
 def get_conn() -> Iterator:
     from .idempotency import transaction_connection
     current = transaction_connection.get()
     if current is not None:
+        _bind_user(current)
         yield current
         return
     with pool.connection() as conn:
+        _bind_user(conn)
         yield conn

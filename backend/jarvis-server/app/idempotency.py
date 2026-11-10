@@ -61,10 +61,12 @@ class IdempotencyMiddleware:
         if not 1 <= len(key) <= 100:
             return await JSONResponse({"detail": "Invalid idempotency key"}, 400)(scope, receive, send)
         # Authenticate before reading/storing potentially large bodies or replaying responses.
-        from .config import settings
-        import secrets
-        if not secrets.compare_digest(headers.get(b"x-api-key", b""), settings.api_key.encode()):
-            return await JSONResponse({"detail": "Invalid API key"}, 401)(scope, receive, send)
+        from .auth import current_user, resolve_user
+        user = await run_in_threadpool(resolve_user, headers.get(b"authorization", b"").decode("latin-1"),
+                                       headers.get(b"x-api-key", b"").decode("latin-1"))
+        if user is None:
+            return await JSONResponse({"detail": "로그인이 필요합니다."}, 401)(scope, receive, send)
+        user_token = current_user.set(user)
         body = bytearray()
         while True:
             message = await receive()
@@ -75,7 +77,8 @@ class IdempotencyMiddleware:
                 return await JSONResponse({"detail": "Request too large"}, 413)(scope, receive, send)
             if not message.get("more_body", False):
                 break
-        owner = hashlib.sha256(settings.api_key.encode()).hexdigest()
+        # Receipts are per user: one user's key never replays another user's response.
+        owner = hashlib.sha256(b"user:" + user.encode()).hexdigest()
         fingerprint = hashlib.sha256(scope["path"].encode() + b"\n" + body).hexdigest()
         from .db import pool
         from psycopg.types.json import Jsonb
@@ -121,6 +124,7 @@ class IdempotencyMiddleware:
         finally:
             if token is not None:
                 transaction_connection.reset(token)
+            current_user.reset(user_token)
             # Also releases the transaction lock on replay/conflict/error.
             await run_in_threadpool(conn.rollback)
             await run_in_threadpool(pool.putconn, conn)

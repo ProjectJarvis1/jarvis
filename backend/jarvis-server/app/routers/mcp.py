@@ -7,7 +7,8 @@ from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 from .. import mcp_gateway
-from ..auth import require_api_key
+from ..auth import ADMIN_USER, require_api_key
+from ..auth import user_id as current_user_id
 from ..db import get_conn
 from ..mcp_tools import call_tool, get_tool, list_tools
 
@@ -42,7 +43,8 @@ class JsonRpcRequest(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
 
 
-def connected_providers(user_id: str = "default") -> set[str]:
+def connected_providers(user_id: str = "") -> set[str]:
+    user_id = user_id or current_user_id()
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
@@ -55,7 +57,8 @@ def connected_providers(user_id: str = "default") -> set[str]:
 def app_tools() -> list[dict[str, Any]]:
     """앱이 Gemini 에 넘길 도구 목록: 연결된 외부 MCP 도구 + 계정이 연결된 서버 자체 도구."""
     gw = mcp_gateway.gateway
-    tools = gw.manifest() if gw else []
+    # 외부 MCP 연결은 관리자 계정 하나로 열려 있어 다른 사용자에게는 보여 주지 않는다.
+    tools = gw.manifest() if gw and current_user_id() == _GATEWAY_USER else []
     taken = {t["name"] for t in tools}
     connected = connected_providers()
     for manifest in list_tools():
@@ -88,7 +91,7 @@ def status():
 
 # 외부 MCP 연결은 서버 하나에 계정 하나(.env 키 또는 "default" 사용자의 계정 연결)로 연다.
 # 다른 user_id 로 외부 도구를 부르면 남의 계정으로 실행되지 않게 거절한다.
-_GATEWAY_USER = "default"
+_GATEWAY_USER = ADMIN_USER
 
 
 def _with_details(result: dict[str, Any]) -> dict[str, Any]:
@@ -178,8 +181,8 @@ async def jsonrpc(body: JsonRpcRequest, idempotency_key: str = Header("", alias=
     if body.method == "tools/call":
         name = body.params.get("name", "")
         arguments = body.params.get("arguments") or {}
-        user_id = body.params.get("user_id") or "default"
-        result = await _call(name, arguments, user_id, idempotency_key)
+        user_id = current_user_id()  # 요청 본문의 user_id 는 믿지 않는다
+        result = await _call(name, arguments, user_id, f"{user_id}:{idempotency_key}" if idempotency_key else "")
         if result.get("is_error") and result.get("error", "").startswith("unknown tool"):
             return JSONResponse(status_code=404, content={"jsonrpc": "2.0", "id": body.id,
                                                           "error": {"code": -32602, "message": result["error"]}})

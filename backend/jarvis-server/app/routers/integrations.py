@@ -13,6 +13,7 @@ from psycopg.types.json import Jsonb
 
 from .. import notion_mcp_auth
 from ..auth import require_api_key
+from ..auth import user_id as current_user_id
 from ..config import settings
 from ..db import get_conn
 
@@ -82,7 +83,8 @@ def _upsert_integration(
 
 
 @router.get("/status", dependencies=[Depends(require_api_key)])
-def status(user_id: str = "default"):
+def status():
+    user_id = current_user_id()
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -123,8 +125,9 @@ _SERVICE_ROWS = {"notion": ("notion_mcp", "notion"), "google": ("google",), "sla
 
 
 @router.delete("/{service}", dependencies=[Depends(require_api_key)])
-def disconnect(service: str, user_id: str = "default"):
+def disconnect(service: str):
     """앱의 '연결 해제'. 저장한 토큰을 지운다(상대 서비스 쪽 권한은 그 서비스 설정에서 따로 거둔다)."""
+    user_id = current_user_id()
     rows = _SERVICE_ROWS.get(service)
     if not rows:
         raise HTTPException(404, "unknown integration provider")
@@ -162,7 +165,8 @@ def _check_state(provider: str, state: str) -> str:
 
 
 @router.get("/{provider}/link", dependencies=[Depends(require_api_key)])
-def link(provider: str, user_id: str = "default"):
+def link(provider: str):
+    user_id = current_user_id()
     if provider not in ("google", "slack", "notion"):
         raise HTTPException(404, "unknown integration provider")
     if "." in user_id:

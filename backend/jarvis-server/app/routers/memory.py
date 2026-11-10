@@ -181,7 +181,7 @@ def _upsert_entity(cur, entity: dict):
         """
         INSERT INTO entities (entity_type, label, aliases, metadata, embedding)
         VALUES (%s, %s, %s, %s, %s)
-        ON CONFLICT (entity_type, label)
+        ON CONFLICT (user_id, entity_type, label)
         DO UPDATE SET
             aliases = (
                 SELECT ARRAY(
@@ -335,7 +335,11 @@ def memory_image(filename: str):
     if "/" in filename or "\\" in filename or ".." in filename:
         raise HTTPException(status_code=400, detail="invalid filename")
     path = _IMAGE_DIR / filename
-    if not path.exists() or not path.is_file():
+    # Files share one folder; serve only photos whose memory this user can see (row level security).
+    with get_conn() as conn:
+        owned = conn.execute("SELECT 1 FROM memories WHERE metadata->>'image_filename' = %s LIMIT 1",
+                             (filename,)).fetchone()
+    if not owned or not path.exists() or not path.is_file():
         raise HTTPException(status_code=404, detail="image not found")
     return FileResponse(path)
 

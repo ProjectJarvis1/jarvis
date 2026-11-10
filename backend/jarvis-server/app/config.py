@@ -54,6 +54,14 @@ class Settings:
     notion_client_secret: str = os.getenv("NOTION_CLIENT_SECRET", "")
     notion_redirect_uri: str = os.getenv("NOTION_REDIRECT_URI", "")
 
+    # Google account whose sign-in takes over the records saved before per-user sign-in ("default").
+    admin_email: str = os.getenv("ADMIN_EMAIL", "").strip()
+    # Email-only sign-in for emulators without Google Play services. Never true in production.
+    allow_dev_login: bool = os.getenv("ALLOW_DEV_LOGIN", "false").lower() == "true"
+    # Gemini Live is relayed through this server so the app never holds the key.
+    gemini_live_url: str = os.getenv("GEMINI_LIVE_URL", "")
+    gemini_live_key: str = os.getenv("GEMINI_LIVE_KEY", "")
+
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "https://api.projectjarvis.biz").rstrip("/")
 
     use_langgraph: bool = os.getenv("JARVIS_USE_LANGGRAPH", "false").lower() == "true"
