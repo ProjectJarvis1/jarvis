@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.ContactsContract
 import android.provider.ContactsContract.Intents.Insert
-import android.telephony.SmsManager
 import androidx.core.content.ContextCompat
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.AppContextProvider
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
@@ -46,9 +45,6 @@ class ContactActionManager {
         if (!hasContactsPermission()) {
             return ToolResult.Failure("전화번호부 권한이 없습니다. 연락처 권한을 허용한 뒤 다시 시도해주세요.")
         }
-        if (!hasSmsPermission()) {
-            return ToolResult.Failure("문자 전송 권한이 없습니다. SMS 권한을 허용한 뒤 다시 시도해주세요.")
-        }
         val matches = findMatches(query)
         if (matches.isEmpty()) {
             return ToolResult.Failure("전화번호부에서 '$query'에 해당하는 연락처를 찾지 못했습니다.")
@@ -59,8 +55,8 @@ class ContactActionManager {
             )
         }
         val match = matches.first()
-        sendSms(match.phoneNumber, message)
-        return ToolResult.Success("${match.displayName}에게 문자를 보냈습니다.")
+        openSmsComposer(match.phoneNumber, message)
+        return ToolResult.Success("${match.displayName}에게 보낼 문자를 문자 앱에 띄웠습니다. 휴대폰에서 전송 버튼을 누르면 보내집니다.")
     }
 
     fun createContact(
@@ -148,12 +144,6 @@ class ContactActionManager {
         ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.CALL_PHONE,
-        ) == PackageManager.PERMISSION_GRANTED
-
-    private fun hasSmsPermission(): Boolean =
-        ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.SEND_SMS,
         ) == PackageManager.PERMISSION_GRANTED
 
     private fun findMatches(query: String): List<ContactMatch> {
@@ -277,14 +267,14 @@ class ContactActionManager {
         context.startActivity(intent)
     }
 
-    private fun sendSms(phoneNumber: String, message: String) {
-        val smsManager = context.getSystemService(SmsManager::class.java)
-        val parts = smsManager.divideMessage(message)
-        if (parts.size > 1) {
-            smsManager.sendMultipartTextMessage(phoneNumber, null, parts, null, null)
-        } else {
-            smsManager.sendTextMessage(phoneNumber, null, message, null, null)
+    /** Google Play allows SEND_SMS only for default SMS apps, so the text opens in the user's SMS app to send. */
+    private fun openSmsComposer(phoneNumber: String, message: String) {
+        val intent = Intent(Intent.ACTION_SENDTO).apply {
+            data = Uri.parse("smsto:${Uri.encode(phoneNumber)}")
+            putExtra("sms_body", message)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
+        context.startActivity(intent)
     }
 
     private fun normalize(value: String): String =

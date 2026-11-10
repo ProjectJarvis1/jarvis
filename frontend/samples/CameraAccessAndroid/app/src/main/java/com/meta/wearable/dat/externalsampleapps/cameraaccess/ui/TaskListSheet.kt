@@ -185,7 +185,7 @@ private fun stateLabel(state: TaskState) = when (state) {
 private fun actionLabel(action: TaskListAction, task: TaskRecord) = when (action) {
     TaskListAction.APPROVE -> when (task.tool) {
         "call_contact" -> "전화 걸기"
-        "text_contact" -> "문자 보내기"
+        "text_contact" -> "문자 앱 열기"
         else -> "확인"
     }
     TaskListAction.EDIT -> "고치기"

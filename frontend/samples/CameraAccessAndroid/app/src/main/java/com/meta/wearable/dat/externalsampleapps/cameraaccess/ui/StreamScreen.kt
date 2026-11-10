@@ -719,9 +719,9 @@ private fun ContactActionConfirmCard(
     onCancel: () -> Unit,
 ) {
     val isCall = action.type == PendingContactActionType.CALL
-    val label = if (isCall) "전화 걸기" else "문자 보내기"
+    val label = if (isCall) "전화 걸기" else "문자 앱 열기"
     ConfirmSheet(
-        headline = if (isCall) "${action.query}에게 전화할까요?" else "${action.query}에게 문자를 보낼까요?",
+        headline = if (isCall) "${action.query}에게 전화할까요?" else "${action.query}에게 보낼 문자를 문자 앱에 띄울까요?",
         actionLabel = label, onAction = onConfirm, onCancel = onCancel,
         initial = action.query.trim().take(1).ifBlank { null },
         // The whole message is shown: it is exactly what will be sent.

@@ -6,25 +6,29 @@
  * LICENSE file in the root directory of this source tree.
  */
 
+import java.util.Properties
+
 plugins {
   alias(libs.plugins.android.application)
   alias(libs.plugins.jetbrains.kotlin.android)
   alias(libs.plugins.compose.compiler)
-  id("com.google.gms.google-services")
 }
 
 android {
   namespace = "com.meta.wearable.dat.externalsampleapps.cameraaccess"
-  compileSdk = 35
+  compileSdk = 36
+  compileSdkMinor = 1
+  ndkVersion = "27.0.12077973" // 16KB page alignment by default, needed for Play on Android 15+
 
   buildFeatures { buildConfig = true }
 
   defaultConfig {
-    applicationId = "com.meta.wearable.dat.externalsampleapps.cameraaccess"
+    // Store identity; fixed once uploaded to Google Play. The code namespace above stays the Meta sample one.
+    applicationId = "ai.jarvisglass.app"
     minSdk = 31
-    targetSdk = 34
-    versionCode = 1
-    versionName = "1.0"
+    targetSdk = 36
+    versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+    versionName = (findProperty("versionName") as String?) ?: "0.1.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     vectorDrawables { useSupportLibrary = true }
@@ -39,11 +43,25 @@ android {
     }
   }
 
+  // Upload key for Google Play lives outside the repo; see keystore.properties.example.
+  val keystoreProps = Properties().apply {
+    rootProject.file("keystore.properties").takeIf { it.exists() }?.inputStream()?.use { load(it) }
+  }
+  signingConfigs {
+    if (keystoreProps.getProperty("storeFile") != null) {
+      create("upload") {
+        storeFile = file(keystoreProps.getProperty("storeFile"))
+        storePassword = keystoreProps.getProperty("storePassword")
+        keyAlias = keystoreProps.getProperty("keyAlias")
+        keyPassword = keystoreProps.getProperty("keyPassword")
+      }
+    }
+  }
   buildTypes {
     release {
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("debug")
+      signingConfig = signingConfigs.findByName("upload")
     }
   }
   compileOptions {
@@ -69,7 +87,6 @@ dependencies {
   testImplementation("org.json:json:20240303")
   implementation(libs.androidx.activity.compose)
   implementation(platform(libs.androidx.compose.bom))
-  implementation(platform("com.google.firebase:firebase-bom:34.15.0"))
   implementation(libs.androidx.exifinterface)
   implementation(libs.androidx.lifecycle.runtime.compose)
   implementation(libs.androidx.lifecycle.viewmodel.compose)

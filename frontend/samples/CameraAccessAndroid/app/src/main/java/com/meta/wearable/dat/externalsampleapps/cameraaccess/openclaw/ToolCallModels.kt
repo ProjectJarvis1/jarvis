@@ -99,7 +99,7 @@ private fun String.userFacingToolLabel(): String = when (this) {
     "universal_search", "search_memory" -> "기억 검색"
     "search_contacts" -> "연락처 후보 검색"
     "call_contact" -> "전화 연결"
-    "text_contact" -> "문자 전송"
+    "text_contact" -> "문자 작성"
     "create_contact" -> "연락처 등록"
     "create_calendar_event" -> "일정 등록"
     "save_meeting" -> "회의 저장"
@@ -313,7 +313,7 @@ object ToolDeclarations {
 
     private fun textContact() = decl(
         name = "text_contact",
-        description = "사용자의 Android 전화번호부에서 연락처를 찾아 SMS 문자를 즉시 전송합니다. 반드시 universal_search의 person_candidates에서 임베딩 유사도 높은 자비스 사람 후보를 찾고 사용자가 수신자를 확정한 뒤 호출하세요. 여러 명이면 이 도구를 호출하지 말고 다시 확인하세요.",
+        description = "사용자의 Android 전화번호부에서 연락처를 찾아 문자 앱에 받는 사람과 내용을 채워 띄웁니다. 실제 전송은 사용자가 휴대폰에서 전송 버튼을 눌러야 하니, 호출 뒤에는 '보냈다'가 아니라 '문자 앱에 띄웠다'고 말하세요. 반드시 universal_search의 person_candidates에서 임베딩 유사도 높은 자비스 사람 후보를 찾고 사용자가 수신자를 확정한 뒤 호출하세요. 여러 명이면 이 도구를 호출하지 말고 다시 확인하세요.",
         properties = JSONObject()
             .put("query", strProp("연락처 이름 또는 전화번호 일부"))
             .put("message", strProp("보낼 문자 초안")),

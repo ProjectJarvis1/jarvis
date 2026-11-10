@@ -160,7 +160,7 @@ object SettingsManager {
 
 [실행]
 - call_contact(query) — 전화번호부에서 연락처를 찾아 즉시 전화 걸기
-- text_contact(query, message) — 전화번호부에서 연락처를 찾아 SMS 즉시 전송
+- text_contact(query, message) — 전화번호부에서 연락처를 찾아 문자 앱에 내용을 채워 띄움(전송은 사용자가 직접 누름)
 - search_contacts(query, top_k?) — Android 전화번호부에서 연락처 후보 검색. 실행하지 않고 후보만 반환
 - create_contact(name, phone?, email?, org?, role?, notes?) — Android 연락처 등록 화면 열기
 - create_calendar_event(title, start_at, end_at?, location?, description?) — 일정 등록(구글 캘린더 연결 시 바로 등록)

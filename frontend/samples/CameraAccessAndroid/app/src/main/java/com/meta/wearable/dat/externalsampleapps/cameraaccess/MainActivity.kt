@@ -17,7 +17,6 @@ import android.Manifest.permission.INTERNET
 import android.Manifest.permission.POST_NOTIFICATIONS
 import android.Manifest.permission.READ_CONTACTS
 import android.Manifest.permission.RECORD_AUDIO
-import android.Manifest.permission.SEND_SMS
 import android.Manifest.permission.WRITE_CONTACTS
 import android.os.Build
 import android.os.Bundle
@@ -54,7 +53,6 @@ class MainActivity : ComponentActivity() {
                 add(READ_CONTACTS)
                 add(WRITE_CONTACTS)
                 add(CALL_PHONE)
-                add(SEND_SMS)
                 add(CAMERA)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                   add(POST_NOTIFICATIONS)
