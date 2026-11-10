@@ -54,8 +54,10 @@ def _sign_in(sub: str, email: str, name: str) -> dict:
             user = ADMIN_USER
             conn.execute("UPDATE app_users SET google_sub = %s WHERE id = %s", (sub, user))
         else:
-            user = "u_" + secrets.token_hex(8)
-            conn.execute("INSERT INTO app_users(id, google_sub) VALUES (%s, %s)", (user, sub))
+            # Two devices signing in for the first time at once: the second takes the row the first created.
+            conn.execute("INSERT INTO app_users(id, google_sub) VALUES (%s, %s) ON CONFLICT (google_sub) DO NOTHING",
+                         ("u_" + secrets.token_hex(8), sub))
+            user = conn.execute("SELECT id FROM app_users WHERE google_sub = %s", (sub,)).fetchone()["id"]
         conn.execute("UPDATE app_users SET email = %s, name = %s, last_login_at = now() WHERE id = %s",
                      (email, name, user))
         token = create_session(conn, user)

@@ -40,8 +40,11 @@ BEGIN
         -- The app connects as the table owner, which skips policies unless forced.
         EXECUTE format('ALTER TABLE %I FORCE ROW LEVEL SECURITY', t);
         EXECUTE format('DROP POLICY IF EXISTS own_rows ON %I', t);
+        -- Writes also need the user to still exist: a save still running when its account is deleted
+        -- must not recreate data under the deleted id.
         EXECUTE format($p$CREATE POLICY own_rows ON %I USING (user_id = current_setting('app.user_id', true))
-                          WITH CHECK (user_id = current_setting('app.user_id', true))$p$, t);
+                          WITH CHECK (user_id = current_setting('app.user_id', true)
+                                      AND EXISTS (SELECT 1 FROM app_users u WHERE u.id = user_id))$p$, t);
     END LOOP;
 END $$;
 
