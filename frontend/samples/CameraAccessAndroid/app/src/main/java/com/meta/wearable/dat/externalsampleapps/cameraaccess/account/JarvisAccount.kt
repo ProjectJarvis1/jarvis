@@ -145,6 +145,7 @@ object JarvisAccount {
     fun onUnauthorized() = clearLocal()
 
     private fun clearLocal() {
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools.clear()
         prefs.edit().clear().apply()
         _user.value = null
     }
