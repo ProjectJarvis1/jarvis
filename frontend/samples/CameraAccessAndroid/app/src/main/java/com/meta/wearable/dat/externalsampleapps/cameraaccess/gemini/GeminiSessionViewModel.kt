@@ -232,7 +232,7 @@ class GeminiSessionViewModel : ViewModel() {
                             taskManager.snapshot().filter { it.state == TaskState.COMPLETED }.forEach {
                                 openClawBridge.durableRequests.acknowledge("${it.id}:${it.revision}")
                             }
-                            openClawBridge.durableRequests.recover(GeminiConfig.jarvisApiBase.trimEnd('/'), GeminiConfig.jarvisApiKey,
+                            openClawBridge.durableRequests.recover(GeminiConfig.jarvisApiBase.trimEnd('/'), GeminiConfig.jarvisAuthorization,
                                 taskManager::canRecover) { key, code, body ->
                                 // An outside-service write answers 200 even when it could not confirm the send;
                                 // record that as failed with its message, never as completed.
@@ -337,7 +337,7 @@ class GeminiSessionViewModel : ViewModel() {
     suspend fun readChange(changeId: String): JSONObject = readAssistant("/assistant/changes/${java.util.UUID.fromString(changeId)}")
     private suspend fun readAssistant(path: String): JSONObject = withContext(Dispatchers.IO) {
         val request = okhttp3.Request.Builder().url(GeminiConfig.jarvisApiBase.trimEnd('/') + path)
-            .header("X-API-Key", GeminiConfig.jarvisApiKey).build()
+            .header("Authorization", GeminiConfig.jarvisAuthorization).build()
         val response = recordClient.newCall(request).awaitTaskResponse()
         check(response.code in 200..299) { "기록을 불러오지 못했습니다: HTTP ${response.code}" }
         JSONObject(response.body)
@@ -360,7 +360,7 @@ class GeminiSessionViewModel : ViewModel() {
     suspend fun evidenceImage(path: String): Bitmap? = withContext(Dispatchers.IO) {
         if (!path.startsWith("/memory/images/") || path.contains("..")) return@withContext null
         val request = okhttp3.Request.Builder().url(GeminiConfig.jarvisApiBase.trimEnd('/') + path)
-            .header("X-API-Key", GeminiConfig.jarvisApiKey).build()
+            .header("Authorization", GeminiConfig.jarvisAuthorization).build()
         runCatching { recordClient.newCall(request).execute().use { response ->
             if (!response.isSuccessful) null else response.body?.byteStream()?.let(android.graphics.BitmapFactory::decodeStream)
         } }.getOrNull()
@@ -377,7 +377,7 @@ class GeminiSessionViewModel : ViewModel() {
 
         if (!GeminiConfig.isConfigured) {
             _uiState.value = _uiState.value.copy(
-                errorMessage = "게이트웨이 키가 없습니다. 설정 > 고급 설정 > Gemini 키 (마인드로직)에 키를 넣어 주세요."
+                errorMessage = "로그인이 필요합니다. 설정에서 구글 계정으로 로그인해 주세요."
             )
             return
         }

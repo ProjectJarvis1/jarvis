@@ -99,6 +99,10 @@ dependencies {
   implementation(libs.mwdat.mockdevice)
   // VisionClaw additions
   implementation(libs.okhttp)
+  // Google sign-in (Credential Manager). The server checks the ID token and opens a Jarvis session.
+  implementation("androidx.credentials:credentials:1.5.0")
+  implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+  implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
   implementation(libs.webrtc)
   implementation(libs.camerax.core)
   implementation(libs.camerax.camera2)

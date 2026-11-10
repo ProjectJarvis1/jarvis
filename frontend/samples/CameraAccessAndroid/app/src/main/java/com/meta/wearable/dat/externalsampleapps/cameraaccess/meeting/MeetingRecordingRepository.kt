@@ -37,7 +37,7 @@ class MeetingRecordingRepository {
             .build()
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/meetings/recordings")
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .post(body)
             .build()
 

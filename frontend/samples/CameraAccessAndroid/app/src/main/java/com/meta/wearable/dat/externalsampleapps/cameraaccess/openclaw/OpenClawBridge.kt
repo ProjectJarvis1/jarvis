@@ -77,7 +77,7 @@ class OpenClawBridge {
         val fresh = withTimeoutOrNull(timeoutMs) {
             runCatching {
                 val request = Request.Builder().url("${baseUrl()}/mcp/tools").get()
-                    .addHeader("X-API-Key", GeminiConfig.jarvisApiKey).build()
+                    .addHeader("Authorization", GeminiConfig.jarvisAuthorization).build()
                 client.newCall(request).awaitTaskResponse().takeIf { it.code in 200..299 }?.body
             }.getOrNull()
         }
@@ -312,14 +312,14 @@ class OpenClawBridge {
 
     private suspend fun post(path: String, body: JSONObject): ToolResult {
         currentCoroutineContext()[RequestIdentity]?.value?.let { key ->
-            val response = durableRequests.send(key, baseUrl(), GeminiConfig.jarvisApiKey, path, body.toString())
+            val response = durableRequests.send(key, baseUrl(), GeminiConfig.jarvisAuthorization, path, body.toString())
             return if (response.code in 200..299) ToolResult.Success(response.body)
                 else ToolResult.Failure("HTTP ${response.code}: ${response.body.take(200)}")
         }
         val request = Request.Builder()
             .url("${baseUrl()}$path")
             .post(body.toString().toRequestBody(jsonMediaType))
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .addHeader("Content-Type", "application/json")
             .build()
         return execute(request, "POST $path")
@@ -329,7 +329,7 @@ class OpenClawBridge {
         val request = Request.Builder()
             .url("${baseUrl()}$path")
             .get()
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .build()
         return execute(request, "GET $path")
     }

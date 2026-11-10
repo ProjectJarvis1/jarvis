@@ -139,7 +139,7 @@ object MeetingBriefer {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}$path")
             .post(body.toString().toRequestBody("application/json".toMediaType()))
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) error("HTTP ${response.code}")

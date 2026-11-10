@@ -32,7 +32,7 @@ object ServiceConnections {
     private fun base() = GeminiConfig.jarvisApiBase.trimEnd('/')
 
     private fun request(path: String) = Request.Builder().url("${base()}$path")
-        .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+        .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
 
     suspend fun status(): Map<Service, State> = withContext(Dispatchers.IO) {
         client.newCall(request("/integrations/status").get().build()).execute().use { response ->

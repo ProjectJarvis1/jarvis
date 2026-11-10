@@ -23,6 +23,8 @@ import android.os.Bundle
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
 import androidx.activity.viewModels
@@ -89,6 +91,7 @@ class MainActivity : ComponentActivity() {
 
     // Initialize settings with app context
     SettingsManager.init(this)
+    com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.init(this)
 
     // Keep screen on while streaming
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -104,10 +107,17 @@ class MainActivity : ComponentActivity() {
 
     setContent {
       com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.JarvisTheme {
-      CameraAccessScaffold(
-          viewModel = viewModel,
-          onRequestWearablesPermission = ::requestWearablesPermission,
-      )
+      // Records live on the server per account, so the app starts at sign-in until there is one.
+      val user by com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.user
+          .collectAsState()
+      if (user == null) {
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.SignInScreen()
+      } else {
+        CameraAccessScaffold(
+            viewModel = viewModel,
+            onRequestWearablesPermission = ::requestWearablesPermission,
+        )
+      }
       }
     }
   }

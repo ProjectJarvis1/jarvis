@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
@@ -94,7 +95,7 @@ class GeminiLiveService {
         _connectionState.value = GeminiConnectionState.Connecting
         connectCallback = callback
 
-        val request = Request.Builder().url(url).header(GeminiConfig.API_KEY_HEADER, GeminiConfig.apiKey).build()
+        val request = Request.Builder().url(url).header("Authorization", GeminiConfig.jarvisAuthorization).build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 dispatch(generation) {
@@ -113,6 +114,8 @@ class GeminiLiveService {
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                // The Jarvis relay refuses the handshake (403) when the session is no longer valid.
+                if (response?.code == 401 || response?.code == 403) JarvisAccount.onUnauthorized()
                 dispatch(generation) {
                     val msg = friendlyError(t.message ?: "Unknown error")
                     Log.e(TAG, "WebSocket failure: $msg")

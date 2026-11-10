@@ -69,14 +69,14 @@ class DurableRequests(private val directory: File, private val client: OkHttpCli
             val identity = data.getString("identity")
             val supported = synchronized(monitor) { capabilities[identity]?.let { System.nanoTime() - it < 300_000_000_000L } ?: false }
             if (!supported) {
-                val capability = request(Request.Builder().url(data.getString("base") + "/assistant/capabilities").header("X-API-Key", apiKey).build())
+                val capability = request(Request.Builder().url(data.getString("base") + "/assistant/capabilities").header("Authorization", apiKey).build())
                 if (capability.code >= 500 || capability.code in setOf(408, 429)) throw PendingNetworkException()
                 check(capability.code == 200 && JSONObject(capability.body).optInt("atomic_idempotency") == 1) { "서버를 업데이트한 뒤 저장해주세요." }
                 synchronized(monitor) { capabilities[identity] = System.nanoTime() }
             }
             // Recheck revision AFTER capability IO. The registered Call is cancellable until completion.
             val response = request(Request.Builder().url(data.getString("base") + data.getString("path"))
-                .header("X-API-Key", apiKey).header("Idempotency-Key", key)
+                .header("Authorization", apiKey).header("Idempotency-Key", key)
                 .post(data.getString("body").toRequestBody("application/json".toMediaType())).build())
             if (response.code >= 500 || response.code in setOf(408, 429)) throw PendingNetworkException()
             return response

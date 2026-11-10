@@ -1,14 +1,12 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 
 object GeminiConfig {
-    // Gemini Live through the Mindlogic API gateway. Same protocol as Google's socket; the gateway key goes in
-    // the x-goog-api-key header (never in the address, so it stays out of logs).
-    const val WEBSOCKET_BASE_URL =
-        "wss://factchat-cloud.mindlogic.ai/v1/gateway/gemini/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent"
+    // Gemini Live goes through the Jarvis server, which holds the gateway key (/live/gemini relays frames
+    // unchanged). The app authenticates with the signed-in user's session.
     const val MODEL = "models/gemini-3.8-live"
-    const val API_KEY_HEADER = "x-goog-api-key"
 
     const val INPUT_AUDIO_SAMPLE_RATE = 16000
     const val OUTPUT_AUDIO_SAMPLE_RATE = 24000
@@ -42,9 +40,6 @@ object GeminiConfig {
         return "[현재 시각]\n- 지금은 한국 시간 $text (${day}요일)입니다. \"오늘\", \"내일\", \"이번 주\", \"오후 3시\"는 모두 이 시각과 한국 시간(+09:00) 기준으로 계산하세요. 미국 시간이나 세계 표준시로 계산하지 마세요."
     }
 
-    val apiKey: String
-        get() = SettingsManager.geminiAPIKey
-
     val openClawHost: String
         get() = SettingsManager.openClawHost
 
@@ -61,22 +56,20 @@ object GeminiConfig {
     val jarvisApiBase: String
         get() = SettingsManager.jarvisApiBase
 
-    val jarvisApiKey: String
-        get() = SettingsManager.jarvisApiKey
+    /** `Authorization` header value for Jarvis server calls (the signed-in user's session). */
+    val jarvisAuthorization: String
+        get() = JarvisAccount.authorization
 
     val isJarvisConfigured: Boolean
-        get() = jarvisApiBase != "http://YOUR_HOST:8000"
-                && jarvisApiBase.isNotEmpty()
-                && jarvisApiKey != "YOUR_JARVIS_API_KEY"
-                && jarvisApiKey.isNotEmpty()
+        get() = jarvisApiBase != "http://YOUR_HOST:8000" && jarvisApiBase.isNotEmpty() && JarvisAccount.isSignedIn
 
     fun websocketURL(): String? {
-        if (apiKey == "YOUR_GEMINI_API_KEY" || apiKey.isEmpty()) return null
-        return WEBSOCKET_BASE_URL
+        if (!isJarvisConfigured) return null
+        return jarvisApiBase.trimEnd('/').replaceFirst("https://", "wss://").replaceFirst("http://", "ws://") + "/live/gemini"
     }
 
     val isConfigured: Boolean
-        get() = apiKey != "YOUR_GEMINI_API_KEY" && apiKey.isNotEmpty()
+        get() = isJarvisConfigured
 
     val isOpenClawConfigured: Boolean
         get() = openClawGatewayToken != "YOUR_OPENCLAW_GATEWAY_TOKEN"

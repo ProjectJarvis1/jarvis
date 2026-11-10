@@ -20,11 +20,13 @@ async def gemini_live(ws: WebSocket):
     if user is None:
         await ws.close(code=4401, reason="login required")
         return
+    # Refusing before accept answers the handshake with HTTP 403, which the app reads as "signed out";
+    # a server-side setup problem is therefore reported after accept, as a normal close.
+    await ws.accept()
     if not (settings.gemini_live_url and settings.gemini_live_key):
         await ws.close(code=1011, reason="relay not configured")
         return
     import websockets
-    await ws.accept()
     try:
         async with websockets.connect(settings.gemini_live_url, max_size=None, open_timeout=15,
                                       additional_headers={"x-goog-api-key": settings.gemini_live_key}) as upstream:

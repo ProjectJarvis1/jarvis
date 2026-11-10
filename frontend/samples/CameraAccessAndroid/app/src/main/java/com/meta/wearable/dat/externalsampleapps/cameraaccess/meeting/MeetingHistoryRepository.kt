@@ -27,7 +27,7 @@ class MeetingHistoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/meetings?limit=$limit")
             .get()
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .build()
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
@@ -74,7 +74,7 @@ class MeetingHistoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/meetings/$meetingId")
             .get()
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .build()
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
@@ -97,7 +97,7 @@ class MeetingHistoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/meetings/${meeting.id}")
             .put(body.toString().toRequestBody(jsonMediaType))
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .addHeader("Content-Type", "application/json")
             .build()
         client.newCall(request).execute().use { response ->
@@ -113,7 +113,7 @@ class MeetingHistoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/meetings/$meetingId")
             .delete()
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {

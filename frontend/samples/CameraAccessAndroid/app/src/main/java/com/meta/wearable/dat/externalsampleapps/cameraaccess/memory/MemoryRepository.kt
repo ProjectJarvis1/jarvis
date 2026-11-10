@@ -47,7 +47,7 @@ class MemoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/memory/$memoryId")
             .get()
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .build()
         client.newCall(request).execute().use { response ->
             val responseBody = response.body?.string().orEmpty()
@@ -67,7 +67,7 @@ class MemoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/memory/${memory.id}")
             .put(body.toString().toRequestBody(jsonMediaType))
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .addHeader("Content-Type", "application/json")
             .build()
         client.newCall(request).execute().use { response ->
@@ -83,7 +83,7 @@ class MemoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/memory/$memoryId")
             .delete()
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) {
@@ -106,7 +106,7 @@ class MemoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}$path")
             .post(body.toString().toRequestBody(jsonMediaType))
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .addHeader("Content-Type", "application/json")
             .build()
         client.newCall(request).execute().use { response ->
@@ -139,7 +139,7 @@ class MemoryRepository {
         val request = Request.Builder()
             .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/memory/images/$filename")
             .get()
-            .addHeader("X-API-Key", GeminiConfig.jarvisApiKey)
+            .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
             .build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null

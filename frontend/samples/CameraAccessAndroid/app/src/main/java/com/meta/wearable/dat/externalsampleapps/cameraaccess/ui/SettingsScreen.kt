@@ -60,7 +60,10 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ServiceConnections
+import androidx.compose.material.icons.outlined.AccountCircle
+import androidx.compose.runtime.collectAsState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ServiceConnections.Service
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.WakeWordTrialLog
@@ -75,10 +78,8 @@ fun SettingsScreen(
     onDisconnect: (() -> Unit)? = null,
     glassesStatus: String? = null,
 ) {
-    var geminiAPIKey by remember { mutableStateOf(SettingsManager.geminiAPIKey) }
     var systemPrompt by remember { mutableStateOf(SettingsManager.geminiSystemPrompt) }
     var jarvisApiBase by remember { mutableStateOf(SettingsManager.jarvisApiBase) }
-    var jarvisApiKey by remember { mutableStateOf(SettingsManager.jarvisApiKey) }
     var webrtcSignalingURL by remember { mutableStateOf(SettingsManager.webrtcSignalingURL) }
     var videoStreamingEnabled by remember { mutableStateOf(SettingsManager.videoStreamingEnabled) }
     var cardOfferEnabled by remember { mutableStateOf(SettingsManager.businessCardOfferEnabled) }
@@ -92,10 +93,8 @@ fun SettingsScreen(
     var advancedOpen by remember { mutableStateOf(false) }
 
     fun save() {
-        SettingsManager.geminiAPIKey = geminiAPIKey.trim()
         SettingsManager.geminiSystemPrompt = systemPrompt.trim()
         SettingsManager.jarvisApiBase = jarvisApiBase.trim()
-        SettingsManager.jarvisApiKey = jarvisApiKey.trim()
         SettingsManager.webrtcSignalingURL = webrtcSignalingURL.trim()
         SettingsManager.videoStreamingEnabled = videoStreamingEnabled
         SettingsManager.businessCardOfferEnabled = cardOfferEnabled
@@ -107,10 +106,8 @@ fun SettingsScreen(
     }
 
     fun reload() {
-        geminiAPIKey = SettingsManager.geminiAPIKey
         systemPrompt = SettingsManager.geminiSystemPrompt
         jarvisApiBase = SettingsManager.jarvisApiBase
-        jarvisApiKey = SettingsManager.jarvisApiKey
         webrtcSignalingURL = SettingsManager.webrtcSignalingURL
         videoStreamingEnabled = SettingsManager.videoStreamingEnabled
         cardOfferEnabled = SettingsManager.businessCardOfferEnabled
@@ -122,7 +119,7 @@ fun SettingsScreen(
     }
 
     // Tab navigation and system Back also persist edits, not only the toolbar Back button.
-    LaunchedEffect(geminiAPIKey, systemPrompt, jarvisApiBase, jarvisApiKey, webrtcSignalingURL,
+    LaunchedEffect(systemPrompt, jarvisApiBase, webrtcSignalingURL,
         videoStreamingEnabled, cardOfferEnabled, backgroundWakeWordEnabled, meetingBriefingEnabled, proactiveNotificationsEnabled,
         liveConversationEnabled,
         whisperSttEnabled) {
@@ -144,6 +141,8 @@ fun SettingsScreen(
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            AccountSection()
+
             JarvisGroup {
                 if (glassesStatus != null) JarvisRow("글라스", leading = { RowIcon(painterResource(com.meta.wearable.dat.externalsampleapps.cameraaccess.R.drawable.ic_jarvis_mark)) },
                     trailing = { StatusText(glassesStatus, glassesStatus == "연결됨") })
@@ -184,10 +183,8 @@ fun SettingsScreen(
                 JarvisRow("고급 설정", onClick = { advancedOpen = !advancedOpen }, trailing = { Chevron(advancedOpen) })
                 if (advancedOpen) Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 8.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    MonoTextField(geminiAPIKey, { geminiAPIKey = it }, "Gemini 키 (마인드로직)", "게이트웨이 키 입력", secret = true)
                     MonoTextField(jarvisApiBase, { jarvisApiBase = it }, "Jarvis 서버 주소", "https://api.example.com",
                         keyboardType = KeyboardType.Uri)
-                    MonoTextField(jarvisApiKey, { jarvisApiKey = it }, "Jarvis 서버 API 키", "API 키 입력", secret = true)
                     MonoTextField(webrtcSignalingURL, { webrtcSignalingURL = it }, "화면 공유 서버 주소",
                         "비워 두면 Jarvis 서버를 씁니다", keyboardType = KeyboardType.Uri)
                     if (onDisconnect != null) TextButton(onClick = { showDisconnectDialog = true }) { Text("글라스 앱 등록 해제") }
@@ -220,6 +217,37 @@ fun SettingsScreen(
     )
 }
 
+/** Who is signed in, sign-out, and account deletion (Google Play requires deletion inside the app). */
+@Composable
+private fun AccountSection() {
+    val scope = rememberCoroutineScope()
+    val user by JarvisAccount.user.collectAsState()
+    var confirmDelete by remember { mutableStateOf(false) }
+    var deleting by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    JarvisGroup {
+        JarvisRow(user?.name?.ifBlank { null } ?: "내 계정", subtitle = user?.email?.ifBlank { null }, icon = Icons.Outlined.AccountCircle)
+        JarvisRow("로그아웃", onClick = { scope.launch { JarvisAccount.signOut() } })
+        JarvisRow("계정 삭제", subtitle = error, onClick = { confirmDelete = true },
+            trailing = { Text("모든 기록 삭제", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error) })
+    }
+    if (confirmDelete) AlertDialog(
+        onDismissRequest = { if (!deleting) confirmDelete = false },
+        title = { Text("계정을 삭제할까요?") },
+        text = { Text("서버에 저장한 사람, 회의, 기억, 사진, 녹음과 연결한 서비스가 모두 지워져요. 되돌릴 수 없어요.") },
+        confirmButton = {
+            TextButton(enabled = !deleting, onClick = {
+                deleting = true
+                scope.launch {
+                    JarvisAccount.deleteAccount().onFailure { error = it.message }
+                    deleting = false; confirmDelete = false
+                }
+            }) { Text(if (deleting) "지우는 중" else "삭제", color = MaterialTheme.colorScheme.error) }
+        },
+        dismissButton = { TextButton(enabled = !deleting, onClick = { confirmDelete = false }) { Text("유지하기") } },
+    )
+}
+
 /**
  * Notion, Google Calendar and Slack. "연결" opens the service's sign-in in the browser; the list is read again
  * whenever the user comes back to the app, so a finished sign-in shows up without any extra step.
@@ -243,7 +271,7 @@ private fun ServiceConnectionsSection(onServer: (Boolean) -> Unit) {
     LaunchedEffect(reloads) {
         runCatching { ServiceConnections.status() }
             .onSuccess { states = it; error = null; onServer(true) }
-            .onFailure { onServer(false); error = "서버에 연결하지 못했어요. 고급 설정에서 서버 주소와 키를 확인해 주세요." }
+            .onFailure { onServer(false); error = "서버에 연결하지 못했어요. 고급 설정의 서버 주소를 확인하거나 다시 로그인해 주세요." }
     }
 
     JarvisGroup {

@@ -13,11 +13,6 @@ object SettingsManager {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
     }
 
-    var geminiAPIKey: String
-        // Stored under a new name: a Google AI Studio key saved by an older build does not work on the gateway.
-        get() = prefs.getString("gatewayAPIKey", null) ?: Secrets.geminiAPIKey
-        set(value) = prefs.edit().putString("gatewayAPIKey", value).apply()
-
     var geminiSystemPrompt: String
         get() {
             val stored = prefs.getString("geminiSystemPrompt", null) ?: return DEFAULT_SYSTEM_PROMPT
@@ -52,22 +47,22 @@ object SettingsManager {
         set(value) = prefs.edit().putString("geminiSystemPrompt", value).apply()
 
     var openClawHost: String
-        get() = prefs.getString("openClawHost", null) ?: Secrets.openClawHost
+        get() = prefs.getString("openClawHost", null) ?: ""
         set(value) = prefs.edit().putString("openClawHost", value).apply()
 
     var openClawPort: Int
         get() {
             val stored = prefs.getInt("openClawPort", 0)
-            return if (stored != 0) stored else Secrets.openClawPort
+            return stored
         }
         set(value) = prefs.edit().putInt("openClawPort", value).apply()
 
     var openClawHookToken: String
-        get() = prefs.getString("openClawHookToken", null) ?: Secrets.openClawHookToken
+        get() = prefs.getString("openClawHookToken", null) ?: ""
         set(value) = prefs.edit().putString("openClawHookToken", value).apply()
 
     var openClawGatewayToken: String
-        get() = prefs.getString("openClawGatewayToken", null) ?: Secrets.openClawGatewayToken
+        get() = prefs.getString("openClawGatewayToken", null) ?: ""
         set(value) = prefs.edit().putString("openClawGatewayToken", value).apply()
 
     var jarvisApiBase: String
@@ -76,10 +71,6 @@ object SettingsManager {
             return raw.trim().trimEnd('/')
         }
         set(value) = prefs.edit().putString("jarvisApiBase", value).apply()
-
-    var jarvisApiKey: String
-        get() = prefs.getString("jarvisApiKey", null) ?: Secrets.jarvisApiKey
-        set(value) = prefs.edit().putString("jarvisApiKey", value).apply()
 
     var webrtcSignalingURL: String
         get() {
