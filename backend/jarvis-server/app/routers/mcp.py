@@ -182,7 +182,10 @@ async def jsonrpc(body: JsonRpcRequest, idempotency_key: str = Header("", alias=
         name = body.params.get("name", "")
         arguments = body.params.get("arguments") or {}
         user_id = current_user_id()  # 요청 본문의 user_id 는 믿지 않는다
-        result = await _call(name, arguments, user_id, f"{user_id}:{idempotency_key}" if idempotency_key else "")
+        # Dispatch records are per user; the admin keeps bare keys so a send retried across the upgrade
+        # still finds the earlier attempt.
+        dispatch_key = idempotency_key if user_id == ADMIN_USER or not idempotency_key else f"{user_id}:{idempotency_key}"
+        result = await _call(name, arguments, user_id, dispatch_key)
         if result.get("is_error") and result.get("error", "").startswith("unknown tool"):
             return JSONResponse(status_code=404, content={"jsonrpc": "2.0", "id": body.id,
                                                           "error": {"code": -32602, "message": result["error"]}})

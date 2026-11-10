@@ -108,7 +108,7 @@ def delete_account():
             conn.execute(f"DELETE FROM {table}")
         conn.execute("DELETE FROM user_integrations WHERE user_id = %s", (user,))
         # Saved replies to retried writes hold copies of the saved records (owner as in idempotency.py).
-        conn.execute("DELETE FROM request_receipts WHERE owner = %s",
+        conn.execute("DELETE FROM request_receipts WHERE owner = %s",  # non-admin owner form
                      (hashlib.sha256(b"user:" + user.encode()).hexdigest(),))
         conn.execute("DELETE FROM app_users WHERE id = %s", (user,))  # sessions cascade
         conn.commit()

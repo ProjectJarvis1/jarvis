@@ -22,10 +22,9 @@ def main() -> None:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "TRUNCATE proposal_points, needs, memories, meetings, people "
-                    "RESTART IDENTITY CASCADE"
-                )
+                # Row level security limits these to JARVIS_USER; TRUNCATE would bypass it and empty every user.
+                for table in ("proposal_points", "needs", "memory_entities", "memories", "meetings", "people"):
+                    cur.execute(f"DELETE FROM {table}")
 
                 # ── People
                 yuseop = _insert_person(cur, "김유섭", ["유섭", "Yuseop"], "워트인텔리전스", "대표")

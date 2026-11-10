@@ -171,6 +171,10 @@ def link(provider: str):
         raise HTTPException(404, "unknown integration provider")
     if "." in user_id:
         raise HTTPException(400, "user_id 에 마침표를 쓸 수 없습니다.")
+    from ..auth import ADMIN_USER
+    if provider == "notion" and user_id != ADMIN_USER:
+        # Notion runs through the server's single MCP connection, which belongs to the admin account.
+        raise HTTPException(400, "노션 연동은 아직 관리자 계정에서만 쓸 수 있어요.")
     query = urllib.parse.urlencode({"state": _make_state(provider, user_id)})
     return {"url": f"{settings.public_base_url}/integrations/{provider}/connect?{query}", "expires_in": _STATE_TTL_S}
 

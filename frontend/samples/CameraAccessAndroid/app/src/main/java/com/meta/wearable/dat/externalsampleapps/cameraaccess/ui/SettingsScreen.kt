@@ -311,7 +311,8 @@ private fun ServiceConnectionsSection(onServer: (Boolean) -> Unit) {
                                         error = null
                                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                                     }
-                                    .onFailure { error = "${service.label} 연결 주소를 받지 못했어요. 잠시 뒤 다시 눌러 주세요." }
+                                    .onFailure { error = (it as? ServiceConnections.ServiceRefused)?.message
+                                        ?: "${service.label} 연결 주소를 받지 못했어요. 잠시 뒤 다시 눌러 주세요." }
                                 busy = null
                             }
                         },

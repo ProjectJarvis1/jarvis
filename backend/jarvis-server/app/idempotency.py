@@ -77,8 +77,12 @@ class IdempotencyMiddleware:
                 return await JSONResponse({"detail": "Request too large"}, 413)(scope, receive, send)
             if not message.get("more_body", False):
                 break
-        # Receipts are per user: one user's key never replays another user's response.
-        owner = hashlib.sha256(b"user:" + user.encode()).hexdigest()
+        from .config import settings
+        # Receipts are per user: one user's key never replays another user's response. The admin keeps
+        # the owner value used before sign-in existed, so a write retried across the upgrade still replays.
+        from .auth import ADMIN_USER
+        owner = (hashlib.sha256(settings.api_key.encode()).hexdigest() if user == ADMIN_USER
+                 else hashlib.sha256(b"user:" + user.encode()).hexdigest())
         fingerprint = hashlib.sha256(scope["path"].encode() + b"\n" + body).hexdigest()
         from .db import pool
         from psycopg.types.json import Jsonb

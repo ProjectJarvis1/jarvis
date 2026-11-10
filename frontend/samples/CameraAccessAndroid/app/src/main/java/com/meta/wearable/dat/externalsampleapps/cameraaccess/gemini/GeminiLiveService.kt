@@ -95,7 +95,8 @@ class GeminiLiveService {
         _connectionState.value = GeminiConnectionState.Connecting
         connectCallback = callback
 
-        val request = Request.Builder().url(url).header("Authorization", GeminiConfig.jarvisAuthorization).build()
+        val sentAuthorization = GeminiConfig.jarvisAuthorization
+        val request = Request.Builder().url(url).header("Authorization", sentAuthorization).build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 dispatch(generation) {
@@ -115,7 +116,11 @@ class GeminiLiveService {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 // The Jarvis relay refuses the handshake (403) when the session is no longer valid.
-                if (response?.code == 401 || response?.code == 403) JarvisAccount.onUnauthorized()
+                // Only when this socket used the session that is still current: a late refusal of an older
+                // connection must not sign out a session created since.
+                if ((response?.code == 401 || response?.code == 403) && sentAuthorization == JarvisAccount.authorization) {
+                    JarvisAccount.onUnauthorized()
+                }
                 dispatch(generation) {
                     val msg = friendlyError(t.message ?: "Unknown error")
                     Log.e(TAG, "WebSocket failure: $msg")
