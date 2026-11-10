@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 
 from ..auth import require_api_key
 from ..db import get_conn
+from ..media import safe_unlink, user_dir
 from ..embeddings import embed_text
 from ..schemas import (
     LifeMemoryCreate,
@@ -49,9 +50,7 @@ def _row_to_memory(row: dict) -> MemoryOut:
 def _user_image_dir() -> Path:
     """Each user's photos sit in their own folder, chosen by the server from the signed-in user.
     Photos saved before sign-in existed stay in the shared folder and belong to the admin user."""
-    from ..auth import ADMIN_USER, user_id
-    user = user_id()
-    return _IMAGE_DIR if user == ADMIN_USER else _IMAGE_DIR / "users" / user
+    return user_dir(_IMAGE_DIR)
 
 
 def _save_memory_image(image_base64: str, mime_type: str) -> dict:
@@ -73,14 +72,8 @@ def _save_memory_image(image_base64: str, mime_type: str) -> dict:
 
 def _delete_memory_image(metadata: dict) -> None:
     image_path = metadata.get("image_path")
-    if not image_path:
-        return
-    try:
-        path = Path(image_path)
-        if path.exists() and path.is_file():
-            path.unlink()
-    except OSError:
-        pass
+    if image_path:
+        safe_unlink(image_path, _IMAGE_DIR)
 
 
 def _captured_at_kst(captured_at) -> str:

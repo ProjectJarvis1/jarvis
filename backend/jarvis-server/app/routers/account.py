@@ -2,7 +2,6 @@
 import hashlib
 import logging
 import secrets
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
@@ -11,6 +10,7 @@ from starlette.concurrency import run_in_threadpool
 from ..auth import ADMIN_USER, create_session, hash_token, require_user, user_id
 from ..config import settings
 from ..db import get_conn, pool
+from ..media import remove_user_files
 
 log = logging.getLogger("jarvis.account")
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -97,16 +97,6 @@ def logout(authorization: str = Header("", alias="Authorization")):
     return {"ok": True}
 
 
-def _delete_files(paths: list[str]) -> None:
-    for raw in paths:
-        try:
-            path = Path(raw)
-            if path.is_file():
-                path.unlink()
-        except OSError:
-            log.warning("계정 삭제 중 파일을 지우지 못함")
-
-
 @router.delete("/me", dependencies=[Depends(require_user)])
 def delete_account():
     """Deletes every record, saved photo, recording and linked account of the signed-in user."""
@@ -114,9 +104,6 @@ def delete_account():
     if user == ADMIN_USER:
         raise HTTPException(400, "기존 기록을 가진 관리자 계정은 앱에서 지울 수 없습니다.")
     with get_conn() as conn:  # row level security scopes these to the user
-        files = [r["p"] for r in conn.execute(
-            "SELECT metadata->>'image_path' AS p FROM memories WHERE metadata ? 'image_path' "
-            "UNION ALL SELECT metadata->>'recording_path' FROM meetings WHERE metadata ? 'recording_path'").fetchall() if r["p"]]
         for table in _USER_TABLES:
             conn.execute(f"DELETE FROM {table}")
         conn.execute("DELETE FROM user_integrations WHERE user_id = %s", (user,))
@@ -125,5 +112,9 @@ def delete_account():
                      (hashlib.sha256(b"user:" + user.encode()).hexdigest(),))
         conn.execute("DELETE FROM app_users WHERE id = %s", (user,))  # sessions cascade
         conn.commit()
-    _delete_files(files)
+    # Folders are derived from the user id, never from record metadata (which the user can edit).
+    from .meetings import _RECORDING_DIR
+    from .memory import _IMAGE_DIR
+    remove_user_files(_IMAGE_DIR, user)
+    remove_user_files(_RECORDING_DIR, user)
     return {"ok": True}

@@ -9,6 +9,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from psycopg.types.json import Jsonb
 
 from app.db import close_pool, get_conn, open_pool  # noqa: E402
+from app.auth import current_user  # noqa: E402
+
+# Rows are per user (migrations/005_users.sql). Scripts act for JARVIS_USER, the admin user "default" unless set.
+current_user.set(os.getenv("JARVIS_USER", "default"))
 from app.embeddings import embed_text  # noqa: E402
 
 

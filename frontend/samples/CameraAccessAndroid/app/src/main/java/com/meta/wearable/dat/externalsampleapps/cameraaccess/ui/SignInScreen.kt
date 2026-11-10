@@ -32,6 +32,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.unit.dp
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import kotlinx.coroutines.launch
 
 /**
@@ -46,6 +47,9 @@ fun SignInScreen(modifier: Modifier = Modifier) {
     var error by remember { mutableStateOf<String?>(null) }
     var devOpen by remember { mutableStateOf(false) }
     var devEmail by remember { mutableStateOf("") }
+    // Sign-in goes to this address, so a wrong or outdated one must be fixable before signing in.
+    var serverOpen by remember { mutableStateOf(false) }
+    var server by remember { mutableStateOf(SettingsManager.jarvisApiBase) }
     val byWord = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase)
 
     fun run(block: suspend () -> Result<*>) {
@@ -71,6 +75,12 @@ fun SignInScreen(modifier: Modifier = Modifier) {
                 Spacer(Modifier.height(16.dp))
                 Text(it, style = MaterialTheme.typography.bodyMedium.copy(lineBreak = byWord), color = MaterialTheme.colorScheme.error)
             }
+            if (serverOpen) {
+                Spacer(Modifier.height(20.dp))
+                OutlinedTextField(server, { server = it; SettingsManager.jarvisApiBase = it.trim() }, Modifier.fillMaxWidth(),
+                    singleLine = true, label = { Text("Jarvis 서버 주소") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
+            }
             if (devOpen) {
                 Spacer(Modifier.height(20.dp))
                 OutlinedTextField(devEmail, { devEmail = it }, Modifier.fillMaxWidth(), singleLine = true,
@@ -87,8 +97,13 @@ fun SignInScreen(modifier: Modifier = Modifier) {
             JarvisPrimaryButton(if (busy) "확인하는 중" else "구글 계정으로 로그인", {
                 activity?.let { run { JarvisAccount.signInWithGoogle(it) } }
             }, Modifier.fillMaxWidth(), enabled = !busy)
-            if (JarvisAccount.devSignInAvailable && !devOpen) TextButton(onClick = { devOpen = true }, modifier = Modifier.heightIn(min = 48.dp)) {
-                Text("개발용 이메일 로그인", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(horizontalArrangement = Arrangement.Center, modifier = Modifier.fillMaxWidth()) {
+                if (!serverOpen) TextButton(onClick = { serverOpen = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("서버 주소", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                if (JarvisAccount.devSignInAvailable && !devOpen) TextButton(onClick = { devOpen = true }, modifier = Modifier.heightIn(min = 48.dp)) {
+                    Text("개발용 이메일 로그인", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
     }

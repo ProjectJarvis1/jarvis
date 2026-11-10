@@ -12,6 +12,7 @@ from psycopg.types.json import Jsonb
 from ..auth import require_api_key
 from ..config import settings
 from ..db import get_conn
+from ..media import safe_unlink, user_dir
 from ..embeddings import embed_text
 from ..meeting_projection import meeting_memory_text as _meeting_memory_text, sync_meeting_memory
 from ..meeting_ai import summarize_transcript, transcribe_audio
@@ -163,9 +164,10 @@ async def create_meeting_from_recording(
     if len(audio_bytes) > _MAX_AUDIO_BYTES:
         raise HTTPException(413, "audio file exceeds 25 MB")
 
-    _RECORDING_DIR.mkdir(parents=True, exist_ok=True)
+    recording_dir = user_dir(_RECORDING_DIR)
+    recording_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{uuid4()}{suffix}"
-    path = _RECORDING_DIR / filename
+    path = recording_dir / filename
     path.write_bytes(audio_bytes)
 
     try:
@@ -357,12 +359,7 @@ def delete_meeting(meeting_id: UUID):
             cur.execute("DELETE FROM meetings WHERE id = %s", (meeting_id,))
         conn.commit()
     if recording_path:
-        try:
-            path = Path(recording_path)
-            if path.exists() and path.is_file():
-                path.unlink()
-        except OSError:
-            pass
+        safe_unlink(recording_path, _RECORDING_DIR)
     return None
 
 
