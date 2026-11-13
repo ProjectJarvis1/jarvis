@@ -111,13 +111,13 @@ object ProactivePlanner {
 
     /**
      * "오늘 오후 2시에 '한빛정밀 견적 미팅' 일정이 있으시네요. 최근 김민수 님과 나눈 내용 정리해 드릴까요?"
-     * The "나눈 내용" wording only when a past meeting or note was found ([hasHistory]); a saved contact alone
-     * is offered as stored information, not as a conversation.
+     * The "○○ 님과 나눈 내용" wording only for someone a found meeting or note names ([historyWith]); other
+     * history is "관련 기록", and a saved contact alone is offered as stored information, not as a conversation.
      */
-    fun meetingMessage(item: CalendarItem, people: List<String>, hasHistory: Boolean): String {
+    fun meetingMessage(item: CalendarItem, people: List<String>, hasHistory: Boolean, historyWith: List<String> = emptyList()): String {
         val offer = when {
-            hasHistory && people.isNotEmpty() -> "최근 ${people.first()} 님과 나눈 내용 정리해 드릴까요?"
-            hasHistory -> "지난번 기록 정리해 드릴까요?"
+            historyWith.isNotEmpty() -> "최근 ${historyWith.first()} 님과 나눈 내용 정리해 드릴까요?"
+            hasHistory -> "관련 기록 정리해 드릴까요?"
             people.isNotEmpty() -> "${people.first()} 님에 대해 저장된 정보를 확인해 드릴까요?"
             else -> "관련해 저장된 정보를 확인해 드릴까요?"
         }

@@ -27,20 +27,28 @@ object ProactiveStore {
 
     private var loadedFor: String? = null
     private val claims = mutableMapOf<String, Long>()
+    /** Notification ids posted for this account, kept apart from the list so a dismissed or dropped offer is still taken down on sign-out. */
+    private val posted = linkedSetOf<Int>()
+    private const val KEEP_POSTED = 64
 
     private fun file(context: Context) = File(JarvisAccount.dataDir(context), FILE)
+
+    /** The notification id of [offer]; the same id posts, replaces and cancels it. */
+    fun notificationId(offer: ProactiveOffer) = offer.id.hashCode()
 
     @Synchronized
     fun load(context: Context) {
         val uid = JarvisAccount.userId
         if (loadedFor == uid) return
         claims.clear()
+        posted.clear()
         val list = mutableListOf<ProactiveOffer>()
         runCatching {
             val f = file(context)
             if (f.exists()) {
                 val json = JSONObject(f.readText())
                 json.optJSONObject("claimed")?.let { c -> c.keys().forEach { k -> claims[k] = c.getLong(k) } }
+                json.optJSONArray("posted")?.let { a -> for (i in 0 until a.length()) posted += a.getInt(i) }
                 json.optJSONArray("offers")?.let { a -> for (i in 0 until a.length()) offerFrom(a.getJSONObject(i))?.let(list::add) }
             }
         }
@@ -60,6 +68,8 @@ object ProactiveStore {
     fun record(context: Context, key: String, offer: ProactiveOffer) {
         load(context)
         claims[key] = offer.createdAtMs
+        posted += notificationId(offer)
+        while (posted.size > KEEP_POSTED) posted.remove(posted.first())
         _offers.value = (listOf(offer) + _offers.value.filter { it.id != offer.id }).take(KEEP_OFFERS)
         save(context)
     }
@@ -75,6 +85,9 @@ object ProactiveStore {
     @Synchronized
     fun dismiss(context: Context, id: String) {
         load(context)
+        _offers.value.firstOrNull { it.id == id }?.let {
+            androidx.core.app.NotificationManagerCompat.from(context).cancel(notificationId(it))
+        }
         _offers.value = _offers.value.filter { it.id != id }
         save(context)
     }
@@ -82,12 +95,14 @@ object ProactiveStore {
     /** Called on sign-out: the next account starts with no offers and no claims. */
     @Synchronized
     fun clear(context: Context) {
-        // Notifications already shown carry this account's event titles and names: take them down too.
+        // Notifications already shown carry this account's event titles and names: take them all down,
+        // including those whose offer was dismissed or dropped from the list.
         load(context)
         val shown = androidx.core.app.NotificationManagerCompat.from(context)
-        _offers.value.forEach { shown.cancel(it.id.hashCode()) }
+        (posted + _offers.value.map(::notificationId)).forEach { shown.cancel(it) }
         runCatching { file(context).delete() }
         claims.clear()
+        posted.clear()
         loadedFor = null
         _offers.value = emptyList()
         _opened.value = null
@@ -96,6 +111,7 @@ object ProactiveStore {
     private fun save(context: Context) {
         val json = JSONObject()
             .put("claimed", JSONObject(claims as Map<*, *>))
+            .put("posted", JSONArray(posted.toList()))
             .put("offers", JSONArray(_offers.value.map { o ->
                 JSONObject().put("id", o.id).put("kind", o.kind.name).put("title", o.title).put("message", o.message)
                     .put("detail", o.detail).put("created", o.createdAtMs).put("begin", o.eventBeginMs)

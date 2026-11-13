@@ -50,6 +50,9 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             if (!MeetingBriefer.hasCalendarPermission(app)) return emptyList()
             if (!ProactivePlanner.withinHours(nowMs)) return emptyList()
             val uid = JarvisAccount.userId
+            // [nowMs] may be a chosen time (debug); the time spent searching is added to it.
+            val startedAt = System.currentTimeMillis()
+            fun current() = nowMs + (System.currentTimeMillis() - startedAt)
 
             val items = MeetingBriefer.calendarItems(app, nowMs - 24 * 3_600_000L, ProactivePlanner.windowEnd(nowMs))
             val sent = mutableListOf<ProactiveOffer>()
@@ -68,8 +71,9 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
                 } ?: continue
                 val (key, o) = offer
                 // The search takes time: the switch may be off now, the work cancelled, or the account changed.
+                // Slow searches can also run past 21:00; what is left waits, unclaimed, for the next allowed pass.
                 if (!stillWanted() || !SettingsManager.proactiveOffersEnabled || !JarvisAccount.isSignedIn ||
-                    JarvisAccount.userId != uid) break
+                    JarvisAccount.userId != uid || !ProactivePlanner.withinHours(current())) break
                 ProactiveStore.record(app, key, o)
                 JarvisNotifications.postOffer(app, o)
                 sent += o
@@ -86,7 +90,7 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             val detail = (listOf("오늘 ${ProactivePlanner.clock(item.beginMs)} ${item.title}" +
                 (if (item.location.isNotBlank()) " (${item.location})" else "")) + brief.detail.lines().drop(1)).joinToString("\n")
             return ProactiveOffer("meet-${item.key}", OfferKind.MEETING, item.title,
-                ProactivePlanner.meetingMessage(item, brief.people, brief.hasHistory), detail, nowMs, item.beginMs)
+                ProactivePlanner.meetingMessage(item, brief.people, brief.hasHistory, brief.historyWith), detail, nowMs, item.beginMs)
         }
 
         /** Null when the server did not answer: offered on a later run instead of as "nothing stored". */

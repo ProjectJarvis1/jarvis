@@ -44,7 +44,11 @@ fun ProactiveOfferList(modifier: Modifier = Modifier) {
     LaunchedEffect(Unit) { ProactiveStore.load(context) }
     val offers by ProactiveStore.offers.collectAsState()
     val now = System.currentTimeMillis()
-    val live = offers.filter { it.eventBeginMs + 24 * 3_600_000L > now }.take(3)
+    // A meeting offer says "오늘 오후 2시", so it goes once the meeting is over (two hours after it starts);
+    // a deadline stays through its day (all-day items start at midnight UTC, 09:00 in Korea).
+    val live = offers.filter { o ->
+        if (o.kind == OfferKind.MEETING) o.eventBeginMs + 2 * 3_600_000L > now else o.eventBeginMs + 24 * 3_600_000L > now
+    }.take(3)
     if (live.isEmpty()) return
     val scheme = MaterialTheme.colorScheme
     Column(modifier.fillMaxWidth()) {

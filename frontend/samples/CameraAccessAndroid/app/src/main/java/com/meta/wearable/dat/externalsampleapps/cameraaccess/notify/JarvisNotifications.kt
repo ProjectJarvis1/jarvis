@@ -35,7 +35,7 @@ object JarvisNotifications {
                 .addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val id = offer.id.hashCode()
+        val id = com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore.notificationId(offer)
         val action = if (offer.kind == com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.OfferKind.MEETING) "정리해 줘" else "모아 줘"
         val notification = NotificationCompat.Builder(app, OFFER_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)

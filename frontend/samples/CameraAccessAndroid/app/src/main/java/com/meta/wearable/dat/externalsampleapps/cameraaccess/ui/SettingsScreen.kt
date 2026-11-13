@@ -92,10 +92,27 @@ fun SettingsScreen(
     fun calendarAllowed() = settingsContext.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) ==
         android.content.pm.PackageManager.PERMISSION_GRANTED
     var calendarGranted by remember { mutableStateOf(calendarAllowed()) }
+    // Coming back from the app's system settings page may have changed it.
+    val settingsLifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(settingsLifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) calendarGranted = calendarAllowed() }
+        settingsLifecycle.addObserver(observer)
+        onDispose { settingsLifecycle.removeObserver(observer) }
+    }
     val offerPermissions = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
     ) { calendarGranted = calendarAllowed() }
     fun askOfferPermissions() {
+        // After repeated "no", Android stops showing the dialog; then only the app's settings page can allow it.
+        val prefs = settingsContext.getSharedPreferences("proactive_permission", android.content.Context.MODE_PRIVATE)
+        val activity = settingsContext as? android.app.Activity
+        if (!calendarAllowed() && prefs.getBoolean("asked", false) &&
+            activity?.shouldShowRequestPermissionRationale(android.Manifest.permission.READ_CALENDAR) == false) {
+            settingsContext.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", settingsContext.packageName, null)))
+            return
+        }
+        prefs.edit().putBoolean("asked", true).apply()
         val wanted = buildList {
             add(android.Manifest.permission.READ_CALENDAR)
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) add(android.Manifest.permission.POST_NOTIFICATIONS)

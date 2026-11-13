@@ -33,7 +33,7 @@ data class MemoryHit(val text: String, val peopleText: String = "", val captured
  * people, and [hasRecords] is false when nothing stored was about this meeting.
  */
 data class Brief(val spoken: String, val detail: String, val people: List<String> = emptyList(), val hasRecords: Boolean = true,
-    val hasHistory: Boolean = true)
+    val hasHistory: Boolean = true, val historyWith: List<String> = emptyList())
 
 /**
  * Builds the briefing a few minutes before a meeting from what Jarvis has stored about the people in it.
@@ -145,7 +145,12 @@ object MeetingBriefing {
         // The wake word in Jarvis's own voice would start a new conversation; the notification keeps the text as is.
         return Brief(spoken.joinToString(" ").replace("자비스", ""), detail.joinToString("\n"),
             people = persons.map { it.name }, hasRecords = hasRecords,
-            hasHistory = pastMeetings.isNotEmpty() || notes.isNotEmpty())
+            hasHistory = pastMeetings.isNotEmpty() || notes.isNotEmpty(),
+            // Only people a found meeting or note actually names: "최근 ○○ 님과 나눈 내용" must be true of them.
+            historyWith = persons.filter { p ->
+                val texts = pastMeetings.flatMap { listOf(it.title, it.summary) + it.actionItems } + notes.flatMap { listOf(it.text, it.peopleText) }
+                p.allNames.any { n -> texts.any { it.contains(n) } }
+            }.map { it.name })
     }
 
     /** Up to the first sentence end (". " or end of text; "1.5억" is not an end), at most about 90 characters. */
