@@ -10,7 +10,7 @@ from .. import mcp_gateway
 from ..auth import ADMIN_USER, require_api_key
 from ..auth import user_id as current_user_id
 from ..db import get_conn
-from ..mcp_tools import call_tool, get_tool, has_gmail_scope, list_tools
+from ..mcp_tools import calendar_active, call_tool, get_tool, gmail_active, list_tools
 
 
 router = APIRouter(
@@ -20,7 +20,7 @@ router = APIRouter(
 )
 
 # 서버 자체 도구 중 앱에 내보내는 것. meeting_search 는 앱의 search_meetings 와 겹치고,
-# notion_search 는 외부 노션 MCP 로 대신한다. agent_graph 는 list_tools() 를 그대로 쓴다.
+# notion_search 는 외부 노션 MCP 로 대신한다. agent_graph 는 list_tools() 를 쓰므로 앱 전용 도구(지메일)는 보지 못한다.
 _APP_NATIVE = {"calendar_list_events", "calendar_create_event", "slack_post_message", "gmail_search", "gmail_read_thread"}
 _NATIVE_TITLES = {
     "calendar_list_events": ("gcal_list_events", "구글 캘린더 일정 조회",
@@ -56,13 +56,16 @@ def connected_providers(user_id: str = "") -> set[str]:
     try:
         with get_conn() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT provider, scopes FROM user_integrations WHERE user_id = %s", (user_id,))
+                cur.execute("SELECT provider, scopes, metadata FROM user_integrations WHERE user_id = %s", (user_id,))
                 rows = cur.fetchall()
     except Exception:
         return set()
-    # 지메일은 구글 연결 줄 하나에 권한(scope)으로 붙는다. 캘린더만 허용한 계정에는 지메일 도구를 내보내지 않는다.
-    providers = {row["provider"] for row in rows}
-    if any(row["provider"] == "google" and has_gmail_scope(row.get("scopes")) for row in rows):
+    # 구글 연결 줄 하나에 캘린더와 지메일이 권한(scope)으로 붙는다. 실제로 받은(그리고 지메일은 앱에서 켠) 권한만 연결로 본다.
+    providers = {row["provider"] for row in rows if row["provider"] != "google"}
+    google = next((row for row in rows if row["provider"] == "google"), None)
+    if calendar_active(google):
+        providers.add("google")
+    if gmail_active(google):
         providers.add("gmail")
     return providers
 
@@ -74,7 +77,7 @@ def app_tools() -> list[dict[str, Any]]:
     tools = gw.manifest() if gw and current_user_id() == _GATEWAY_USER else []
     taken = {t["name"] for t in tools}
     connected = connected_providers()
-    for manifest in list_tools():
+    for manifest in list_tools(app=True):
         native = manifest["name"]
         if native not in _APP_NATIVE or _PROVIDER[native] not in connected:
             continue
@@ -120,7 +123,7 @@ def _requires_confirmation(name: str) -> bool:
     gw = mcp_gateway.gateway
     if gw and gw.is_external(name):
         return gw.tools[name].confirm
-    tool = get_tool(_ALIASES.get(name, name))
+    tool = get_tool(_ALIASES.get(name, name), app=True)
     return bool(tool and tool.requires_confirmation)
 
 
@@ -168,12 +171,12 @@ async def _run(name: str, arguments: dict[str, Any], user_id: str) -> dict[str, 
         if user_id != _GATEWAY_USER:
             return {"is_error": True, "error": "외부 도구는 기본 사용자 계정으로만 실행합니다."}
         # 노션 MCP 가 아직 안 붙었으면, 예전 계정 연결로 동작하던 서버 자체 노션 검색을 쓴다.
-        if not gw.is_ready(name) and get_tool(native) is not None:
-            return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id))
+        if not gw.is_ready(name) and get_tool(native, app=True) is not None:
+            return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id, True))
         return await gw.call(name, arguments)
-    if get_tool(native) is None:
+    if get_tool(native, app=True) is None:
         return {"is_error": True, "error": f"unknown tool: {name}"}
-    return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id))
+    return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id, True))
 
 
 async def _call(name: str, arguments: dict[str, Any], user_id: str, request_key: str = "") -> dict[str, Any]:

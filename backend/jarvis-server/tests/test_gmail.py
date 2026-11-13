@@ -22,8 +22,11 @@ from app.routers import integrations as integ  # noqa: E402
 from app.routers import mcp as mcp_router  # noqa: E402
 
 
-def b64(text: str) -> str:
-    return base64.urlsafe_b64encode(text.encode()).decode().rstrip("=")
+ON = {"gmail_enabled": True}
+
+
+def b64(text: str, charset: str = "utf-8") -> str:
+    return base64.urlsafe_b64encode(text.encode(charset)).decode().rstrip("=")
 
 
 THREAD = {
@@ -126,15 +129,15 @@ def use_rows(monkeypatch, module, rows):
 def test_calendar_only_account_gets_needs_auth_and_no_request(gmail, monkeypatch):
     use_rows(monkeypatch, t, [{"scopes": [integ._CALENDAR_SCOPE]}])
     monkeypatch.setattr(t, "_integration_token", lambda *a: "good-token")
-    result = t.call_tool("gmail_search", {"query": "김 팀장"}, "u1")
+    result = t.call_tool("gmail_search", {"query": "김 팀장"}, "u1", app=True)
     assert result["needs_auth"] and result["provider"] == "gmail"
     assert FakeGmail.calls == []
 
 
 def test_search_returns_headers_kst_date_and_notice(gmail, monkeypatch):
-    use_rows(monkeypatch, t, [{"scopes": [integ._CALENDAR_SCOPE, t.GMAIL_SCOPE]}])
+    use_rows(monkeypatch, t, [{"scopes": [integ._CALENDAR_SCOPE, t.GMAIL_SCOPE], "metadata": ON}])
     monkeypatch.setattr(t, "_integration_token", lambda *a: "good-token")
-    result = t.call_tool("gmail_search", {"query": "김 팀장", "max_results": 50}, "u1")
+    result = t.call_tool("gmail_search", {"query": "김 팀장", "max_results": 50}, "u1", app=True)
     assert not result["is_error"]
     assert result["content"].startswith("[메일 데이터]")
     mails = result["structured_content"]["mails"]
@@ -145,9 +148,9 @@ def test_search_returns_headers_kst_date_and_notice(gmail, monkeypatch):
 
 
 def test_read_thread_prefers_plain_drops_quotes_strips_html(gmail, monkeypatch):
-    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE]}])
+    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE], "metadata": ON}])
     monkeypatch.setattr(t, "_integration_token", lambda *a: "good-token")
-    result = t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1")
+    result = t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1", app=True)
     first, second = result["structured_content"]["messages"]
     assert first["body"] == "금요일까지 견적서 부탁드립니다."
     assert "무시될" not in first["body"] and "x()" not in second["body"]
@@ -156,25 +159,25 @@ def test_read_thread_prefers_plain_drops_quotes_strips_html(gmail, monkeypatch):
 
 
 def test_thread_body_budget_keeps_latest_mail(gmail, monkeypatch):
-    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE]}])
+    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE], "metadata": ON}])
     monkeypatch.setattr(t, "_integration_token", lambda *a: "good-token")
     monkeypatch.setattr(t, "_THREAD_BODY_BUDGET", 10)
-    first, second = t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1")["structured_content"]["messages"]
+    first, second = t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1", app=True)["structured_content"]["messages"]
     assert len(second["body"]) == 10 and second["body_cut"]
     assert first["body"] == "" and first["body_cut"]
 
 
 def test_revoked_google_permission_asks_to_reconnect(gmail, monkeypatch):
-    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE]}])
+    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE], "metadata": ON}])
     monkeypatch.setattr(t, "_integration_token", lambda *a: "good-token")
     FakeGmail.fail_auth = True
-    assert t.call_tool("gmail_search", {"query": "김 팀장"}, "u1")["needs_auth"]
-    assert t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1")["needs_auth"]
+    assert t.call_tool("gmail_search", {"query": "김 팀장"}, "u1", app=True)["needs_auth"]
+    assert t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1", app=True)["needs_auth"]
 
 
 def test_mail_tools_are_read_only():
     for name in ("gmail_search", "gmail_read_thread"):
-        assert t.get_tool(name).requires_confirmation is False
+        assert t.get_tool(name, app=True).requires_confirmation is False
     # 메일을 읽은 뒤의 쓰기 확인은 도구마다 고정이다(모델이나 메일 내용이 바꿀 수 없다).
     for name in ("calendar_create_event", "slack_post_message"):
         assert t.get_tool(name).requires_confirmation is True
@@ -186,7 +189,7 @@ def test_gmail_tools_exported_only_with_gmail_scope(monkeypatch):
     use_rows(monkeypatch, mcp_router, [{"provider": "google", "scopes": [integ._CALENDAR_SCOPE]}])
     names = {tool["name"] for tool in mcp_router.app_tools()}
     assert "gcal_list_events" in names and "gmail_search" not in names
-    use_rows(monkeypatch, mcp_router, [{"provider": "google", "scopes": [integ._CALENDAR_SCOPE, t.GMAIL_SCOPE]}])
+    use_rows(monkeypatch, mcp_router, [{"provider": "google", "scopes": [integ._CALENDAR_SCOPE, t.GMAIL_SCOPE], "metadata": ON}])
     names = {tool["name"] for tool in mcp_router.app_tools()}
     assert {"gmail_search", "gmail_read_thread"} <= names
 
@@ -217,7 +220,7 @@ def test_callback_reports_unticked_gmail_permission(monkeypatch):
                                                               "scope": integ._CALENDAR_SCOPE, "expires_in": 3600})
     page = integ.callback("google", "code", _state("gmail")).body.decode()
     assert "지메일 권한을 받지 못했어요" in page
-    assert saved[0]["scopes"] == [integ._CALENDAR_SCOPE]
+    assert saved[0]["scopes"] == [integ._CALENDAR_SCOPE] and saved[0]["metadata"]["gmail_enabled"] is False
     monkeypatch.setattr(integ, "_form_post", lambda *a, **k: {"access_token": "a", "scope": f"{integ._CALENDAR_SCOPE} {t.GMAIL_SCOPE}"})
     assert "지메일 연결됐어요" in integ.callback("google", "code", _state("gmail")).body.decode()
 
@@ -230,5 +233,72 @@ def test_status_and_gmail_only_disconnect(monkeypatch):
     conn = use_rows(monkeypatch, integ, [])
     integ.disconnect("gmail")
     sql, params = conn.sql[-1]
-    assert sql.startswith("UPDATE user_integrations SET scopes = array_remove") and params[0] == t.GMAIL_SCOPE
+    assert sql.startswith("UPDATE user_integrations SET metadata = metadata ||")
+    assert params[0].obj == {"gmail_enabled": False}
     assert not any("DELETE" in s for s, _ in conn.sql)  # 캘린더 연결은 남긴다
+
+
+def test_calendar_reconnect_does_not_turn_gmail_back_on(monkeypatch):
+    saved = []
+    monkeypatch.setattr(integ, "_upsert_integration", lambda **kw: saved.append(kw))
+    # 지메일을 끈 뒤 캘린더만 다시 연결해도 구글은 예전 메일 권한을 함께 돌려줄 수 있다.
+    monkeypatch.setattr(integ, "_form_post", lambda *a, **k: {"access_token": "a", "scope": f"{integ._CALENDAR_SCOPE} {t.GMAIL_SCOPE}"})
+    integ.callback("google", "code", _state("google"))
+    assert "gmail_enabled" not in saved[0]["metadata"]  # 저장된 꺼짐 상태(metadata 병합)가 그대로 남는다
+    row = {"provider": "google", "scopes": saved[0]["scopes"], "metadata": {"gmail_enabled": False}}
+    assert t.calendar_active(row) and not t.gmail_active(row)
+
+
+def test_calendar_status_follows_granted_scope(monkeypatch):
+    monkeypatch.setattr(integ, "current_user_id", lambda: "u1")
+    use_rows(monkeypatch, integ, [{"provider": "google", "scopes": [t.GMAIL_SCOPE], "metadata": ON, "updated_at": None}])
+    services = integ.status()["services"]
+    assert not services["google"]["connected"] and services["gmail"]["connected"]
+    monkeypatch.setattr(mcp_router, "current_user_id", lambda: "u1")
+    monkeypatch.setattr(mcp_router.mcp_gateway, "gateway", None)
+    use_rows(monkeypatch, mcp_router, [{"provider": "google", "scopes": [t.GMAIL_SCOPE], "metadata": ON}])
+    names = {tool["name"] for tool in mcp_router.app_tools()}
+    assert "gmail_search" in names and "gcal_list_events" not in names
+
+
+def test_gmail_tools_hidden_from_server_agent():
+    # 서버 에이전트는 도구 결과를 agent_tool_calls 에 저장한다. 메일 내용이 남지 않게 지메일 도구를 못 보게 한다.
+    assert "gmail_search" not in {m["name"] for m in t.list_tools()}
+    assert t.get_tool("gmail_search") is None
+    assert t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1")["error"].startswith("unknown tool")
+    assert t.get_tool("gmail_search", app=True) is not None
+
+
+def test_expired_refresh_token_asks_to_reconnect(monkeypatch):
+    import io
+    import urllib.error
+    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE], "metadata": ON}])
+    def expired(*a):
+        raise urllib.error.HTTPError("https://oauth2.googleapis.com/token", 400, "Bad Request", {},
+                                     io.BytesIO(b'{"error": "invalid_grant"}'))
+    monkeypatch.setattr(t, "_integration_token", expired)
+    assert t.call_tool("gmail_search", {"query": "x"}, "u1", app=True)["needs_auth"]
+    assert t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1", app=True)["needs_auth"]
+
+
+def test_korean_legacy_charset_is_decoded():
+    part = {"mimeType": "text/plain", "headers": [{"name": "Content-Type", "value": 'text/plain; charset="ks_c_5601-1987"'}],
+            "body": {"data": b64("견적서 보내 드립니다", "cp949")}}
+    assert t._mail_text({"mimeType": "multipart/mixed", "parts": [part]}) == "견적서 보내 드립니다"
+    part["headers"][0]["value"] = "text/plain; charset=no-such-charset"
+    part["body"]["data"] = b64("그냥 글")
+    assert t._mail_text(part) == "그냥 글"
+
+
+def test_long_thread_keeps_latest_mail_inside_result_limit(gmail, monkeypatch):
+    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE], "metadata": ON}])
+    monkeypatch.setattr(t, "_integration_token", lambda *a: "good-token")
+    many = {"id": "t1", "messages": [
+        {"id": f"m{i}", "internalDate": "1762995600000", "payload": {"mimeType": "text/plain", "headers": [
+            {"name": "From", "value": f"보낸이{i} <a{i}@example.com>"}, {"name": "Subject", "value": "제목" * 20}],
+            "body": {"data": b64(f"본문 {i}")}}} for i in range(40)]}
+    monkeypatch.setitem(THREAD, "messages", many["messages"])
+    result = t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1", app=True)
+    shown = mcp_router._with_details(result)["content"]
+    assert "본문 39" in shown  # 가장 최근 메일은 모델에 넘어가는 글 안에 있다
+    assert result["structured_content"]["omitted_older"] > 0 and "뺐습니다" in result["content"]

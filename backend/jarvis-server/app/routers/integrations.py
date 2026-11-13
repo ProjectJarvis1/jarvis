@@ -16,7 +16,7 @@ from ..auth import require_api_key
 from ..auth import user_id as current_user_id
 from ..config import settings
 from ..db import get_conn
-from ..mcp_tools import GMAIL_SCOPE, has_gmail_scope
+from ..mcp_tools import CALENDAR_SCOPE, GMAIL_SCOPE, calendar_active, gmail_active
 
 
 router = APIRouter(
@@ -31,7 +31,7 @@ _SLACK_USER_SCOPES = (
     "channels:read", "groups:read", "users:read", "chat:write",
 )
 _PROVIDERS = ("google", "slack", "slack_user", "notion", "notion_mcp")
-_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+_CALENDAR_SCOPE = CALENDAR_SCOPE
 # 지메일은 따로 앱 등록 없이 구글 연결에 권한만 더한다. 지메일 연결 요청도 콜백은 구글 주소로 돌아온다.
 _STATE_PROVIDERS = {"google": ("google", "gmail")}
 
@@ -93,7 +93,7 @@ def status():
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT provider, scopes, updated_at
+                SELECT provider, scopes, metadata, updated_at
                 FROM user_integrations
                 WHERE user_id = %s
                 """,
@@ -115,12 +115,12 @@ def status():
     }
     # 앱 설정 화면이 쓰는 요약: 서비스별로 연결됐는지, 서버에 연결 준비(앱 키)가 됐는지.
     google_ready = bool(settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri)
-    google_row = by_provider.get("google") or {}
     result["services"] = {
         "notion": {"connected": "notion_mcp" in by_provider, "ready": True},
-        "google": {"connected": "google" in by_provider, "ready": google_ready},
+        # 구글 동의 화면에서 권한마다 체크를 풀 수 있어, 실제로 받은 권한으로 연결 여부를 판단한다.
+        "google": {"connected": calendar_active(by_provider.get("google")), "ready": google_ready},
         # 캘린더만 허용한 예전 연결은 지메일 미연결로 보이고, 다시 연결하면 지메일 권한을 더 묻는다.
-        "gmail": {"connected": has_gmail_scope(google_row.get("scopes")), "ready": google_ready},
+        "gmail": {"connected": gmail_active(by_provider.get("google")), "ready": google_ready},
         "slack": {"connected": "slack" in by_provider or "slack_user" in by_provider,
                   "ready": bool(settings.slack_client_id and settings.slack_client_secret and settings.slack_redirect_uri)},
     }
@@ -149,14 +149,15 @@ def disconnect(service: str):
 
 
 def _drop_gmail_scope(user_id: str) -> dict[str, Any]:
-    """지메일만 해제: 캘린더 연결은 두고 지메일 권한 표시를 지운다. 서버는 이 표시가 있을 때만 메일을 읽는다.
+    """지메일만 해제: 캘린더 연결은 두고 지메일을 끈다. 서버는 gmail_enabled 가 켜져 있을 때만 메일을 읽는다.
+    캘린더를 다시 연결하면서 구글이 예전 메일 권한을 함께 돌려줘도 꺼진 채로 남는다.
     (구글 쪽 권한까지 거두려면 사용자가 구글 계정의 서드파티 연결에서 지운다.)"""
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE user_integrations SET scopes = array_remove(scopes, %s), updated_at = now() "
-                "WHERE user_id = %s AND provider = 'google' AND %s = ANY(scopes)",
-                (GMAIL_SCOPE, user_id, GMAIL_SCOPE),
+                "UPDATE user_integrations SET metadata = metadata || %s, updated_at = now() "
+                "WHERE user_id = %s AND provider = 'google'",
+                (Jsonb({"gmail_enabled": False}), user_id),
             )
             changed = cur.rowcount
         conn.commit()
@@ -272,14 +273,18 @@ def callback(provider: str, code: str = Query(...), state: str = Query(...)):
         if "access_token" not in data:
             raise HTTPException(400, f"google token exchange failed: {data}")
         granted = (data.get("scope") or "").split()
+        metadata = {"token_type": data.get("token_type"), "expires_in": data.get("expires_in"),
+                    "expires_at": time.time() + float(data.get("expires_in") or 3600)}
+        if requested == "gmail":
+            # 지메일을 켜는 건 지메일 연결뿐이다. 캘린더 연결은 이 값을 건드리지 않아 예전 선택이 남는다.
+            metadata["gmail_enabled"] = GMAIL_SCOPE in granted
         _upsert_integration(
             user_id=user_id,
             provider="google",
             access_token=data["access_token"],
             refresh_token=data.get("refresh_token"),
             scopes=granted,
-            metadata={"token_type": data.get("token_type"), "expires_in": data.get("expires_in"),
-                      "expires_at": time.time() + float(data.get("expires_in") or 3600)},
+            metadata=metadata,
         )
         # 구글 동의 화면에서 권한마다 체크를 풀 수 있다. 실제로 받은 권한으로 결과를 알려 준다.
         if requested == "gmail":
@@ -289,6 +294,10 @@ def callback(provider: str, code: str = Query(...), state: str = Query(...)):
                 title="지메일 권한을 받지 못했어요",
                 body="구글 화면에서 메일 읽기 권한이 체크되지 않았어요. Jarvis 앱 설정에서 지메일을 다시 연결하고, "
                      "메일 읽기 항목을 체크해 주세요."))
+        if _CALENDAR_SCOPE not in granted:
+            return HTMLResponse(_PAGE.format(
+                title="캘린더 권한을 받지 못했어요",
+                body="구글 화면에서 캘린더 항목이 체크되지 않았어요. Jarvis 앱 설정에서 구글 캘린더를 다시 연결해 주세요."))
         return _connected_html("구글 캘린더")
 
     if provider == "slack":
