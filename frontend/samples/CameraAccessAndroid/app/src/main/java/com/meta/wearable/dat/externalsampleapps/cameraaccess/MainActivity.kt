@@ -100,6 +100,9 @@ class MainActivity : ComponentActivity() {
     lifecycleScope.launch {
       com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.validate()
     }
+    // Jarvis checks the calendar every 15 minutes, app open or not, to offer help first.
+    com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveWorker.schedule(this)
+    if (savedInstanceState == null) openOffer(intent)
 
     // Keep screen on while streaming
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -139,6 +142,21 @@ class MainActivity : ComponentActivity() {
       }
       }
     }
+  }
+
+  override fun onNewIntent(intent: android.content.Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    openOffer(intent)
+  }
+
+  /** A tapped offer notification: show that offer's detail, if it belongs to the signed-in account. */
+  private fun openOffer(intent: android.content.Intent?) {
+    val id = intent?.getStringExtra(
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications.EXTRA_OFFER_ID) ?: return
+    intent.removeExtra(com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications.EXTRA_OFFER_ID)
+    val store = com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore
+    store.find(this, id)?.let(store::open)
   }
 
   fun checkPermissions(onPermissionsGranted: () -> Unit) {

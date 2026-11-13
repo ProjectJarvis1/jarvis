@@ -88,6 +88,8 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
                     onDisconnect = if (state.isRegistered && activity != null) { { viewModel.startUnregistration(activity) } } else null,
                     glassesStatus = when { state.hasActiveDevice -> "연결됨"; state.isRegistered -> "기다리는 중"; else -> "연결 안 됨" })
             }
+            // An offer Jarvis made on its own and the user just opened, over whatever screen is up.
+            ProactiveOfferSheet()
             if (state.isDebugMenuVisible && BuildConfig.DEBUG) ModalBottomSheet(onDismissRequest = viewModel::hideDebugMenu) {
                 MockDeviceKitScreen(Modifier.fillMaxHeight(.9f))
             }

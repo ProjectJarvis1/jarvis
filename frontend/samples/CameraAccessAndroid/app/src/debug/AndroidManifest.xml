@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application>
+        <!-- Debug builds only: run one proactive-offer pass at a chosen time from adb. -->
+        <receiver
+            android:name=".briefing.ProactiveDebugReceiver"
+            android:exported="true" />
+    </application>
+</manifest>

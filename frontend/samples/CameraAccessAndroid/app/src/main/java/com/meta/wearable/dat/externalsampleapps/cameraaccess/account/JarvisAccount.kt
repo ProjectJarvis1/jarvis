@@ -36,7 +36,10 @@ object JarvisAccount {
     private val _user = MutableStateFlow<User?>(null)
     val user: StateFlow<User?> = _user
 
+    private var appContext: Context? = null
+
     fun init(context: Context) {
+        appContext = context.applicationContext
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         _user.value = prefs.getString("token", null)?.let {
             User(prefs.getString("email", "").orEmpty(), prefs.getString("name", "").orEmpty())
@@ -146,6 +149,8 @@ object JarvisAccount {
 
     private fun clearLocal() {
         com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools.clear()
+        // Offers Jarvis made for this account, and which events it already offered, go with the account.
+        appContext?.let { com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore.clear(it) }
         prefs.edit().clear().apply()
         _user.value = null
     }

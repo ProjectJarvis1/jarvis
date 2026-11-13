@@ -109,6 +109,8 @@ dependencies {
   implementation("androidx.credentials:credentials:1.5.0")
   implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
   implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+  // Proactive offers: a periodic check of the phone calendar that runs with the app closed.
+  implementation("androidx.work:work-runtime-ktx:2.10.1")
   implementation(libs.webrtc)
   implementation(libs.camerax.core)
   implementation(libs.camerax.camera2)

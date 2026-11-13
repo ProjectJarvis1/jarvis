@@ -78,6 +78,7 @@ fun JarvisHome(registered: Boolean, deviceReady: Boolean, onGlasses: () -> Unit,
             Text(body, style = MaterialTheme.typography.bodyMedium.copy(lineBreak = byWord),
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(20.dp))
+            ProactiveOfferList(Modifier.padding(bottom = 20.dp))
             GlassesPanel(stage)
             Spacer(Modifier.height(24.dp))
             if (stage == GlassesStage.Ready) TryList() else ConnectSteps(stage)

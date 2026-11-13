@@ -28,8 +28,11 @@ data class PersonHit(
 data class MeetingHit(val title: String, val startedAt: String, val summary: String = "", val actionItems: List<String> = emptyList())
 data class MemoryHit(val text: String, val peopleText: String = "", val capturedAt: String = "")
 
-/** What to say on the glasses, and the longer text for the phone notification. */
-data class Brief(val spoken: String, val detail: String)
+/**
+ * What to say on the glasses, and the longer text for the phone notification. [people] names the matched
+ * people, and [hasRecords] is false when nothing stored was about this meeting.
+ */
+data class Brief(val spoken: String, val detail: String, val people: List<String> = emptyList(), val hasRecords: Boolean = true)
 
 /**
  * Builds the briefing a few minutes before a meeting from what Jarvis has stored about the people in it.
@@ -57,7 +60,7 @@ object MeetingBriefing {
     private fun attendeeNames(meeting: UpcomingMeeting) =
         meeting.attendees.map { it.trim().removeSuffix("님").trim() }.filter { it.length >= 2 && '@' !in it }.distinct()
 
-    private fun titleWords(meeting: UpcomingMeeting) = meeting.title.split(Regex("""[\s,/()\[\]·:|-]+"""))
+    internal fun titleWords(meeting: UpcomingMeeting) = meeting.title.split(Regex("""[\s,/()\[\]·:|-]+"""))
         // "홍길동님과" -> "홍길동": the particle comes off before the honorific.
         .map { it.trim().removeSuffix("과").removeSuffix("와").removeSuffix("님") }
         .filter { it.length >= 2 && it.lowercase() !in STOP_WORDS && !it.all(Char::isDigit) }
@@ -133,12 +136,14 @@ object MeetingBriefing {
             spoken += "${date ?: "예전"}에 저장한 기록도 있어요. ${firstSentence(n.text.take(80))}"
             detail += "${date ?: "날짜 모름"} 기록: ${n.text.take(160)}"
         }
-        if (persons.isEmpty() && pastMeetings.isEmpty() && notes.isEmpty()) {
+        val hasRecords = persons.isNotEmpty() || pastMeetings.isNotEmpty() || notes.isNotEmpty()
+        if (!hasRecords) {
             spoken += "이 일정과 관련된 지난 기록은 찾지 못했어요."
             detail += "관련된 지난 기록 없음"
         }
         // The wake word in Jarvis's own voice would start a new conversation; the notification keeps the text as is.
-        return Brief(spoken.joinToString(" ").replace("자비스", ""), detail.joinToString("\n"))
+        return Brief(spoken.joinToString(" ").replace("자비스", ""), detail.joinToString("\n"),
+            people = persons.map { it.name }, hasRecords = hasRecords)
     }
 
     /** Up to the first sentence end (". " or end of text; "1.5억" is not an end), at most about 90 characters. */
