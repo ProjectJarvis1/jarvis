@@ -32,23 +32,13 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.meta.wearable.dat.camera.Camera
-import com.meta.wearable.dat.camera.Stream
-import com.meta.wearable.dat.camera.addCamera
-import com.meta.wearable.dat.camera.types.PhotoData
-import com.meta.wearable.dat.camera.types.StreamConfiguration
-import com.meta.wearable.dat.camera.types.StreamState
-import com.meta.wearable.dat.camera.types.VideoFrame
-import com.meta.wearable.dat.camera.types.VideoQuality
-import com.meta.wearable.dat.core.Wearables
-import com.meta.wearable.dat.core.selectors.DeviceSelector
-import com.meta.wearable.dat.core.session.DeviceSession
-import com.meta.wearable.dat.core.session.DeviceSessionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.VisualMemoryFrameStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.PhoneCameraManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.glassesErrorMessage
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.GlassesCamera
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.GlassesCameraListener
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.GlassesPlatform
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.webrtc.WebRTCSessionViewModel
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -86,14 +76,8 @@ class StreamViewModel(
     private val INITIAL_STATE = StreamUiState()
   }
 
-  // Read on first glasses use: touching it before Wearables.initialize() throws (phone mode never needs it).
-  private val deviceSelector: DeviceSelector by lazy { wearablesViewModel.deviceSelector }
-  private var deviceSession: DeviceSession? = null
-  private var camera: Camera? = null
-  private var streamSession: Stream? = null
-  private var sessionErrorJob: Job? = null
-  private var streamErrorJob: Job? = null
-  private var streamStateJob: Job? = null
+  // The glasses camera, behind the app's own interface (null on the phone build and in phone mode).
+  private var glassesCamera: GlassesCamera? = null
 
   private val _uiState = MutableStateFlow(INITIAL_STATE)
   val uiState: StateFlow<StreamUiState> = _uiState.asStateFlow()
@@ -132,32 +116,29 @@ class StreamViewModel(
 
     VisualMemoryFrameStore.freshStillProvider = ::captureFreshVisualFrame
     Log.d(TAG, "Starting glasses stream session with HIGH/30fps")
-    // SDK 1.0: a DeviceSession connects the glasses; the camera is a capability added to it.
-    val created =
-        try {
-          Wearables.createSession(deviceSelector)
-        } catch (e: com.meta.wearable.dat.core.types.WearablesException) {
-          Log.e(TAG, "Wearables SDK not ready", e)
-          _uiState.update {
-            it.copy(streamSessionState = StreamState.STOPPED, errorMessage = "글라스 기능이 아직 준비되지 않았어요. 앱 권한을 모두 허용한 뒤 다시 시도해 주세요.")
-          }
-          return
-        }
-    created.onFailure { error, _ ->
-      Log.e(TAG, "Failed to create glasses session: ${error.description}")
-      _uiState.update {
-        it.copy(streamSessionState = StreamState.STOPPED, errorMessage = glassesErrorMessage(error, "글라스 연결을 시작하지 못했어요. Meta AI 앱 연결을 확인해 주세요."))
+    var opened: GlassesCamera? = null
+    val listener = object : GlassesCameraListener {
+      override fun onState(state: StreamState) {
+        if (glassesCamera !== opened) return
+        onGlassesStreamState(state)
+      }
+
+      override fun onFrame(i420: ByteArray, width: Int, height: Int) {
+        if (glassesCamera !== opened) return
+        viewModelScope.launch { handleVideoFrame(i420, width, height) }
+      }
+
+      override fun onError(message: String) {
+        if (opened != null && glassesCamera !== opened) return
+        _uiState.update { it.copy(errorMessage = message) }
       }
     }
-    val session = created.getOrNull() ?: return
-    deviceSession = session
-    sessionErrorJob =
-        viewModelScope.launch {
-          session.errors.collect { error ->
-            Log.e(TAG, "Glasses session error: ${error.description}")
-            _uiState.update { it.copy(errorMessage = glassesErrorMessage(error)) }
-          }
-        }
+    opened = GlassesPlatform.openCamera(viewModelScope, GLASSES_FRAME_INTERVAL_MS, listener)
+    if (opened == null) {
+      _uiState.update { it.copy(streamSessionState = StreamState.STOPPED) }
+      return
+    }
+    glassesCamera = opened
     startTimeoutJob =
         viewModelScope.launch {
           delay(GLASSES_START_TIMEOUT_MS)
@@ -177,74 +158,35 @@ class StreamViewModel(
             }
           }
         }
-    stateJob =
-        viewModelScope.launch {
-          // Subscribed before start() so no transition is missed; the camera is added once connected.
-          val ready = async { session.state.first { it == DeviceSessionState.STARTED || it == DeviceSessionState.STOPPED } }
-          session.start()
-          if (ready.await() != DeviceSessionState.STARTED || deviceSession !== session) return@launch
-          session
-              .addCamera(StreamConfiguration(videoQuality = VideoQuality.HIGH, frameRate = 30))
-              .onSuccess { added -> attachGlassesStream(added) }
-              .onFailure { error, _ ->
-                Log.e(TAG, "Failed to add glasses camera: ${error.description}")
-                _uiState.update { it.copy(errorMessage = glassesErrorMessage(error, "글라스 카메라를 켜지 못했어요. 카메라 권한을 확인해 주세요.")) }
-              }
-        }
   }
 
-  private fun attachGlassesStream(added: Camera) {
-    camera = added
-    val stream = added.stream
-    streamSession = stream
-    videoJob =
-        viewModelScope.launch {
-          stream.videoStream
-              .conflate()
-              .collectLatest { handleVideoFrame(it) }
-        }
-    streamErrorJob =
-        viewModelScope.launch {
-          stream.errorStream.collect { error ->
-            Log.e(TAG, "Glasses stream error: ${error.description}")
-            _uiState.update { it.copy(errorMessage = glassesErrorMessage(error, "글라스 영상에 문제가 생겼어요.")) }
-          }
-        }
-    streamStateJob =
-        viewModelScope.launch {
-          stream.state.collect { currentState ->
-            val prevState = _uiState.value.streamSessionState
-            Log.d(TAG, "Glasses stream state: $prevState -> $currentState")
-            _uiState.update { it.copy(streamSessionState = currentState) }
+  private fun onGlassesStreamState(currentState: StreamState) {
+    val prevState = _uiState.value.streamSessionState
+    Log.d(TAG, "Glasses stream state: $prevState -> $currentState")
+    _uiState.update { it.copy(streamSessionState = currentState) }
 
-            if (currentState == StreamState.STREAMING && !isStreamingServiceRunning) {
-              hasReachedGlassesStreaming = true
-              startTimeoutJob?.cancel()
-              startTimeoutJob = null
-              scheduleStableStreamReset()
-              StreamingService.start(getApplication())
-              isStreamingServiceRunning = true
-            }
+    if (currentState == StreamState.STREAMING && !isStreamingServiceRunning) {
+      hasReachedGlassesStreaming = true
+      startTimeoutJob?.cancel()
+      startTimeoutJob = null
+      scheduleStableStreamReset()
+      StreamingService.start(getApplication())
+      isStreamingServiceRunning = true
+    }
 
-            val terminal = currentState == StreamState.STOPPED || currentState == StreamState.CLOSED
-            if (currentState != prevState && terminal && hasReachedGlassesStreaming && !userRequestedStop) {
-              _uiState.update {
-                it.copy(
-                  errorMessage =
-                      "Glasses video stream stopped. Check Bluetooth, Meta AI app connection, and camera permission.",
-                )
-              }
-              if (isStreamingServiceRunning) {
-                StreamingService.stop(getApplication())
-                  isStreamingServiceRunning = false
-              }
-              scheduleGlassesStreamRestart()
-            }
-          }
-        }
-    stream.start().onFailure { error, _ ->
-      Log.e(TAG, "Failed to start glasses stream: ${error.description}")
-      _uiState.update { it.copy(errorMessage = "글라스 영상을 시작하지 못했어요. 다시 시도해 주세요.") }
+    val terminal = currentState == StreamState.STOPPED || currentState == StreamState.CLOSED
+    if (currentState != prevState && terminal && hasReachedGlassesStreaming && !userRequestedStop) {
+      _uiState.update {
+        it.copy(
+          errorMessage =
+              "Glasses video stream stopped. Check Bluetooth, Meta AI app connection, and camera permission.",
+        )
+      }
+      if (isStreamingServiceRunning) {
+        StreamingService.stop(getApplication())
+          isStreamingServiceRunning = false
+      }
+      scheduleGlassesStreamRestart()
     }
   }
 
@@ -303,18 +245,8 @@ class StreamViewModel(
     stateJob = null
     stableStreamJob?.cancel()
     stableStreamJob = null
-    sessionErrorJob?.cancel()
-    sessionErrorJob = null
-    streamErrorJob?.cancel()
-    streamErrorJob = null
-    streamStateJob?.cancel()
-    streamStateJob = null
-    // Closing the camera detaches the capability; otherwise the next addCamera() says "already active".
-    camera?.close()
-    camera = null
-    streamSession = null
-    deviceSession?.stop()
-    deviceSession = null
+    glassesCamera?.close()
+    glassesCamera = null
     phoneCameraManager?.stop()
     phoneCameraManager = null
     VisualMemoryFrameStore.freshStillProvider = null
@@ -382,13 +314,14 @@ class StreamViewModel(
 
       viewModelScope.launch {
         try {
-          val result = photoCaptureMutex.withLock {
+          val camera = glassesCamera
+          val photo = photoCaptureMutex.withLock {
             currentCoroutineContext().ensureActive()
-            withContext(NonCancellable) { streamSession?.capturePhoto() }
+            withContext(NonCancellable) { camera?.capturePhoto() }
           }
           currentCoroutineContext().ensureActive()
-          result?.onSuccess { photoData -> handlePhotoData(photoData) }
-              ?.onFailure { Log.e(TAG, "Photo capture failed") }
+          if (photo != null) _uiState.update { it.copy(capturedPhoto = photo, isShareDialogVisible = true) }
+          else Log.e(TAG, "Photo capture failed")
         } finally {
           _uiState.update { it.copy(isCapturing = false) }
         }
@@ -434,31 +367,16 @@ class StreamViewModel(
     }
   }
 
-  private suspend fun handleVideoFrame(videoFrame: VideoFrame) {
+  private suspend fun handleVideoFrame(byteArray: ByteArray, width: Int, height: Int) {
     val now = SystemClock.elapsedRealtime()
-    if (now - lastGlassesFrameAt < GLASSES_FRAME_INTERVAL_MS) {
-      return
-    }
     lastGlassesFrameAt = now
-
     if (now - lastGlassesFrameLogAt >= GLASSES_FRAME_LOG_INTERVAL_MS) {
-      Log.d(TAG, "Glasses frame ${videoFrame.width}x${videoFrame.height}")
+      Log.d(TAG, "Glasses frame ${width}x${height}")
       lastGlassesFrameLogAt = now
     }
 
-    // VideoFrame contains raw I420 video data in a ByteBuffer
-    val buffer = videoFrame.buffer
-    val dataSize = buffer.remaining()
-    val byteArray = ByteArray(dataSize)
-
-    // Save current position
-    val originalPosition = buffer.position()
-    buffer.get(byteArray)
-    // Restore position
-    buffer.position(originalPosition)
-
     val bitmap = withContext(Dispatchers.Default) {
-      decodeI420FrameToBitmap(byteArray, videoFrame.width, videoFrame.height)
+      decodeI420FrameToBitmap(byteArray, width, height)
     } ?: return
     _uiState.update { it.copy(videoFrame = bitmap) }
 
@@ -481,7 +399,7 @@ class StreamViewModel(
       }
       StreamingMode.GLASSES -> {
         try {
-          val session = streamSession ?: return null
+          val session = glassesCamera ?: return null
           if (stillCapture?.isActive == true) {
             _uiState.update { it.copy(errorMessage = "이전 촬영을 마무리하고 있어요. 계속되면 카메라를 다시 연결해주세요.") }
             return null
@@ -489,15 +407,14 @@ class StreamViewModel(
           // The hardware call owns its lifetime; cancelling a user task only stops awaiting it.
           // Late hardware results never update the screen or a superseded business task.
           val capture = viewModelScope.async(Dispatchers.IO) {
-            val data = photoCaptureMutex.withLock {
-              withContext(NonCancellable) { session.capturePhoto().getOrNull() }
-            } ?: return@async null
-            photoDataToBitmap(data)
+            photoCaptureMutex.withLock {
+              withContext(NonCancellable) { session.capturePhoto() }
+            }
           }
           stillCapture = capture
           val bitmap = withTimeoutOrNull(8_000L) { capture.await() }
           currentCoroutineContext().ensureActive()
-          if (bitmap == null || streamSession !== session) {
+          if (bitmap == null || glassesCamera !== session) {
             _uiState.update { it.copy(errorMessage = "사진을 받지 못했어요. 카메라 연결을 확인해주세요.") }
             return null
           }
@@ -543,102 +460,6 @@ class StreamViewModel(
       output[size + n * 2 + 1] = input[size + n] // U second
     }
     return output
-  }
-
-  private fun handlePhotoData(photo: PhotoData) {
-    val capturedPhoto = photoDataToBitmap(photo)
-    _uiState.update { it.copy(capturedPhoto = capturedPhoto, isShareDialogVisible = true) }
-  }
-
-  private fun photoDataToBitmap(photo: PhotoData): Bitmap =
-      when (photo) {
-        is PhotoData.Bitmap -> photo.bitmap
-        is PhotoData.HEIC -> {
-          val byteArray = ByteArray(photo.data.remaining())
-          photo.data.get(byteArray)
-
-          // Extract EXIF transformation matrix and apply to bitmap.
-          val exifInfo = getExifInfo(byteArray)
-          val transform = getTransform(exifInfo)
-          decodeHeic(byteArray, transform)
-        }
-      }
-
-  // HEIC Decoding with EXIF transformation
-  private fun decodeHeic(heicBytes: ByteArray, transform: Matrix): Bitmap {
-    val bitmap = BitmapFactory.decodeByteArray(heicBytes, 0, heicBytes.size)
-    return applyTransform(bitmap, transform)
-  }
-
-  private fun getExifInfo(heicBytes: ByteArray): ExifInterface? {
-    return try {
-      ByteArrayInputStream(heicBytes).use { inputStream -> ExifInterface(inputStream) }
-    } catch (e: IOException) {
-      Log.w(TAG, "Failed to read EXIF from HEIC", e)
-      null
-    }
-  }
-
-  private fun getTransform(exifInfo: ExifInterface?): Matrix {
-    val matrix = Matrix()
-
-    if (exifInfo == null) {
-      return matrix // Identity matrix (no transformation)
-    }
-
-    when (
-        exifInfo.getAttributeInt(
-            ExifInterface.TAG_ORIENTATION,
-            ExifInterface.ORIENTATION_NORMAL,
-        )
-    ) {
-      ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> {
-        matrix.postScale(-1f, 1f)
-      }
-      ExifInterface.ORIENTATION_ROTATE_180 -> {
-        matrix.postRotate(180f)
-      }
-      ExifInterface.ORIENTATION_FLIP_VERTICAL -> {
-        matrix.postScale(1f, -1f)
-      }
-      ExifInterface.ORIENTATION_TRANSPOSE -> {
-        matrix.postRotate(90f)
-        matrix.postScale(-1f, 1f)
-      }
-      ExifInterface.ORIENTATION_ROTATE_90 -> {
-        matrix.postRotate(90f)
-      }
-      ExifInterface.ORIENTATION_TRANSVERSE -> {
-        matrix.postRotate(270f)
-        matrix.postScale(-1f, 1f)
-      }
-      ExifInterface.ORIENTATION_ROTATE_270 -> {
-        matrix.postRotate(270f)
-      }
-      ExifInterface.ORIENTATION_NORMAL,
-      ExifInterface.ORIENTATION_UNDEFINED -> {
-        // No transformation needed
-      }
-    }
-
-    return matrix
-  }
-
-  private fun applyTransform(bitmap: Bitmap, matrix: Matrix): Bitmap {
-    if (matrix.isIdentity) {
-      return bitmap
-    }
-
-    return try {
-      val transformed = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
-      if (transformed != bitmap) {
-        bitmap.recycle()
-      }
-      transformed
-    } catch (e: OutOfMemoryError) {
-      Log.e(TAG, "Failed to apply transformation due to memory", e)
-      bitmap
-    }
   }
 
   override fun onCleared() {

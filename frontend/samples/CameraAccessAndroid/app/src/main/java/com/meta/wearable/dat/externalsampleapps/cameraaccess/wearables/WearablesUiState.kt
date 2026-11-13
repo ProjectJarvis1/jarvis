@@ -12,14 +12,12 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables
 
-import com.meta.wearable.dat.core.types.DeviceIdentifier
-import com.meta.wearable.dat.core.types.RegistrationState
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 
 data class WearablesUiState(
-    val registrationState: RegistrationState = RegistrationState.UNAVAILABLE,
-    val devices: ImmutableList<DeviceIdentifier> = persistentListOf(),
+    val registrationState: GlassesRegistration = GlassesRegistration.UNAVAILABLE,
+    val devices: ImmutableList<String> = persistentListOf(),
     val recentError: String? = null,
     val isStreaming: Boolean = false,
     val hasMockDevices: Boolean = false,
@@ -30,5 +28,5 @@ data class WearablesUiState(
     val isSettingsVisible: Boolean = false,
     val isMemoryVisible: Boolean = false,
 ) {
-  val isRegistered: Boolean = registrationState == RegistrationState.REGISTERED || hasMockDevices
+  val isRegistered: Boolean = registrationState == GlassesRegistration.REGISTERED || hasMockDevices
 }

@@ -35,7 +35,35 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.Wearables
 @Composable
 fun HomeScreen(viewModel: WearablesViewModel, modifier: Modifier = Modifier) {
     val activity = LocalActivity.current
+    if (!com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig.GLASSES) {
+        PhoneHome(viewModel::navigateToPhoneMode, modifier)
+        return
+    }
     JarvisHome(false, false, { activity?.let(viewModel::startRegistration) }, viewModel::navigateToPhoneMode, modifier)
+}
+
+/** Phone build: no glasses to link, so home is the way into a conversation with the phone camera and mic. */
+@Composable
+private fun PhoneHome(onStart: () -> Unit, modifier: Modifier = Modifier) {
+    val byWord = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase)
+    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            JarvisWordmark(Modifier.weight(1f))
+        }
+        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
+            Spacer(Modifier.height(12.dp))
+            Text("자비스에게 말을 걸어 보세요", style = MaterialTheme.typography.headlineLarge.copy(lineBreak = byWord))
+            Spacer(Modifier.height(8.dp))
+            Text("휴대폰 카메라와 마이크로 보고 듣고,\n기억해 둔 미팅과 사람을 찾아 알려 드려요.",
+                style = MaterialTheme.typography.bodyMedium.copy(lineBreak = byWord), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.height(24.dp))
+            TryList()
+            Spacer(Modifier.height(24.dp))
+        }
+        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
+            JarvisPrimaryButton("대화 시작", onStart, Modifier.fillMaxWidth())
+        }
+    }
 }
 
 /** The glasses mark from the company site: two round lenses and a bridge. */

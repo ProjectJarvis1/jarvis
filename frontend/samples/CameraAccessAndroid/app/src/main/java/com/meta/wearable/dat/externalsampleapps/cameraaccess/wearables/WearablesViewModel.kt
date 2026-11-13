@@ -20,23 +20,14 @@ import android.app.Activity
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.meta.wearable.dat.core.Wearables
-import com.meta.wearable.dat.core.selectors.AutoDeviceSelector
-import com.meta.wearable.dat.core.selectors.DeviceSelector
-import com.meta.wearable.dat.core.types.DeviceIdentifier
-import com.meta.wearable.dat.core.types.Permission
-import com.meta.wearable.dat.core.types.PermissionStatus
-import com.meta.wearable.dat.core.types.RegistrationError
-import com.meta.wearable.dat.core.types.RegistrationState
-import com.meta.wearable.dat.mockdevice.MockDeviceKit
 import kotlinx.collections.immutable.toImmutableList
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+/** Screen state around the glasses. The glasses SDK itself sits behind [GlassesPlatform] (glasses build only). */
 class WearablesViewModel(application: Application) : AndroidViewModel(application) {
   companion object {
     private const val TAG = "WearablesViewModel"
@@ -45,89 +36,35 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
   private val _uiState = MutableStateFlow(WearablesUiState())
   val uiState: StateFlow<WearablesUiState> = _uiState.asStateFlow()
 
-  // AutoDeviceSelector automatically selects the first available wearable device
-  // SDK 1.0 throws if this is built before Wearables.initialize(); create it on first use.
-  val deviceSelector: DeviceSelector by lazy { AutoDeviceSelector() }
-  private var deviceSelectorJob: Job? = null
-
   private var monitoringStarted = false
-  private val deviceMonitoringJobs = mutableMapOf<DeviceIdentifier, Job>()
 
   fun startMonitoring() {
     if (monitoringStarted) {
       return
     }
     monitoringStarted = true
+    GlassesPlatform.monitor(viewModelScope, getApplication(), object : GlassesSink {
+      override fun onActiveDevice(active: Boolean) {
+        _uiState.update { it.copy(hasActiveDevice = active) }
+      }
 
-    // Monitor device selector for active device
-    deviceSelectorJob =
-        viewModelScope.launch {
-          deviceSelector.activeDeviceFlow().collect { device ->
-            _uiState.update { it.copy(hasActiveDevice = device != null) }
-          }
-        }
+      override fun onRegistration(state: GlassesRegistration) {
+        val previous = _uiState.value.registrationState
+        val showGettingStarted = state == GlassesRegistration.REGISTERED && previous == GlassesRegistration.REGISTERING
+        _uiState.update { it.copy(registrationState = state, isGettingStartedSheetVisible = showGettingStarted) }
+      }
 
-    // This allows the app to react to registration changes (registered, unregistered, etc.)
-    viewModelScope.launch {
-      Wearables.registrationState.collect { value ->
-        val previousState = _uiState.value.registrationState
-        val showGettingStartedSheet =
-            value == RegistrationState.REGISTERED && previousState == RegistrationState.REGISTERING
-        _uiState.update {
-          it.copy(registrationState = value, isGettingStartedSheetVisible = showGettingStartedSheet)
-        }
+      override fun onDevices(ids: List<String>, hasMockDevices: Boolean) {
+        _uiState.update { it.copy(devices = ids.toImmutableList(), hasMockDevices = hasMockDevices) }
       }
-    }
-    // Registration happens inside the Meta AI app; when it fails there, say why and show the SDK's code
-    // so the cause can be looked up instead of guessed.
-    viewModelScope.launch {
-      Wearables.registrationErrorStream.collect { error ->
-        if (error == RegistrationError.ALREADY_REGISTERED || error == RegistrationError.ALREADY_UNREGISTERED) return@collect
-        setRecentError(registrationErrorMessage(error))
-      }
-    }
-    // This automatically updates when devices are discovered, connected, or disconnected
-    viewModelScope.launch {
-      Wearables.devices.collect { value ->
-        val hasMockDevices = MockDeviceKit.getInstance(getApplication()).pairedDevices.isNotEmpty()
-        _uiState.update {
-          it.copy(devices = value.toList().toImmutableList(), hasMockDevices = hasMockDevices)
-        }
-        // Monitor device metadata for compatibility issues
-        monitorDeviceCompatibility(value)
-      }
-    }
+
+      override fun onError(message: String) = setRecentError(message)
+    })
   }
 
-  private fun monitorDeviceCompatibility(devices: Set<DeviceIdentifier>) {
-    // Cancel monitoring jobs for devices that are no longer in the list
-    val removedDevices = deviceMonitoringJobs.keys - devices
-    removedDevices.forEach { deviceId ->
-      deviceMonitoringJobs[deviceId]?.cancel()
-      deviceMonitoringJobs.remove(deviceId)
-    }
-
-    // Start monitoring jobs only for new devices (not already being monitored)
-    val newDevices = devices - deviceMonitoringJobs.keys
-    newDevices.forEach { deviceId ->
-      val job =
-          viewModelScope.launch {
-            Wearables.devicesMetadata[deviceId]?.collect { metadata ->
-              if (
-                  metadata.compatibility ==
-                      com.meta.wearable.dat.core.types.DeviceCompatibility.DEVICE_UPDATE_REQUIRED
-              ) {
-                val deviceName = metadata.name.ifEmpty { deviceId }
-                setRecentError("글라스 '$deviceName'의 소프트웨어 업데이트가 필요해요. Meta AI 앱에서 업데이트해 주세요. (오류 코드 DEVICE_UPDATE_REQUIRED)")
-              }
-            }
-          }
-      deviceMonitoringJobs[deviceId] = job
-    }
-  }
-
-  /** False until MainActivity calls Wearables.initialize() (it waits for Android permissions). */
+  /** False until MainActivity initializes the glasses SDK (it waits for Android permissions). */
   private fun sdkReady(): Boolean {
+    if (!GlassesPlatform.SUPPORTED) return false
     if (monitoringStarted) return true
     setRecentError("글라스 기능을 쓰려면 앱 권한을 모두 허용해 주세요. 휴대폰 카메라 대화는 지금도 쓸 수 있어요.")
     return false
@@ -135,41 +72,26 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
 
   fun startRegistration(activity: Activity) {
     if (!sdkReady()) return
-    Wearables.startRegistration(activity)
+    GlassesPlatform.startRegistration(activity)
   }
 
   fun startUnregistration(activity: Activity) {
     if (!sdkReady()) return
-    Wearables.startUnregistration(activity)
+    GlassesPlatform.startUnregistration(activity)
   }
 
-  fun navigateToStreaming(onRequestWearablesPermission: suspend (Permission) -> PermissionStatus) {
+  /** Opens the conversation on the glasses camera, asking for the glasses camera permission first if needed. */
+  fun navigateToStreaming(onRequestWearablesPermission: suspend () -> Boolean) {
     if (!sdkReady()) return
     viewModelScope.launch {
-      val permission = Permission.CAMERA // Camera permission is required for streaming
-      val result = Wearables.checkPermissionStatus(permission)
-
-      // Handle the result
-      result.onFailure { error, _ ->
-        setRecentError(glassesErrorMessage(error, "글라스 카메라 권한을 확인하지 못했어요."))
+      val granted = GlassesPlatform.cameraPermissionGranted().getOrElse { error ->
+        setRecentError(error.message ?: "글라스 카메라 권한을 확인하지 못했어요.")
         return@launch
       }
-
-      val permissionStatus = result.getOrNull()
-      if (permissionStatus == PermissionStatus.Granted) {
+      if (granted || onRequestWearablesPermission()) {
         _uiState.update { it.copy(isStreaming = true) }
-        return@launch
-      }
-
-      // Request permission
-      val requestedPermissionStatus = onRequestWearablesPermission(permission)
-      when (requestedPermissionStatus) {
-        PermissionStatus.Denied -> {
-          setRecentError("Permission denied")
-        }
-        PermissionStatus.Granted -> {
-          _uiState.update { it.copy(isStreaming = true) }
-        }
+      } else {
+        setRecentError("글라스 카메라 권한이 거부됐어요. Meta AI 앱의 앱 연결 화면에서 카메라를 허용해 주세요.")
       }
     }
   }
@@ -210,15 +132,6 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     _uiState.update { it.copy(recentError = null) }
   }
 
-  private fun registrationErrorMessage(error: RegistrationError): String {
-    val guide = when (error) {
-      RegistrationError.META_AI_NOT_INSTALLED -> "Meta AI 앱이 없어요. 설치하고 글라스를 페어링한 뒤 다시 눌러 주세요."
-      RegistrationError.FAILED_TO_UNREGISTER -> "글라스 연결을 해제하지 못했어요. Meta AI 앱에서 직접 해제해 주세요."
-      else -> "Meta AI 앱에서 연결을 마치지 못했어요. Meta AI 앱을 최신으로 업데이트하고 개발자 모드가 켜져 있는지 확인해 주세요."
-    }
-    return "$guide (오류 코드 ${error.name})"
-  }
-
   fun setRecentError(error: String) {
     _uiState.update { it.copy(recentError = error) }
   }
@@ -231,11 +144,4 @@ class WearablesViewModel(application: Application) : AndroidViewModel(applicatio
     _uiState.update { it.copy(isGettingStartedSheetVisible = false) }
   }
 
-  override fun onCleared() {
-    super.onCleared()
-    // Cancel all device monitoring jobs when ViewModel is cleared
-    deviceMonitoringJobs.values.forEach { it.cancel() }
-    deviceMonitoringJobs.clear()
-    deviceSelectorJob?.cancel()
-  }
 }

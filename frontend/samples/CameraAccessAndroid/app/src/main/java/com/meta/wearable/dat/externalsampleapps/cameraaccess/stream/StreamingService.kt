@@ -103,7 +103,9 @@ class StreamingService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     Log.d(TAG, "Service started")
 
-    val base = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE or ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+    // The phone build declares no connected-device type, so it never asks for one.
+    val base = (if (com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig.GLASSES) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0) or
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
     val microphone = withMicrophone && hasMicPermission()
     // Already in the foreground with the right microphone state: a second start (the glasses stream
     // reconnecting in a pocket) must not re-request types, because Android 14 would refuse the

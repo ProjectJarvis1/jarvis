@@ -13,7 +13,6 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.stream
 
 import android.graphics.Bitmap
-import com.meta.wearable.dat.camera.types.StreamState
 
 enum class StreamingMode { GLASSES, PHONE }
 

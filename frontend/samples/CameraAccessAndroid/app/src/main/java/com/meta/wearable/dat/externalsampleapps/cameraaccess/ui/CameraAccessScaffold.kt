@@ -14,8 +14,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.meta.wearable.dat.core.types.Permission
-import com.meta.wearable.dat.core.types.PermissionStatus
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
@@ -23,7 +21,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.Wearables
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraAccessScaffold(viewModel: WearablesViewModel,
-    onRequestWearablesPermission: suspend (Permission) -> PermissionStatus, modifier: Modifier = Modifier,
+    onRequestWearablesPermission: suspend () -> Boolean, modifier: Modifier = Modifier,
     geminiViewModel: GeminiSessionViewModel = viewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val activity = androidx.activity.compose.LocalActivity.current
@@ -85,11 +83,12 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
             if (state.isSettingsVisible) Surface(Modifier.fillMaxSize(), color = Jarvis.extras.ground) {
                 SettingsScreen(onBack = viewModel::hideSettings,
                     onDebug = if (BuildConfig.DEBUG) viewModel::showDebugMenu else null,
-                    onDisconnect = if (state.isRegistered && activity != null) { { viewModel.startUnregistration(activity) } } else null,
-                    glassesStatus = when { state.hasActiveDevice -> "연결됨"; state.isRegistered -> "기다리는 중"; else -> "연결 안 됨" })
+                    onDisconnect = if (BuildConfig.GLASSES && state.isRegistered && activity != null) { { viewModel.startUnregistration(activity) } } else null,
+                    glassesStatus = if (!BuildConfig.GLASSES) null
+                        else when { state.hasActiveDevice -> "연결됨"; state.isRegistered -> "기다리는 중"; else -> "연결 안 됨" })
             }
             if (state.isDebugMenuVisible && BuildConfig.DEBUG) ModalBottomSheet(onDismissRequest = viewModel::hideDebugMenu) {
-                MockDeviceKitScreen(Modifier.fillMaxHeight(.9f))
+                GlassesDebugPanel(Modifier.fillMaxHeight(.9f))
             }
         }
     }

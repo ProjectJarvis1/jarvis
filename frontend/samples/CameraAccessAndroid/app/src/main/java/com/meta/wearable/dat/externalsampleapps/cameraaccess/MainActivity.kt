@@ -10,9 +10,6 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess
 
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
 
-import android.Manifest.permission.BLUETOOTH
-import android.Manifest.permission.BLUETOOTH_CONNECT
-import android.Manifest.permission.BLUETOOTH_SCAN
 import android.Manifest.permission.CALL_PHONE
 import android.Manifest.permission.CAMERA
 import android.Manifest.permission.INTERNET
@@ -33,28 +30,17 @@ import androidx.compose.runtime.setValue
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions
 import androidx.activity.viewModels
-import com.meta.wearable.dat.core.Wearables
-import com.meta.wearable.dat.core.types.Permission
-import com.meta.wearable.dat.core.types.PermissionStatus
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.GlassesPlatform
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.CameraAccessScaffold
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
-import kotlin.coroutines.resume
-import kotlinx.coroutines.CancellableContinuation
-import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 
 class MainActivity : ComponentActivity() {
   companion object {
     val PERMISSIONS: Array<String>
       get() =
           buildList {
-                add(BLUETOOTH)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                  add(BLUETOOTH_SCAN)
-                  add(BLUETOOTH_CONNECT)
-                }
+                addAll(GlassesPlatform.permissions)
                 add(INTERNET)
                 add(RECORD_AUDIO)
                 add(READ_CONTACTS)
@@ -70,24 +56,8 @@ class MainActivity : ComponentActivity() {
 
   val viewModel: WearablesViewModel by viewModels()
 
-  private var permissionContinuation: CancellableContinuation<PermissionStatus>? = null
-  private val permissionMutex = Mutex()
-  private val permissionsResultLauncher =
-      registerForActivityResult(Wearables.RequestPermissionContract()) { result ->
-        val permissionStatus = result.getOrDefault(PermissionStatus.Denied)
-        permissionContinuation?.resume(permissionStatus)
-        permissionContinuation = null
-      }
-
-  suspend fun requestWearablesPermission(permission: Permission): PermissionStatus {
-    return permissionMutex.withLock {
-      suspendCancellableCoroutine { continuation ->
-        permissionContinuation = continuation
-        continuation.invokeOnCancellation { permissionContinuation = null }
-        permissionsResultLauncher.launch(permission)
-      }
-    }
-  }
+  // Registered while the activity is created; asks for the glasses camera permission (always false on the phone build).
+  private val requestGlassesCamera: suspend () -> Boolean = GlassesPlatform.permissionRequester(this)
 
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -106,8 +76,8 @@ class MainActivity : ComponentActivity() {
 
     // First, ensure the app has necessary Android permissions
     checkPermissions {
-      // Initialize the DAT SDK once the permissions are granted
-      Wearables.initialize(this)
+      // Initialize the glasses SDK once the permissions are granted (nothing to do on the phone build)
+      GlassesPlatform.initialize(this)
 
       // Start observing Wearables state after SDK is initialized
       viewModel.startMonitoring()
@@ -134,7 +104,7 @@ class MainActivity : ComponentActivity() {
       } else {
         CameraAccessScaffold(
             viewModel = viewModel,
-            onRequestWearablesPermission = ::requestWearablesPermission,
+            onRequestWearablesPermission = requestGlassesCamera,
         )
       }
       }

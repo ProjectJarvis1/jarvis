@@ -22,6 +22,23 @@ android {
 
   buildFeatures { buildConfig = true }
 
+  // Two builds of one app: "glasses" carries the Meta glasses SDK (tester-only distribution while that SDK
+  // is a developer preview); "phone" has no glasses code at all and runs on the phone camera and microphone.
+  flavorDimensions += "device"
+  productFlavors {
+    create("glasses") {
+      dimension = "device"
+      isDefault = true
+      buildConfigField("boolean", "GLASSES", "true")
+      manifestPlaceholders["fgsTypes"] = "connectedDevice|dataSync|microphone"
+    }
+    create("phone") {
+      dimension = "device"
+      buildConfigField("boolean", "GLASSES", "false")
+      manifestPlaceholders["fgsTypes"] = "dataSync|microphone"
+    }
+  }
+
   defaultConfig {
     // Store identity; fixed once uploaded to Google Play. The code namespace above stays the Meta sample one.
     applicationId = "ai.jarvisglass.app"
@@ -99,10 +116,10 @@ dependencies {
   implementation(libs.androidx.material.icons.extended)
   implementation(libs.androidx.material3)
   implementation(libs.kotlinx.collections.immutable)
-  implementation(libs.mwdat.core)
+  "glassesImplementation"(libs.mwdat.core)
   implementation(libs.mlkit.text.korean)
-  implementation(libs.mwdat.camera)
-  implementation(libs.mwdat.mockdevice)
+  "glassesImplementation"(libs.mwdat.camera)
+  "glassesImplementation"(libs.mwdat.mockdevice)
   // VisionClaw additions
   implementation(libs.okhttp)
   // Google sign-in (Credential Manager). The server checks the ID token and opens a Jarvis session.
