@@ -57,6 +57,7 @@ private fun PhoneHome(onStart: () -> Unit, modifier: Modifier = Modifier) {
             Text("휴대폰 카메라와 마이크로 보고 듣고,\n기억해 둔 미팅과 사람을 찾아 알려 드려요.",
                 style = MaterialTheme.typography.bodyMedium.copy(lineBreak = byWord), color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(24.dp))
+            ProactiveOfferList(Modifier.padding(bottom = 20.dp))
             TryList()
             Spacer(Modifier.height(24.dp))
         }

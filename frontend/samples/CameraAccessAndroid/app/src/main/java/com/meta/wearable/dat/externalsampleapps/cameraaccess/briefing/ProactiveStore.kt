@@ -53,7 +53,8 @@ object ProactiveStore {
             }
         }
         loadedFor = uid
-        _offers.value = list
+        // One card per event, also for lists saved before cards were merged (newest first, so the latest stays).
+        _offers.value = list.distinctBy { Triple(it.kind, it.eventBeginMs, it.title) }
     }
 
     @Synchronized
