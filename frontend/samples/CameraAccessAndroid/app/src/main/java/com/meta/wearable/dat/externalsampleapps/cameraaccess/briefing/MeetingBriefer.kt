@@ -48,6 +48,65 @@ object MeetingBriefer {
         if (delivered.claim(key, System.currentTimeMillis())) save(context, delivered)
     }
 
+    /**
+     * Calendar occurrences from [fromMs] to [toMs], all-day ones included, skipping canceled and declined
+     * ones. Used by the proactive offers, which look days ahead for deadlines.
+     */
+    fun calendarItems(context: Context, fromMs: Long, toMs: Long): List<CalendarItem> {
+        if (!hasCalendarPermission(context)) return emptyList()
+        val uri = CalendarContract.Instances.CONTENT_URI.buildUpon().also {
+            ContentUris.appendId(it, fromMs)
+            ContentUris.appendId(it, toMs)
+        }.build()
+        val projection = arrayOf(
+            CalendarContract.Instances.EVENT_ID, CalendarContract.Instances.BEGIN, CalendarContract.Instances.TITLE,
+            CalendarContract.Instances.EVENT_LOCATION, CalendarContract.Instances.ALL_DAY, CalendarContract.Instances.STATUS,
+            CalendarContract.Instances.SELF_ATTENDEE_STATUS, CalendarContract.Instances.OWNER_ACCOUNT,
+        )
+        val result = mutableListOf<CalendarItem>()
+        runCatching {
+            context.contentResolver.query(uri, projection, null, null, CalendarContract.Instances.BEGIN)?.use { c ->
+                while (c.moveToNext()) {
+                    if (c.getInt(5) == CalendarContract.Events.STATUS_CANCELED) continue
+                    if (c.getInt(6) == CalendarContract.Attendees.ATTENDEE_STATUS_DECLINED) continue
+                    val eventId = c.getLong(0)
+                    val begin = c.getLong(1)
+                    val allDay = c.getInt(4) == 1
+                    result += CalendarItem(
+                        key = "$eventId:$begin",
+                        title = c.getString(2).orEmpty().ifBlank { "제목 없는 일정" },
+                        beginMs = begin,
+                        allDay = allDay,
+                        location = c.getString(3).orEmpty(),
+                        attendees = if (allDay) emptyList() else attendees(context, eventId, c.getString(7).orEmpty()),
+                    )
+                }
+            }
+        }.onFailure { Log.w(TAG, "Calendar read failed: ${it.message}") }
+        return result
+    }
+
+    /** Counts failed searches, so a caller can tell "nothing stored" from "the server did not answer". */
+    @Volatile private var failedSearches = 0
+
+    /** The briefing for [meeting], or null when any search failed (try again later). Call off the main thread. */
+    internal fun briefFor(meeting: UpcomingMeeting): Brief? {
+        val before = failedSearches
+        val brief = brief(meeting)
+        return brief.takeIf { failedSearches == before }
+    }
+
+    /**
+     * Stored people, meetings and notes that may be about a deadline, searched by its distinctive words;
+     * null when any search failed, so an empty answer is never mistaken for "nothing stored".
+     */
+    internal fun recordsFor(words: List<String>, title: String): Triple<List<PersonHit>, List<MeetingHit>, List<MemoryHit>>? {
+        val before = failedSearches
+        val query = (words.ifEmpty { listOf(title) }).joinToString(" ")
+        val found = Triple(words.take(3).flatMap { searchPeople(it) }, searchMeetings(query), searchMemories(query))
+        return found.takeIf { failedSearches == before }
+    }
+
     private fun brief(meeting: UpcomingMeeting): Brief {
         val keys = MeetingBriefing.keys(meeting)
         val query = (listOf(meeting.title) + meeting.attendees).joinToString(" ").trim()
@@ -147,7 +206,7 @@ object MeetingBriefer {
             if (!response.isSuccessful) error("HTTP ${response.code}")
             JSONArray(response.body?.string().orEmpty())
         }
-    }.onFailure { Log.w(TAG, "Search $path failed: ${it.message}") }.getOrNull()
+    }.onFailure { failedSearches++; Log.w(TAG, "Search $path failed: ${it.message}") }.getOrNull()
 
     private fun JSONObject.optNullable(key: String): String = if (isNull(key)) "" else optString(key)
 

@@ -96,6 +96,11 @@ object SettingsManager {
         get() = prefs.getBoolean("meetingBriefingEnabled", true)
         set(value) = prefs.edit().putBoolean("meetingBriefingEnabled", value).apply()
 
+    /** Offer to prepare today's meeting and upcoming deadlines on its own, even with the app closed. */
+    var proactiveOffersEnabled: Boolean
+        get() = prefs.getBoolean("proactiveOffersEnabled", true)
+        set(value) = prefs.edit().putBoolean("proactiveOffersEnabled", value).apply()
+
     /** Keep listening for "자비스" with the screen off (a microphone foreground service). */
     var backgroundWakeWordEnabled: Boolean
         get() = prefs.getBoolean("backgroundWakeWordEnabled", true)

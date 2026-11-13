@@ -70,6 +70,9 @@ class MainActivity : ComponentActivity() {
     lifecycleScope.launch {
       com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.validate()
     }
+    // Jarvis checks the calendar every 15 minutes, app open or not, to offer help first.
+    com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveWorker.schedule(this)
+    if (savedInstanceState == null) openOffer(intent)
 
     // Keep screen on while streaming
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
@@ -81,6 +84,7 @@ class MainActivity : ComponentActivity() {
 
       // Start observing Wearables state after SDK is initialized
       viewModel.startMonitoring()
+      askCalendarForOffers()
     }
 
     setContent {
@@ -109,6 +113,39 @@ class MainActivity : ComponentActivity() {
       }
       }
     }
+  }
+
+  // "먼저 알려 주기" is on by default and reads the calendar; asked once after the app's own permissions.
+  private val calendarPermissionLauncher =
+      registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+
+  private fun askCalendarForOffers() {
+    // Asked once; after a "no" the Settings row explains why nothing arrives and offers to allow it.
+    val prefs = getSharedPreferences("proactive_permission", MODE_PRIVATE)
+    if (prefs.getBoolean("asked", false)) return
+    if (com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager.proactiveOffersEnabled &&
+        checkSelfPermission(android.Manifest.permission.READ_CALENDAR) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+      prefs.edit().putBoolean("asked", true).apply()
+      calendarPermissionLauncher.launch(android.Manifest.permission.READ_CALENDAR)
+    }
+  }
+
+  override fun onNewIntent(intent: android.content.Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    openOffer(intent)
+  }
+
+  /** A tapped offer notification: show that offer's detail, if it belongs to the signed-in account. */
+  private fun openOffer(intent: android.content.Intent?) {
+    val id = intent?.getStringExtra(
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications.EXTRA_OFFER_ID) ?: return
+    intent.removeExtra(com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications.EXTRA_OFFER_ID)
+    val store = com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore
+    // An offer whose event is over would still say "오늘 …"; the home list hides it, so this does not open it.
+    store.find(this, id)
+        ?.takeIf { com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner.isLive(it, System.currentTimeMillis()) }
+        ?.let(store::open)
   }
 
   fun checkPermissions(onPermissionsGranted: () -> Unit) {

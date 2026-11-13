@@ -86,6 +86,39 @@ fun SettingsScreen(
     var backgroundWakeWordEnabled by remember { mutableStateOf(SettingsManager.backgroundWakeWordEnabled) }
     var meetingBriefingEnabled by remember { mutableStateOf(SettingsManager.meetingBriefingEnabled) }
     var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
+    var proactiveOffersEnabled by remember { mutableStateOf(SettingsManager.proactiveOffersEnabled) }
+    val settingsContext = LocalContext.current
+    // "먼저 알려 주기" reads the calendar and shows notifications; ask for both when it is turned on.
+    fun calendarAllowed() = settingsContext.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    var calendarGranted by remember { mutableStateOf(calendarAllowed()) }
+    // Coming back from the app's system settings page may have changed it.
+    val settingsLifecycle = LocalLifecycleOwner.current.lifecycle
+    DisposableEffect(settingsLifecycle) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) calendarGranted = calendarAllowed() }
+        settingsLifecycle.addObserver(observer)
+        onDispose { settingsLifecycle.removeObserver(observer) }
+    }
+    val offerPermissions = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
+    ) { calendarGranted = calendarAllowed() }
+    fun askOfferPermissions() {
+        // After repeated "no", Android stops showing the dialog; then only the app's settings page can allow it.
+        val prefs = settingsContext.getSharedPreferences("proactive_permission", android.content.Context.MODE_PRIVATE)
+        val activity = settingsContext as? android.app.Activity
+        if (!calendarAllowed() && prefs.getBoolean("asked", false) &&
+            activity?.shouldShowRequestPermissionRationale(android.Manifest.permission.READ_CALENDAR) == false) {
+            settingsContext.startActivity(Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.fromParts("package", settingsContext.packageName, null)))
+            return
+        }
+        prefs.edit().putBoolean("asked", true).apply()
+        val wanted = buildList {
+            add(android.Manifest.permission.READ_CALENDAR)
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) add(android.Manifest.permission.POST_NOTIFICATIONS)
+        }.filter { settingsContext.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) offerPermissions.launch(wanted.toTypedArray())
+    }
     var liveConversationEnabled by remember { mutableStateOf(SettingsManager.liveConversationEnabled) }
     var whisperSttEnabled by remember { mutableStateOf(SettingsManager.speechRecognizerProvider == "whisper") }
     var showResetDialog by remember { mutableStateOf(false) }
@@ -101,6 +134,10 @@ fun SettingsScreen(
         SettingsManager.backgroundWakeWordEnabled = backgroundWakeWordEnabled
         SettingsManager.meetingBriefingEnabled = meetingBriefingEnabled
         SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
+        if (SettingsManager.proactiveOffersEnabled != proactiveOffersEnabled) {
+            SettingsManager.proactiveOffersEnabled = proactiveOffersEnabled
+            com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveWorker.schedule(settingsContext)
+        }
         SettingsManager.liveConversationEnabled = liveConversationEnabled
         SettingsManager.speechRecognizerProvider = if (whisperSttEnabled) "whisper" else "android"
     }
@@ -114,6 +151,7 @@ fun SettingsScreen(
         backgroundWakeWordEnabled = SettingsManager.backgroundWakeWordEnabled
         meetingBriefingEnabled = SettingsManager.meetingBriefingEnabled
         proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
+        proactiveOffersEnabled = SettingsManager.proactiveOffersEnabled
         liveConversationEnabled = SettingsManager.liveConversationEnabled
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
     }
@@ -121,7 +159,7 @@ fun SettingsScreen(
     // Tab navigation and system Back also persist edits, not only the toolbar Back button.
     LaunchedEffect(systemPrompt, jarvisApiBase, webrtcSignalingURL,
         videoStreamingEnabled, cardOfferEnabled, backgroundWakeWordEnabled, meetingBriefingEnabled, proactiveNotificationsEnabled,
-        liveConversationEnabled,
+        proactiveOffersEnabled, liveConversationEnabled,
         whisperSttEnabled) {
         save()
     }
@@ -164,6 +202,12 @@ fun SettingsScreen(
                 SettingSwitch("미팅 전 브리핑",
                     "캘린더 일정 5~10분 전에 상대 정보와 지난 회의 내용을 글라스로 알려 줘요. 대화 화면이 열려 있어야 하고 캘린더 권한이 필요해요.",
                     meetingBriefingEnabled) { meetingBriefingEnabled = it }
+                SettingSwitch("먼저 알려 주기",
+                    "앱을 닫아 둬도 캘린더를 보고, 오늘 미팅 두 시간 전과 제출이나 마감 사흘 전에 준비를 도와드릴지 먼저 물어요. 오전 8시부터 밤 9시 사이에만, 하루 4번까지 알려요.",
+                    proactiveOffersEnabled) { proactiveOffersEnabled = it; if (it) askOfferPermissions() }
+                // On by default, so a fresh install may be on without the calendar permission: say so, offer to allow.
+                if (proactiveOffersEnabled && !calendarGranted) JarvisRow("캘린더 권한이 없어 아직 알려 드리지 못해요",
+                    subtitle = "눌러서 허용", onClick = { askOfferPermissions() })
                 SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
                     videoStreamingEnabled) { videoStreamingEnabled = it }
                 SettingSwitch("명함 보이면 저장 제안", "명함이 보이면 Jarvis가 저장할지 먼저 물어요. 대답하기 전에는 저장하지 않아요.",
@@ -209,7 +253,11 @@ fun SettingsScreen(
         title = { Text("설정을 초기화할까요?") },
         text = { Text("앱에 들어 있는 기본 설정으로 되돌려요. 서비스 연결은 그대로 남아요.") },
         confirmButton = {
-            TextButton(onClick = { SettingsManager.resetAll(); reload(); showResetDialog = false }) {
+            TextButton(onClick = {
+                SettingsManager.resetAll(); reload(); showResetDialog = false
+                // The defaults turn "먼저 알려 주기" back on; start its check again if it had been stopped.
+                com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveWorker.schedule(settingsContext)
+            }) {
                 Text("초기화", color = MaterialTheme.colorScheme.error)
             }
         },
