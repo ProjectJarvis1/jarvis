@@ -58,7 +58,13 @@ android {
     }
   }
   buildTypes {
+    debug {
+      // 개발 중에는 같은 와이파이의 http 서버에 붙을 수 있게 둔다.
+      manifestPlaceholders["usesCleartextTraffic"] = "true"
+    }
     release {
+      // 플레이 배포본은 https/wss 서버만 쓴다.
+      manifestPlaceholders["usesCleartextTraffic"] = "false"
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
       signingConfig = signingConfigs.findByName("upload")
