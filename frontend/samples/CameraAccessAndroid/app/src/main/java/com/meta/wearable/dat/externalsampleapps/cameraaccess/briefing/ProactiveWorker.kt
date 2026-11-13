@@ -57,8 +57,9 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             val items = MeetingBriefer.calendarItems(app, nowMs - 24 * 3_600_000L, ProactivePlanner.windowEnd(nowMs))
             val sent = mutableListOf<ProactiveOffer>()
             for (item in items) {
-                // The account may have changed or signed out while the server was searched.
-                if (JarvisAccount.userId != uid || !JarvisAccount.isSignedIn) break
+                // Before each new search: the account may have changed, the switch turned off, the work cancelled.
+                if (JarvisAccount.userId != uid || !JarvisAccount.isSignedIn || !stillWanted() ||
+                    !SettingsManager.proactiveOffersEnabled || !ProactivePlanner.withinHours(current())) break
                 val claimed = ProactiveStore.claimed(app, nowMs)
                 if (ProactivePlanner.sentToday(claimed, nowMs) >= ProactivePlanner.MAX_PER_DAY) break
                 val offer = when {
@@ -89,7 +90,7 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             val detail = (listOf("오늘 ${ProactivePlanner.clock(item.beginMs)} ${item.title}" +
                 (if (item.location.isNotBlank()) " (${item.location})" else "")) + brief.detail.lines().drop(1)).joinToString("\n")
             return ProactiveOffer("meet-${item.key}", OfferKind.MEETING, item.title,
-                ProactivePlanner.meetingMessage(item, brief.people, brief.hasHistory, brief.historyWith), detail, nowMs, item.beginMs)
+                ProactivePlanner.meetingMessage(item, brief.people, brief.hasHistory, brief.historyWith, brief.mentioned), detail, nowMs, item.beginMs)
         }
 
         /** Null when the server did not answer: offered on a later run instead of as "nothing stored". */
@@ -97,7 +98,7 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             val (people, meetings, memories) = MeetingBriefer.recordsFor(ProactivePlanner.deadlineWords(item), item.title) ?: return null
             return ProactiveOffer("due-${item.key}-${stage.name}", OfferKind.DEADLINE, item.title,
                 ProactivePlanner.deadlineMessage(item, nowMs),
-                ProactivePlanner.deadlineDetail(item, people, meetings, memories), nowMs, item.beginMs)
+                ProactivePlanner.deadlineDetail(item, people, meetings, memories, nowMs), nowMs, item.beginMs)
         }
     }
 }

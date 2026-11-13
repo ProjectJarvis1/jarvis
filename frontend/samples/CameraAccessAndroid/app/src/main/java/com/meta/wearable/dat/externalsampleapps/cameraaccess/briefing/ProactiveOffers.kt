@@ -114,9 +114,11 @@ object ProactivePlanner {
      * The "○○ 님과 나눈 내용" wording only for someone a found meeting or note names ([historyWith]); other
      * history is "관련 기록", and a saved contact alone is offered as stored information, not as a conversation.
      */
-    fun meetingMessage(item: CalendarItem, people: List<String>, hasHistory: Boolean, historyWith: List<String> = emptyList()): String {
+    fun meetingMessage(item: CalendarItem, people: List<String>, hasHistory: Boolean, historyWith: List<String> = emptyList(),
+        mentioned: List<String> = emptyList()): String {
         val offer = when {
             historyWith.isNotEmpty() -> "최근 ${historyWith.first()} 님과 나눈 내용 정리해 드릴까요?"
+            mentioned.isNotEmpty() -> "${mentioned.first()} 님 관련 기록 정리해 드릴까요?"
             hasHistory -> "관련 기록 정리해 드릴까요?"
             people.isNotEmpty() -> "${people.first()} 님에 대해 저장된 정보를 확인해 드릴까요?"
             else -> "관련해 저장된 정보를 확인해 드릴까요?"
@@ -138,7 +140,8 @@ object ProactivePlanner {
      * What a deadline offer opens to: the stored people, meetings and notes that name the deadline's company
      * or other distinctive words, each with its date, and the next steps Jarvis can already take.
      */
-    fun deadlineDetail(item: CalendarItem, people: List<PersonHit>, meetings: List<MeetingHit>, memories: List<MemoryHit>): String {
+    fun deadlineDetail(item: CalendarItem, people: List<PersonHit>, meetings: List<MeetingHit>, memories: List<MemoryHit>,
+        nowMs: Long? = null): String {
         val words = deadlineWords(item)
         val lines = mutableListOf("${dateLabel(localDate(item))} ${item.title}")
         // Search is by meaning, so a hit must be checked here. A person counts when a title word is their
@@ -160,9 +163,13 @@ object ProactivePlanner {
         }
         notes.forEach { n -> lines += "기록 ${shortDate(n.capturedAt)}: ${n.text.take(120)}" }
         if (persons.isEmpty() && pastMeetings.isEmpty() && notes.isEmpty()) lines += "관련해서 저장된 기록은 아직 없어요."
-        // A new conversation does not know this offer, so the example names the day, the time and the event.
+        // A new conversation does not know this offer, so the example names the day, the time and the event;
+        // once 09:00 the day before has passed, it asks the user to pick a time instead of suggesting the past.
         val dayBefore = localDate(item).minusDays(1)
-        lines += "Jarvis에게 \"${dayBefore.monthValue}월 ${dayBefore.dayOfMonth}일 오전 9시에 ${item.title} 준비 일정 잡아 줘\"라고 말하면 캘린더에 넣어 드려요."
+        val prepAt = dayBefore.atTime(9, 0).atZone(KST).toInstant().toEpochMilli()
+        lines += if (nowMs == null || prepAt > nowMs)
+            "Jarvis에게 \"${dayBefore.monthValue}월 ${dayBefore.dayOfMonth}일 오전 9시에 ${item.title} 준비 일정 잡아 줘\"라고 말하면 캘린더에 넣어 드려요."
+        else "준비할 날짜와 시각을 정해 Jarvis에게 \"${item.title} 준비 일정 잡아 줘\"라고 함께 말하면 캘린더에 넣어 드려요."
         return lines.joinToString("\n")
     }
 
@@ -178,6 +185,15 @@ object ProactivePlanner {
         val d = t.atZone(KST)
         "${d.monthValue}월 ${d.dayOfMonth}일"
     }.getOrDefault("날짜 모름")
+
+    /**
+     * When a kept offer stops making sense: a meeting offer ("오늘 오후 2시") two hours after the meeting
+     * starts, a deadline offer at the end of its day (an all-day item starts at midnight UTC, 09:00 KST).
+     */
+    fun expiresAt(offer: ProactiveOffer): Long =
+        offer.eventBeginMs + if (offer.kind == OfferKind.MEETING) 2 * 3_600_000L else 24 * 3_600_000L
+
+    fun isLive(offer: ProactiveOffer, nowMs: Long): Boolean = nowMs < expiresAt(offer)
 
     /** Midnight KST [days] from today, for the calendar query window. */
     fun windowEnd(nowMs: Long, days: Long = LOOKAHEAD_DAYS): Long =

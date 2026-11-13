@@ -172,7 +172,10 @@ class MainActivity : ComponentActivity() {
         com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications.EXTRA_OFFER_ID) ?: return
     intent.removeExtra(com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications.EXTRA_OFFER_ID)
     val store = com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore
-    store.find(this, id)?.let(store::open)
+    // An offer whose event is over would still say "오늘 …"; the home list hides it, so this does not open it.
+    store.find(this, id)
+        ?.takeIf { com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner.isLive(it, System.currentTimeMillis()) }
+        ?.let(store::open)
   }
 
   fun checkPermissions(onPermissionsGranted: () -> Unit) {

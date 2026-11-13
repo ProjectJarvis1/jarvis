@@ -33,7 +33,7 @@ data class MemoryHit(val text: String, val peopleText: String = "", val captured
  * people, and [hasRecords] is false when nothing stored was about this meeting.
  */
 data class Brief(val spoken: String, val detail: String, val people: List<String> = emptyList(), val hasRecords: Boolean = true,
-    val hasHistory: Boolean = true, val historyWith: List<String> = emptyList())
+    val hasHistory: Boolean = true, val historyWith: List<String> = emptyList(), val mentioned: List<String> = emptyList())
 
 /**
  * Builds the briefing a few minutes before a meeting from what Jarvis has stored about the people in it.
@@ -146,9 +146,14 @@ object MeetingBriefing {
         return Brief(spoken.joinToString(" ").replace("자비스", ""), detail.joinToString("\n"),
             people = persons.map { it.name }, hasRecords = hasRecords,
             hasHistory = pastMeetings.isNotEmpty() || notes.isNotEmpty(),
-            // Only people a found meeting or note actually names: "최근 ○○ 님과 나눈 내용" must be true of them.
+            // "최근 ○○ 님과 나눈 내용" only for people a past meeting names; a note that merely names someone
+            // ("김민수 님에게 보낼 제안서") is a record about them, not a conversation with them.
             historyWith = persons.filter { p ->
-                val texts = pastMeetings.flatMap { listOf(it.title, it.summary) + it.actionItems } + notes.flatMap { listOf(it.text, it.peopleText) }
+                val texts = pastMeetings.flatMap { listOf(it.title, it.summary) + it.actionItems }
+                p.allNames.any { n -> texts.any { it.contains(n) } }
+            }.map { it.name },
+            mentioned = persons.filter { p ->
+                val texts = notes.flatMap { listOf(it.text, it.peopleText) }
                 p.allNames.any { n -> texts.any { it.contains(n) } }
             }.map { it.name })
     }

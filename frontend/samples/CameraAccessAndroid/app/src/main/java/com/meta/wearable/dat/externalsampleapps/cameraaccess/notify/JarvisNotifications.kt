@@ -45,6 +45,9 @@ object JarvisNotifications {
             .setContentIntent(opener(id))
             .addAction(0, action, opener(id xor 0x5A5A))
             .setAutoCancel(true)
+            // Taken down once the event is over, so yesterday's "오늘 오후 2시" never lingers.
+            .setTimeoutAfter((com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner.expiresAt(offer) -
+                System.currentTimeMillis()).coerceAtLeast(60_000L))
             .build()
         val compat = NotificationManagerCompat.from(app)
         val channelOn = manager.getNotificationChannel(OFFER_CHANNEL_ID)?.importance != NotificationManager.IMPORTANCE_NONE

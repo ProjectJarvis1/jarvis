@@ -124,6 +124,32 @@ class ProactivePlannerTest {
     }
 
     @Test
+    fun aNoteThatOnlyNamesSomeoneIsNotAConversation() {
+        val m = CalendarItem("e1:1", "한빛정밀 견적 미팅", kst(2026, 11, 13, 14), allDay = false)
+        assertEquals("오늘 오후 2시에 '한빛정밀 견적 미팅' 일정이 있으시네요. 김민수 님 관련 기록 정리해 드릴까요?",
+            ProactivePlanner.meetingMessage(m, listOf("김민수"), hasHistory = true, mentioned = listOf("김민수")))
+    }
+
+    @Test
+    fun preparationExampleNeverSuggestsAPastTime() {
+        val d = CalendarItem("d:1", "대성테크 입찰 서류 제출", allDay(2026, 11, 16), allDay = true)
+        assertTrue(ProactivePlanner.deadlineDetail(d, emptyList(), emptyList(), emptyList(), now).contains("11월 15일 오전 9시에"))
+        val late = ProactivePlanner.deadlineDetail(d, emptyList(), emptyList(), emptyList(), kst(2026, 11, 15, 10))
+        assertFalse(late.contains("오전 9시에"))
+        assertTrue(late.contains("준비할 날짜와 시각을 정해"))
+    }
+
+    @Test
+    fun offersExpireAfterTheirEvent() {
+        val meeting = ProactiveOffer("m", OfferKind.MEETING, "t", "", "", now, kst(2026, 11, 13, 14))
+        assertTrue(ProactivePlanner.isLive(meeting, kst(2026, 11, 13, 15)))
+        assertFalse(ProactivePlanner.isLive(meeting, kst(2026, 11, 13, 16, 1)))
+        val deadline = ProactiveOffer("d", OfferKind.DEADLINE, "t", "", "", now, allDay(2026, 11, 16))
+        assertTrue(ProactivePlanner.isLive(deadline, kst(2026, 11, 16, 23)))
+        assertFalse(ProactivePlanner.isLive(deadline, kst(2026, 11, 17, 10)))
+    }
+
+    @Test
     fun aGenericWordAloneDoesNotPullInAnotherCompany() {
         val d = CalendarItem("d:2", "대성테크 견적 제출", allDay(2026, 11, 16), allDay = true)
         val detail = ProactivePlanner.deadlineDetail(d, people = emptyList(),

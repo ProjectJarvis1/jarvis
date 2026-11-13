@@ -70,7 +70,15 @@ object ProactiveStore {
         claims[key] = offer.createdAtMs
         posted += notificationId(offer)
         while (posted.size > KEEP_POSTED) posted.remove(posted.first())
-        _offers.value = (listOf(offer) + _offers.value.filter { it.id != offer.id }).take(KEEP_OFFERS)
+        // One card per event: the day-before offer replaces the earlier one for the same deadline.
+        fun sameEvent(o: ProactiveOffer) = o.id == offer.id ||
+            (o.kind == offer.kind && o.eventBeginMs == offer.eventBeginMs && o.title == offer.title)
+        val replaced = _offers.value.filter { sameEvent(it) && it.id != offer.id }
+        if (replaced.isNotEmpty()) {
+            val shown = androidx.core.app.NotificationManagerCompat.from(context)
+            replaced.forEach { shown.cancel(notificationId(it)) }
+        }
+        _offers.value = (listOf(offer) + _offers.value.filterNot(::sameEvent)).take(KEEP_OFFERS)
         save(context)
     }
 
