@@ -74,8 +74,7 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
                 // Slow searches can also run past 21:00; what is left waits, unclaimed, for the next allowed pass.
                 if (!stillWanted() || !SettingsManager.proactiveOffersEnabled || !JarvisAccount.isSignedIn ||
                     JarvisAccount.userId != uid || !ProactivePlanner.withinHours(current())) break
-                ProactiveStore.record(app, key, o)
-                JarvisNotifications.postOffer(app, o)
+                if (!ProactiveStore.recordAndPost(app, uid, key, o) { JarvisNotifications.postOffer(app, o) }) break
                 sent += o
             }
             return sent

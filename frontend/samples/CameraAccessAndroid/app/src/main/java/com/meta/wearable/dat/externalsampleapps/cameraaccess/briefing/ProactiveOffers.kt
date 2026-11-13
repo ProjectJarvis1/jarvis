@@ -124,13 +124,14 @@ object ProactivePlanner {
         return "오늘 ${clock(item.beginMs)}에 '${item.title}' 일정이 있으시네요. $offer"
     }
 
-    /** "11월 17일(화), 3일 뒤에 '한빛정밀 입찰 서류 제출' 일정이 있어요. 관련 기록 모아 드릴까요?" */
+    /**
+     * "11월 17일(화)에 '한빛정밀 입찰 서류 제출' 일정이 있어요. 관련 기록 모아 드릴까요?" The offer is kept and
+     * shown again later, so it names the date only; "3일 뒤" would be wrong by the next day.
+     */
+    @Suppress("UNUSED_PARAMETER")
     fun deadlineMessage(item: CalendarItem, nowMs: Long): String {
-        val date = localDate(item)
-        val days = ChronoUnit.DAYS.between(today(nowMs), date)
-        val whenText = if (days == 1L) "내일 ${dateLabel(date)}" else "${dateLabel(date)}, ${days}일 뒤"
-        val time = if (item.allDay) "" else " ${clock(item.beginMs)}"
-        return "$whenText$time '${item.title}' 일정이 있어요. 관련 기록 모아 드릴까요?"
+        val whenText = dateLabel(localDate(item)) + if (item.allDay) "" else " ${clock(item.beginMs)}"
+        return "${whenText}에 '${item.title}' 일정이 있어요. 관련 기록 모아 드릴까요?"
     }
 
     /**
@@ -159,13 +160,16 @@ object ProactivePlanner {
         }
         notes.forEach { n -> lines += "기록 ${shortDate(n.capturedAt)}: ${n.text.take(120)}" }
         if (persons.isEmpty() && pastMeetings.isEmpty() && notes.isEmpty()) lines += "관련해서 저장된 기록은 아직 없어요."
-        lines += "Jarvis에게 \"제출 전날 서류 준비 일정 잡아 줘\"라고 말하면 캘린더에 넣어 드려요."
+        // A new conversation does not know this offer, so the example names the day, the time and the event.
+        val dayBefore = localDate(item).minusDays(1)
+        lines += "Jarvis에게 \"${dayBefore.monthValue}월 ${dayBefore.dayOfMonth}일 오전 9시에 ${item.title} 준비 일정 잡아 줘\"라고 말하면 캘린더에 넣어 드려요."
         return lines.joinToString("\n")
     }
 
     /** Words to search a deadline with: the title minus the deadline words and short or generic pieces. */
     fun deadlineWords(item: CalendarItem): List<String> = MeetingBriefing.titleWords(item.asMeeting())
-        .map { w -> DEADLINE_WORDS.fold(w) { acc, d -> acc.replace(d, "") }.removeSuffix("일").trim() }
+        // "마감일" loses "마감" and leaves "일", which the length check drops; a name ending in 일 (제일) stays.
+        .map { w -> DEADLINE_WORDS.fold(w) { acc, d -> acc.replace(d, "") }.trim() }
         .filter { it.length >= 2 }
         .distinct()
 

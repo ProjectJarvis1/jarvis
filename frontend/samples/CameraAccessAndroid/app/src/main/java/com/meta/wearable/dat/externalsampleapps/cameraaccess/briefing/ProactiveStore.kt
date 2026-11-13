@@ -74,6 +74,19 @@ object ProactiveStore {
         save(context)
     }
 
+    /**
+     * Records and shows [offer] only if [uid] is still the signed-in account, all under this store's lock,
+     * which sign-out also holds while it clears: an offer can never land in another account's folder, nor
+     * be posted after the sign-out cleanup took the notifications down.
+     */
+    @Synchronized
+    fun recordAndPost(context: Context, uid: String, key: String, offer: ProactiveOffer, post: () -> Unit): Boolean {
+        if (!JarvisAccount.isSignedIn || JarvisAccount.userId != uid) return false
+        record(context, key, offer)
+        post()
+        return true
+    }
+
     @Synchronized
     fun find(context: Context, id: String): ProactiveOffer? {
         load(context)

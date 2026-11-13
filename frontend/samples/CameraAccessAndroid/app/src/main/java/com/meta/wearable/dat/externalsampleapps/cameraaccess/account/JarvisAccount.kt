@@ -149,9 +149,13 @@ object JarvisAccount {
 
     private fun clearLocal() {
         com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools.clear()
-        // Offers Jarvis made for this account, and which events it already offered, go with the account.
-        appContext?.let { com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore.clear(it) }
-        prefs.edit().clear().apply()
+        // Offers Jarvis made for this account, and which events it already offered, go with the account. The
+        // store's lock is held until the session is gone, so a background pass cannot record or post in between.
+        val store = com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore
+        synchronized(store) {
+            appContext?.let { store.clear(it) }
+            prefs.edit().clear().apply()
+        }
         _user.value = null
     }
 

@@ -98,16 +98,21 @@ class ProactivePlannerTest {
         assertEquals("오전 10시 30분", ProactivePlanner.clock(kst(2026, 11, 13, 10, 30)))
         assertEquals("오후 12시", ProactivePlanner.clock(kst(2026, 11, 13, 12)))
         val d = CalendarItem("d:1", "대성테크 입찰 서류 제출", allDay(2026, 11, 16), allDay = true)
-        assertEquals("11월 16일(월), 3일 뒤 '대성테크 입찰 서류 제출' 일정이 있어요. 관련 기록 모아 드릴까요?",
+        // Kept and shown again later, so only the absolute date: the same text three days or one day ahead.
+        assertEquals("11월 16일(월)에 '대성테크 입찰 서류 제출' 일정이 있어요. 관련 기록 모아 드릴까요?",
             ProactivePlanner.deadlineMessage(d, now))
-        assertEquals("내일 11월 16일(월) '대성테크 입찰 서류 제출' 일정이 있어요. 관련 기록 모아 드릴까요?",
-            ProactivePlanner.deadlineMessage(d, kst(2026, 11, 15, 9)))
+        assertEquals(ProactivePlanner.deadlineMessage(d, now), ProactivePlanner.deadlineMessage(d, kst(2026, 11, 15, 9)))
+        assertEquals("11월 17일(화) 오후 3시에 '서류 제출' 일정이 있어요. 관련 기록 모아 드릴까요?",
+            ProactivePlanner.deadlineMessage(CalendarItem("d:3", "서류 제출", kst(2026, 11, 17, 15), allDay = false), now))
     }
 
     @Test
     fun deadlineDetailKeepsOnlyRecordsAboutTheCompany() {
         val d = CalendarItem("d:1", "대성테크 입찰 서류 제출", allDay(2026, 11, 16), allDay = true)
         assertEquals(listOf("대성테크"), ProactivePlanner.deadlineWords(d))
+        // A company name ending in 일 is kept; "마감일" leaves nothing.
+        assertEquals(listOf("제일"), ProactivePlanner.deadlineWords(d.copy(title = "제일 입찰 서류 제출")))
+        assertEquals(listOf("보고서"), ProactivePlanner.deadlineWords(d.copy(title = "보고서 마감일")))
         val detail = ProactivePlanner.deadlineDetail(d,
             people = listOf(PersonHit("박지훈", "대성테크", "구매 과장"), PersonHit("김철수", "다른회사")),
             meetings = listOf(MeetingHit("대성테크 사양 회의", "2026-11-02T05:00:00Z", "샘플 두 대 요청")),
