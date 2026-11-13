@@ -163,13 +163,9 @@ object ProactivePlanner {
         }
         notes.forEach { n -> lines += "기록 ${shortDate(n.capturedAt)}: ${n.text.take(120)}" }
         if (persons.isEmpty() && pastMeetings.isEmpty() && notes.isEmpty()) lines += "관련해서 저장된 기록은 아직 없어요."
-        // A new conversation does not know this offer, so the example names the day, the time and the event;
-        // once 09:00 the day before has passed, it asks the user to pick a time instead of suggesting the past.
-        val dayBefore = localDate(item).minusDays(1)
-        val prepAt = dayBefore.atTime(9, 0).atZone(KST).toInstant().toEpochMilli()
-        lines += if (nowMs == null || prepAt > nowMs)
-            "Jarvis에게 \"${dayBefore.monthValue}월 ${dayBefore.dayOfMonth}일 오전 9시에 ${item.title} 준비 일정 잡아 줘\"라고 말하면 캘린더에 넣어 드려요."
-        else "준비할 날짜와 시각을 정해 Jarvis에게 \"${item.title} 준비 일정 잡아 줘\"라고 함께 말하면 캘린더에 넣어 드려요."
+        // The detail is kept and may be opened later, so it never names a fixed preparation time that could
+        // already be past; a new conversation does not know this offer, so the event's name goes in the example.
+        lines += "준비할 날짜와 시각을 정해 Jarvis에게 \"${item.title} 준비 일정 잡아 줘\"라고 함께 말하면 캘린더에 넣어 드려요."
         return lines.joinToString("\n")
     }
 
@@ -190,8 +186,13 @@ object ProactivePlanner {
      * When a kept offer stops making sense: a meeting offer ("오늘 오후 2시") two hours after the meeting
      * starts, a deadline offer at the end of its day (an all-day item starts at midnight UTC, 09:00 KST).
      */
-    fun expiresAt(offer: ProactiveOffer): Long =
-        offer.eventBeginMs + if (offer.kind == OfferKind.MEETING) 2 * 3_600_000L else 24 * 3_600_000L
+    fun expiresAt(offer: ProactiveOffer): Long {
+        if (offer.kind == OfferKind.MEETING) return offer.eventBeginMs + 2 * 3_600_000L
+        // A deadline lasts until midnight KST at the end of its day. All-day items are stored at midnight UTC,
+        // which is 09:00 KST of the same date, so the KST date of the start is the deadline's date either way.
+        val day = Instant.ofEpochMilli(offer.eventBeginMs).atZone(KST).toLocalDate()
+        return day.plusDays(1).atStartOfDay(KST).toInstant().toEpochMilli()
+    }
 
     fun isLive(offer: ProactiveOffer, nowMs: Long): Boolean = nowMs < expiresAt(offer)
 

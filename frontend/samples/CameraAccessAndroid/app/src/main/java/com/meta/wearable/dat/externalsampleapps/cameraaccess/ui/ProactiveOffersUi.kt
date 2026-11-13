@@ -21,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -43,7 +44,9 @@ fun ProactiveOfferList(modifier: Modifier = Modifier) {
     val context = LocalContext.current
     LaunchedEffect(Unit) { ProactiveStore.load(context) }
     val offers by ProactiveStore.offers.collectAsState()
-    val now = System.currentTimeMillis()
+    // Re-read the clock every minute so an offer leaves the list once its event is over.
+    var now by androidx.compose.runtime.remember { androidx.compose.runtime.mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(60_000L); now = System.currentTimeMillis() } }
     val live = offers.filter { com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner.isLive(it, now) }.take(3)
     if (live.isEmpty()) return
     val scheme = MaterialTheme.colorScheme
@@ -53,7 +56,10 @@ fun ProactiveOfferList(modifier: Modifier = Modifier) {
         JarvisGroup {
             live.forEachIndexed { i, offer ->
                 if (i > 0) HorizontalDivider(color = scheme.outlineVariant)
-                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable { ProactiveStore.open(offer) }
+                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable {
+                    if (com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner.isLive(offer, System.currentTimeMillis()))
+                        ProactiveStore.open(offer) else now = System.currentTimeMillis()
+                }
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
                     Column(Modifier.padding(top = 6.dp)) { JarvisDot(if (offer.kind == OfferKind.MEETING) scheme.primary else scheme.error, 8) }

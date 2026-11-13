@@ -131,12 +131,11 @@ class ProactivePlannerTest {
     }
 
     @Test
-    fun preparationExampleNeverSuggestsAPastTime() {
+    fun preparationExampleNeverNamesAFixedTime() {
         val d = CalendarItem("d:1", "대성테크 입찰 서류 제출", allDay(2026, 11, 16), allDay = true)
-        assertTrue(ProactivePlanner.deadlineDetail(d, emptyList(), emptyList(), emptyList(), now).contains("11월 15일 오전 9시에"))
-        val late = ProactivePlanner.deadlineDetail(d, emptyList(), emptyList(), emptyList(), kst(2026, 11, 15, 10))
-        assertFalse(late.contains("오전 9시에"))
-        assertTrue(late.contains("준비할 날짜와 시각을 정해"))
+        val detail = ProactivePlanner.deadlineDetail(d, emptyList(), emptyList(), emptyList(), now)
+        assertFalse(detail.contains("오전 9시에"))
+        assertTrue(detail.contains("준비할 날짜와 시각을 정해 Jarvis에게 \"대성테크 입찰 서류 제출 준비 일정 잡아 줘\""))
     }
 
     @Test
@@ -145,8 +144,11 @@ class ProactivePlannerTest {
         assertTrue(ProactivePlanner.isLive(meeting, kst(2026, 11, 13, 15)))
         assertFalse(ProactivePlanner.isLive(meeting, kst(2026, 11, 13, 16, 1)))
         val deadline = ProactiveOffer("d", OfferKind.DEADLINE, "t", "", "", now, allDay(2026, 11, 16))
-        assertTrue(ProactivePlanner.isLive(deadline, kst(2026, 11, 16, 23)))
-        assertFalse(ProactivePlanner.isLive(deadline, kst(2026, 11, 17, 10)))
+        assertTrue(ProactivePlanner.isLive(deadline, kst(2026, 11, 16, 23, 59)))
+        assertFalse(ProactivePlanner.isLive(deadline, kst(2026, 11, 17, 0)))
+        // A timed deadline also ends at midnight of its day, not 24 hours after it starts.
+        val timed = ProactiveOffer("t", OfferKind.DEADLINE, "t", "", "", now, kst(2026, 11, 16, 15))
+        assertFalse(ProactivePlanner.isLive(timed, kst(2026, 11, 17, 0, 30)))
     }
 
     @Test
