@@ -86,13 +86,25 @@ object MeetingBriefer {
         return result
     }
 
-    /** The briefing for [meeting]; empty parts when the server cannot be reached. Call off the main thread. */
-    internal fun briefFor(meeting: UpcomingMeeting): Brief = brief(meeting)
+    /** Counts failed searches, so a caller can tell "nothing stored" from "the server did not answer". */
+    @Volatile private var failedSearches = 0
 
-    /** Stored people, meetings and notes that may be about a deadline, searched by its distinctive words. */
-    internal fun recordsFor(words: List<String>, title: String): Triple<List<PersonHit>, List<MeetingHit>, List<MemoryHit>> {
+    /** The briefing for [meeting], or null when any search failed (try again later). Call off the main thread. */
+    internal fun briefFor(meeting: UpcomingMeeting): Brief? {
+        val before = failedSearches
+        val brief = brief(meeting)
+        return brief.takeIf { failedSearches == before }
+    }
+
+    /**
+     * Stored people, meetings and notes that may be about a deadline, searched by its distinctive words;
+     * null when any search failed, so an empty answer is never mistaken for "nothing stored".
+     */
+    internal fun recordsFor(words: List<String>, title: String): Triple<List<PersonHit>, List<MeetingHit>, List<MemoryHit>>? {
+        val before = failedSearches
         val query = (words.ifEmpty { listOf(title) }).joinToString(" ")
-        return Triple(words.take(3).flatMap { searchPeople(it) }, searchMeetings(query), searchMemories(query))
+        val found = Triple(words.take(3).flatMap { searchPeople(it) }, searchMeetings(query), searchMemories(query))
+        return found.takeIf { failedSearches == before }
     }
 
     private fun brief(meeting: UpcomingMeeting): Brief {
@@ -194,7 +206,7 @@ object MeetingBriefer {
             if (!response.isSuccessful) error("HTTP ${response.code}")
             JSONArray(response.body?.string().orEmpty())
         }
-    }.onFailure { Log.w(TAG, "Search $path failed: ${it.message}") }.getOrNull()
+    }.onFailure { failedSearches++; Log.w(TAG, "Search $path failed: ${it.message}") }.getOrNull()
 
     private fun JSONObject.optNullable(key: String): String = if (isNull(key)) "" else optString(key)
 

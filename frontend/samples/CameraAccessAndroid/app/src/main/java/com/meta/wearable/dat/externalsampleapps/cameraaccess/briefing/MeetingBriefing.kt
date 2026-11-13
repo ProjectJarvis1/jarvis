@@ -32,7 +32,8 @@ data class MemoryHit(val text: String, val peopleText: String = "", val captured
  * What to say on the glasses, and the longer text for the phone notification. [people] names the matched
  * people, and [hasRecords] is false when nothing stored was about this meeting.
  */
-data class Brief(val spoken: String, val detail: String, val people: List<String> = emptyList(), val hasRecords: Boolean = true)
+data class Brief(val spoken: String, val detail: String, val people: List<String> = emptyList(), val hasRecords: Boolean = true,
+    val hasHistory: Boolean = true)
 
 /**
  * Builds the briefing a few minutes before a meeting from what Jarvis has stored about the people in it.
@@ -143,7 +144,8 @@ object MeetingBriefing {
         }
         // The wake word in Jarvis's own voice would start a new conversation; the notification keeps the text as is.
         return Brief(spoken.joinToString(" ").replace("자비스", ""), detail.joinToString("\n"),
-            people = persons.map { it.name }, hasRecords = hasRecords)
+            people = persons.map { it.name }, hasRecords = hasRecords,
+            hasHistory = pastMeetings.isNotEmpty() || notes.isNotEmpty())
     }
 
     /** Up to the first sentence end (". " or end of text; "1.5억" is not an end), at most about 90 characters. */

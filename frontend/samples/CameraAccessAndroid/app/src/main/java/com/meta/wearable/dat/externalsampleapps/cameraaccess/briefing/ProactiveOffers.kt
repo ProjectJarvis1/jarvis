@@ -109,10 +109,19 @@ object ProactivePlanner {
     /** "11월 17일(화)". */
     fun dateLabel(date: LocalDate): String = "${date.monthValue}월 ${date.dayOfMonth}일(${WEEKDAYS[date.dayOfWeek.value - 1]})"
 
-    /** "오늘 오후 2시에 '한빛정밀 견적 미팅' 일정이 있으시네요. 최근 김민수 님과 나눈 내용 정리해 드릴까요?" */
-    fun meetingMessage(item: CalendarItem, people: List<String>): String {
-        val who = people.firstOrNull()?.let { "최근 $it 님과 나눈 내용" } ?: "지난번 기록"
-        return "오늘 ${clock(item.beginMs)}에 '${item.title}' 일정이 있으시네요. $who 정리해 드릴까요?"
+    /**
+     * "오늘 오후 2시에 '한빛정밀 견적 미팅' 일정이 있으시네요. 최근 김민수 님과 나눈 내용 정리해 드릴까요?"
+     * The "나눈 내용" wording only when a past meeting or note was found ([hasHistory]); a saved contact alone
+     * is offered as stored information, not as a conversation.
+     */
+    fun meetingMessage(item: CalendarItem, people: List<String>, hasHistory: Boolean): String {
+        val offer = when {
+            hasHistory && people.isNotEmpty() -> "최근 ${people.first()} 님과 나눈 내용 정리해 드릴까요?"
+            hasHistory -> "지난번 기록 정리해 드릴까요?"
+            people.isNotEmpty() -> "${people.first()} 님에 대해 저장된 정보를 확인해 드릴까요?"
+            else -> "관련해 저장된 정보를 확인해 드릴까요?"
+        }
+        return "오늘 ${clock(item.beginMs)}에 '${item.title}' 일정이 있으시네요. $offer"
     }
 
     /** "11월 17일(화), 3일 뒤에 '한빛정밀 입찰 서류 제출' 일정이 있어요. 관련 기록 모아 드릴까요?" */
@@ -130,10 +139,16 @@ object ProactivePlanner {
      */
     fun deadlineDetail(item: CalendarItem, people: List<PersonHit>, meetings: List<MeetingHit>, memories: List<MemoryHit>): String {
         val words = deadlineWords(item)
-        fun about(vararg texts: String) = words.any { w -> texts.any { it.contains(w, ignoreCase = true) } }
         val lines = mutableListOf("${dateLabel(localDate(item))} ${item.title}")
-        val persons = people.filter { p -> about(p.name, p.org, p.notes) || words.any { it in p.allNames } }
+        // Search is by meaning, so a hit must be checked here. A person counts when a title word is their
+        // name or company. A meeting or note then counts when it names one of those people or companies,
+        // or, with no such anchor, every distinctive title word: "견적" alone would pull in another company.
+        val persons = people.filter { p -> words.any { w -> w in p.allNames || (p.org.isNotBlank() && p.org.contains(w, ignoreCase = true)) } }
             .distinctBy { listOf(it.name, it.org) }.take(3)
+        val anchors = (persons.flatMap { it.allNames } + persons.map { it.org }).filter { it.length >= 2 }.distinct()
+        fun about(vararg texts: String) =
+            anchors.any { a -> texts.any { it.contains(a, ignoreCase = true) } } ||
+                (words.isNotEmpty() && words.all { w -> texts.any { it.contains(w, ignoreCase = true) } })
         val pastMeetings = meetings.filter { about(it.title, it.summary) }.sortedByDescending { it.startedAt }.take(3)
         val notes = memories.filter { about(it.text, it.peopleText) }.take(3)
         persons.forEach { p -> lines += "사람: ${listOf(p.org, p.role, p.name).filter { it.isNotBlank() }.joinToString(" ")}" }

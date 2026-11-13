@@ -21,7 +21,7 @@ import kotlinx.coroutines.withContext
  */
 class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
-        runCatching { runOnce(applicationContext, System.currentTimeMillis()) }
+        runCatching { runOnce(applicationContext, System.currentTimeMillis()) { !isStopped } }
             .onFailure { Log.w(TAG, "Proactive check failed: ${it.message}") }
         Result.success()
     }
@@ -42,7 +42,7 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
         }
 
         /** One pass. Returns the offers that reached the user (notification shown or kept in the list). */
-        fun runOnce(context: Context, nowMs: Long): List<ProactiveOffer> {
+        fun runOnce(context: Context, nowMs: Long, stillWanted: () -> Boolean = { true }): List<ProactiveOffer> {
             val app = context.applicationContext
             SettingsManager.init(app)
             JarvisAccount.init(app)
@@ -63,11 +63,13 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
                         meetingOffer(item, nowMs)?.let { ProactivePlanner.meetingKey(item) to it }
                     else -> ProactivePlanner.deadlineStage(item, nowMs)?.let { stage ->
                         val key = ProactivePlanner.deadlineKey(item, stage)
-                        if (key in claimed) null else key to deadlineOffer(item, stage, nowMs)
+                        if (key in claimed) null else deadlineOffer(item, stage, nowMs)?.let { key to it }
                     }
                 } ?: continue
                 val (key, o) = offer
-                if (JarvisAccount.userId != uid) break
+                // The search takes time: the switch may be off now, the work cancelled, or the account changed.
+                if (!stillWanted() || !SettingsManager.proactiveOffersEnabled || !JarvisAccount.isSignedIn ||
+                    JarvisAccount.userId != uid) break
                 ProactiveStore.record(app, key, o)
                 JarvisNotifications.postOffer(app, o)
                 sent += o
@@ -77,17 +79,19 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
 
         /** Offered only when stored records are about this meeting; otherwise there is nothing to sum up. */
         private fun meetingOffer(item: CalendarItem, nowMs: Long): ProactiveOffer? {
-            val brief = MeetingBriefer.briefFor(item.asMeeting())
+            // Null (a search failed) is retried on the next run; nothing stored means nothing to offer.
+            val brief = MeetingBriefer.briefFor(item.asMeeting()) ?: return null
             if (!brief.hasRecords) return null
             // The brief's first line says "N분 뒤", which is stale by the time the offer is opened.
             val detail = (listOf("오늘 ${ProactivePlanner.clock(item.beginMs)} ${item.title}" +
                 (if (item.location.isNotBlank()) " (${item.location})" else "")) + brief.detail.lines().drop(1)).joinToString("\n")
             return ProactiveOffer("meet-${item.key}", OfferKind.MEETING, item.title,
-                ProactivePlanner.meetingMessage(item, brief.people), detail, nowMs, item.beginMs)
+                ProactivePlanner.meetingMessage(item, brief.people, brief.hasHistory), detail, nowMs, item.beginMs)
         }
 
-        private fun deadlineOffer(item: CalendarItem, stage: DeadlineStage, nowMs: Long): ProactiveOffer {
-            val (people, meetings, memories) = MeetingBriefer.recordsFor(ProactivePlanner.deadlineWords(item), item.title)
+        /** Null when the server did not answer: offered on a later run instead of as "nothing stored". */
+        private fun deadlineOffer(item: CalendarItem, stage: DeadlineStage, nowMs: Long): ProactiveOffer? {
+            val (people, meetings, memories) = MeetingBriefer.recordsFor(ProactivePlanner.deadlineWords(item), item.title) ?: return null
             return ProactiveOffer("due-${item.key}-${stage.name}", OfferKind.DEADLINE, item.title,
                 ProactivePlanner.deadlineMessage(item, nowMs),
                 ProactivePlanner.deadlineDetail(item, people, meetings, memories), nowMs, item.beginMs)

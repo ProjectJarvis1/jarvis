@@ -88,7 +88,10 @@ class ProactivePlannerTest {
     fun wordingUsesKoreanClockAndAbsoluteDate() {
         val m = CalendarItem("e1:1", "한빛정밀 견적 미팅", kst(2026, 11, 13, 14), allDay = false)
         assertEquals("오늘 오후 2시에 '한빛정밀 견적 미팅' 일정이 있으시네요. 최근 김민수 님과 나눈 내용 정리해 드릴까요?",
-            ProactivePlanner.meetingMessage(m, listOf("김민수")))
+            ProactivePlanner.meetingMessage(m, listOf("김민수"), hasHistory = true))
+        // A saved contact without any past meeting or note is not offered as "나눈 내용".
+        assertEquals("오늘 오후 2시에 '한빛정밀 견적 미팅' 일정이 있으시네요. 김민수 님에 대해 저장된 정보를 확인해 드릴까요?",
+            ProactivePlanner.meetingMessage(m, listOf("김민수"), hasHistory = false))
         assertEquals("오전 10시 30분", ProactivePlanner.clock(kst(2026, 11, 13, 10, 30)))
         assertEquals("오후 12시", ProactivePlanner.clock(kst(2026, 11, 13, 12)))
         val d = CalendarItem("d:1", "대성테크 입찰 서류 제출", allDay(2026, 11, 16), allDay = true)
@@ -110,5 +113,15 @@ class ProactivePlannerTest {
         assertFalse(detail.contains("김철수"))
         assertTrue(detail.contains("회의 11월 2일: 대성테크 사양 회의"))
         assertFalse(detail.contains("다른 회사 메모"))
+    }
+
+    @Test
+    fun aGenericWordAloneDoesNotPullInAnotherCompany() {
+        val d = CalendarItem("d:2", "대성테크 견적 제출", allDay(2026, 11, 16), allDay = true)
+        val detail = ProactivePlanner.deadlineDetail(d, people = emptyList(),
+            meetings = listOf(MeetingHit("다른회사 견적 회의", "2026-11-02T05:00:00Z", "단가 10% 인하")),
+            memories = emptyList())
+        assertFalse(detail.contains("다른회사"))
+        assertTrue(detail.contains("저장된 기록은 아직 없어요"))
     }
 }

@@ -82,6 +82,10 @@ object ProactiveStore {
     /** Called on sign-out: the next account starts with no offers and no claims. */
     @Synchronized
     fun clear(context: Context) {
+        // Notifications already shown carry this account's event titles and names: take them down too.
+        load(context)
+        val shown = androidx.core.app.NotificationManagerCompat.from(context)
+        _offers.value.forEach { shown.cancel(it.id.hashCode()) }
         runCatching { file(context).delete() }
         claims.clear()
         loadedFor = null

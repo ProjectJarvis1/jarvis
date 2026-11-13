@@ -114,6 +114,7 @@ class MainActivity : ComponentActivity() {
 
       // Start observing Wearables state after SDK is initialized
       viewModel.startMonitoring()
+      askCalendarForOffers()
     }
 
     setContent {
@@ -141,6 +142,21 @@ class MainActivity : ComponentActivity() {
         )
       }
       }
+    }
+  }
+
+  // "먼저 알려 주기" is on by default and reads the calendar; asked once after the app's own permissions.
+  private val calendarPermissionLauncher =
+      registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { }
+
+  private fun askCalendarForOffers() {
+    // Asked once; after a "no" the Settings row explains why nothing arrives and offers to allow it.
+    val prefs = getSharedPreferences("proactive_permission", MODE_PRIVATE)
+    if (prefs.getBoolean("asked", false)) return
+    if (com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager.proactiveOffersEnabled &&
+        checkSelfPermission(android.Manifest.permission.READ_CALENDAR) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+      prefs.edit().putBoolean("asked", true).apply()
+      calendarPermissionLauncher.launch(android.Manifest.permission.READ_CALENDAR)
     }
   }
 

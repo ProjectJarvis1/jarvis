@@ -89,9 +89,12 @@ fun SettingsScreen(
     var proactiveOffersEnabled by remember { mutableStateOf(SettingsManager.proactiveOffersEnabled) }
     val settingsContext = LocalContext.current
     // "먼저 알려 주기" reads the calendar and shows notifications; ask for both when it is turned on.
+    fun calendarAllowed() = settingsContext.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) ==
+        android.content.pm.PackageManager.PERMISSION_GRANTED
+    var calendarGranted by remember { mutableStateOf(calendarAllowed()) }
     val offerPermissions = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions(),
-    ) { }
+    ) { calendarGranted = calendarAllowed() }
     fun askOfferPermissions() {
         val wanted = buildList {
             add(android.Manifest.permission.READ_CALENDAR)
@@ -185,6 +188,9 @@ fun SettingsScreen(
                 SettingSwitch("먼저 알려 주기",
                     "앱을 닫아 둬도 캘린더를 보고, 오늘 미팅 두 시간 전과 제출이나 마감 사흘 전에 준비를 도와드릴지 먼저 물어요. 오전 8시부터 밤 9시 사이에만, 하루 4번까지 알려요.",
                     proactiveOffersEnabled) { proactiveOffersEnabled = it; if (it) askOfferPermissions() }
+                // On by default, so a fresh install may be on without the calendar permission: say so, offer to allow.
+                if (proactiveOffersEnabled && !calendarGranted) JarvisRow("캘린더 권한이 없어 아직 알려 드리지 못해요",
+                    subtitle = "눌러서 허용", onClick = { askOfferPermissions() })
                 SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
                     videoStreamingEnabled) { videoStreamingEnabled = it }
                 SettingSwitch("명함 보이면 저장 제안", "명함이 보이면 Jarvis가 저장할지 먼저 물어요. 대답하기 전에는 저장하지 않아요.",
@@ -230,7 +236,11 @@ fun SettingsScreen(
         title = { Text("설정을 초기화할까요?") },
         text = { Text("앱에 들어 있는 기본 설정으로 되돌려요. 서비스 연결은 그대로 남아요.") },
         confirmButton = {
-            TextButton(onClick = { SettingsManager.resetAll(); reload(); showResetDialog = false }) {
+            TextButton(onClick = {
+                SettingsManager.resetAll(); reload(); showResetDialog = false
+                // The defaults turn "먼저 알려 주기" back on; start its check again if it had been stopped.
+                com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveWorker.schedule(settingsContext)
+            }) {
                 Text("초기화", color = MaterialTheme.colorScheme.error)
             }
         },
