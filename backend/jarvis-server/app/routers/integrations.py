@@ -16,6 +16,7 @@ from ..auth import require_api_key
 from ..auth import user_id as current_user_id
 from ..config import settings
 from ..db import get_conn
+from ..mcp_tools import GMAIL_SCOPE, has_gmail_scope
 
 
 router = APIRouter(
@@ -30,6 +31,9 @@ _SLACK_USER_SCOPES = (
     "channels:read", "groups:read", "users:read", "chat:write",
 )
 _PROVIDERS = ("google", "slack", "slack_user", "notion", "notion_mcp")
+_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+# 지메일은 따로 앱 등록 없이 구글 연결에 권한만 더한다. 지메일 연결 요청도 콜백은 구글 주소로 돌아온다.
+_STATE_PROVIDERS = {"google": ("google", "gmail")}
 
 
 def _form_post(url: str, data: dict[str, Any], headers: Optional[dict[str, str]] = None) -> dict[str, Any]:
@@ -110,10 +114,13 @@ def status():
         for provider in _PROVIDERS
     }
     # 앱 설정 화면이 쓰는 요약: 서비스별로 연결됐는지, 서버에 연결 준비(앱 키)가 됐는지.
+    google_ready = bool(settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri)
+    google_row = by_provider.get("google") or {}
     result["services"] = {
         "notion": {"connected": "notion_mcp" in by_provider, "ready": True},
-        "google": {"connected": "google" in by_provider,
-                   "ready": bool(settings.google_client_id and settings.google_client_secret and settings.google_redirect_uri)},
+        "google": {"connected": "google" in by_provider, "ready": google_ready},
+        # 캘린더만 허용한 예전 연결은 지메일 미연결로 보이고, 다시 연결하면 지메일 권한을 더 묻는다.
+        "gmail": {"connected": has_gmail_scope(google_row.get("scopes")), "ready": google_ready},
         "slack": {"connected": "slack" in by_provider or "slack_user" in by_provider,
                   "ready": bool(settings.slack_client_id and settings.slack_client_secret and settings.slack_redirect_uri)},
     }
@@ -128,6 +135,8 @@ _SERVICE_ROWS = {"notion": ("notion_mcp", "notion"), "google": ("google",), "sla
 def disconnect(service: str):
     """앱의 '연결 해제'. 저장한 토큰을 지운다(상대 서비스 쪽 권한은 그 서비스 설정에서 따로 거둔다)."""
     user_id = current_user_id()
+    if service == "gmail":
+        return _drop_gmail_scope(user_id)
     rows = _SERVICE_ROWS.get(service)
     if not rows:
         raise HTTPException(404, "unknown integration provider")
@@ -137,6 +146,21 @@ def disconnect(service: str):
             deleted = cur.rowcount
         conn.commit()
     return {"disconnected": service, "rows": deleted}
+
+
+def _drop_gmail_scope(user_id: str) -> dict[str, Any]:
+    """지메일만 해제: 캘린더 연결은 두고 지메일 권한 표시를 지운다. 서버는 이 표시가 있을 때만 메일을 읽는다.
+    (구글 쪽 권한까지 거두려면 사용자가 구글 계정의 서드파티 연결에서 지운다.)"""
+    with get_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "UPDATE user_integrations SET scopes = array_remove(scopes, %s), updated_at = now() "
+                "WHERE user_id = %s AND provider = 'google' AND %s = ANY(scopes)",
+                (GMAIL_SCOPE, user_id, GMAIL_SCOPE),
+            )
+            changed = cur.rowcount
+        conn.commit()
+    return {"disconnected": "gmail", "rows": changed}
 
 
 # 계정 연결 주소는 공개돼 있어서, 아무나 자기 계정을 Jarvis 에 연결하지 못하게 서명한 state 를 쓴다.
@@ -154,20 +178,27 @@ def _make_state(provider: str, user_id: str) -> str:
 
 
 def _check_state(provider: str, state: str) -> str:
+    return _read_state(provider, state)[0]
+
+
+def _read_state(provider: str, state: str) -> tuple[str, str]:
+    """(user_id, 요청한 서비스). 구글 콜백에는 캘린더 요청과 지메일 요청이 함께 돌아온다."""
     try:
         body, sig = state.rsplit(".", 1)
         state_provider, user_id, expires = body.split(".")
     except ValueError:
         raise HTTPException(400, "잘못된 연결 요청입니다. 연결 주소를 새로 받아 주세요.")
-    if not hmac.compare_digest(sig, _sign(body)) or state_provider != provider.split("_")[0] or int(expires) < time.time():
+    route = provider.split("_")[0]
+    allowed = _STATE_PROVIDERS.get(route, (route,))
+    if not hmac.compare_digest(sig, _sign(body)) or state_provider not in allowed or int(expires) < time.time():
         raise HTTPException(400, "연결 주소가 만료되었거나 올바르지 않습니다. 새로 받아 주세요.")
-    return user_id
+    return user_id, state_provider
 
 
 @router.get("/{provider}/link", dependencies=[Depends(require_api_key)])
 def link(provider: str):
     user_id = current_user_id()
-    if provider not in ("google", "slack", "notion"):
+    if provider not in ("google", "gmail", "slack", "notion"):
         raise HTTPException(404, "unknown integration provider")
     if "." in user_id:
         raise HTTPException(400, "user_id 에 마침표를 쓸 수 없습니다.")
@@ -176,21 +207,26 @@ def link(provider: str):
         # Notion runs through the server's single MCP connection, which belongs to the admin account.
         raise HTTPException(400, "노션 연동은 아직 관리자 계정에서만 쓸 수 있어요.")
     query = urllib.parse.urlencode({"state": _make_state(provider, user_id)})
-    return {"url": f"{settings.public_base_url}/integrations/{provider}/connect?{query}", "expires_in": _STATE_TTL_S}
+    route = "google" if provider == "gmail" else provider
+    return {"url": f"{settings.public_base_url}/integrations/{route}/connect?{query}", "expires_in": _STATE_TTL_S}
 
 
 @router.get("/{provider}/connect")
 def connect(provider: str, state: str = Query(...)):
-    _check_state(provider, state)
+    _, requested = _read_state(provider, state)
     if provider == "google":
         if not settings.google_client_id or not settings.google_redirect_uri:
             raise HTTPException(400, "GOOGLE_CLIENT_ID and GOOGLE_REDIRECT_URI are required")
+        # 캘린더 연결은 캘린더 권한만, 지메일 연결은 캘린더와 지메일 읽기 권한을 함께 묻는다.
+        # include_granted_scopes 로 이미 허용한 권한을 새 토큰에 그대로 이어 받는다.
+        scopes = [_CALENDAR_SCOPE] + ([GMAIL_SCOPE] if requested == "gmail" else [])
         params = {
             "client_id": settings.google_client_id,
             "redirect_uri": settings.google_redirect_uri,
             "response_type": "code",
-            "scope": "https://www.googleapis.com/auth/calendar.events",
+            "scope": " ".join(scopes),
             "access_type": "offline",
+            "include_granted_scopes": "true",
             "prompt": "consent",
             "state": state,
         }
@@ -221,7 +257,7 @@ def connect(provider: str, state: str = Query(...)):
 
 @router.get("/{provider}/callback")
 def callback(provider: str, code: str = Query(...), state: str = Query(...)):
-    user_id = _check_state(provider, state)
+    user_id, requested = _read_state(provider, state)
     if provider == "google":
         data = _form_post(
             "https://oauth2.googleapis.com/token",
@@ -235,15 +271,24 @@ def callback(provider: str, code: str = Query(...), state: str = Query(...)):
         )
         if "access_token" not in data:
             raise HTTPException(400, f"google token exchange failed: {data}")
+        granted = (data.get("scope") or "").split()
         _upsert_integration(
             user_id=user_id,
             provider="google",
             access_token=data["access_token"],
             refresh_token=data.get("refresh_token"),
-            scopes=(data.get("scope") or "").split(),
+            scopes=granted,
             metadata={"token_type": data.get("token_type"), "expires_in": data.get("expires_in"),
                       "expires_at": time.time() + float(data.get("expires_in") or 3600)},
         )
+        # 구글 동의 화면에서 권한마다 체크를 풀 수 있다. 실제로 받은 권한으로 결과를 알려 준다.
+        if requested == "gmail":
+            if GMAIL_SCOPE in granted:
+                return _connected_html("지메일")
+            return HTMLResponse(_PAGE.format(
+                title="지메일 권한을 받지 못했어요",
+                body="구글 화면에서 메일 읽기 권한이 체크되지 않았어요. Jarvis 앱 설정에서 지메일을 다시 연결하고, "
+                     "메일 읽기 항목을 체크해 주세요."))
         return _connected_html("구글 캘린더")
 
     if provider == "slack":

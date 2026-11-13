@@ -12,7 +12,7 @@ import okhttp3.Request
 import org.json.JSONObject
 
 /**
- * Outside services the user links from Settings (Notion, Google Calendar, Slack).
+ * Outside services the user links from Settings (Notion, Google Calendar, Gmail, Slack).
  *
  * The server owns the sign-in: [linkUrl] returns a short-lived address the phone opens in the browser, the
  * service redirects back to the server, and the server stores the account. Settings re-reads [status] when the
@@ -22,6 +22,8 @@ object ServiceConnections {
     enum class Service(val key: String, val label: String, val icon: Int) {
         NOTION("notion", "노션", R.drawable.ic_service_notion),
         GOOGLE("google", "구글 캘린더", R.drawable.ic_service_google_calendar),
+        // Same Google sign-in with mail read access added; the server asks only for what this row needs.
+        GMAIL("gmail", "지메일", R.drawable.ic_service_gmail),
         SLACK("slack", "슬랙", R.drawable.ic_service_slack),
     }
 
