@@ -109,4 +109,11 @@ class ContactCandidatesTest {
         assertNoNumber(out)
         assertTrue(out.contains("t1"))
     }
+
+    @Test fun emailAddressesWithNumbersStayUsable() {
+        assertEquals("보낸 사람 01012345678@naver.com", ContactCandidates.redactText("보낸 사람 01012345678@naver.com"))
+        val out = ContactCandidates.redact(JSONObject().put("from", "김민수 <01012345678@naver.com>").put("note", "휴대폰 010-1234-5678")) as JSONObject
+        assertEquals("김민수 <01012345678@naver.com>", out.getString("from"))
+        assertTrue(out.getString("note").contains("[전화번호]"))
+    }
 }

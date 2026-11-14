@@ -85,8 +85,12 @@ object ContactCandidates {
     private val PHONE_KEYS = setOf("phone", "phone_number", "mobile", "tel", "telephone")
     private val NAME_KEYS = listOf("name", "display_name", "person_name")
 
-    /** Korean phone and mobile numbers written in free text (business-card notes, evidence lines). */
-    private val PHONE_IN_TEXT = Regex("""(?<![\d])(?:\+?82[-.\s]*\(?0?|\(?0)\d{1,2}\)?[-.\s]*\d{3,4}[-.\s]*\d{4}(?![\d])""")
+    /**
+     * Korean phone and mobile numbers written in free text (business-card notes, evidence lines). A number that is
+     * the local part of an email address (01012345678@naver.com) is an address, not a phone number, and is kept
+     * whole so a reply draft can still use it.
+     */
+    private val PHONE_IN_TEXT = Regex("""(?<![\d])(?:\+?82[-.\s]*\(?0?|\(?0)\d{1,2}\)?[-.\s]*\d{3,4}[-.\s]*\d{4}(?![\d@])""")
 
     fun redactText(text: String): String = PHONE_IN_TEXT.replace(text, "[전화번호]")
 

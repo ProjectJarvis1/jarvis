@@ -279,6 +279,9 @@ class _Connection:
 
     async def stop(self) -> None:
         if self._task and not self._task.done():
+            # 양보하기 전에 닫는 중으로 표시한다. 그 사이 들어온 요청이 취소된 연결에 줄 서지 않고 새로 연다.
+            self._closing = True
+            self.ready.clear()
             self._task.cancel()
             try:
                 await self._task
@@ -356,7 +359,8 @@ class _Connection:
             while not self._queue.empty():
                 _, _, future = self._queue.get_nowait()
                 if not future.done():
-                    future.set_exception(RuntimeError(f"{self.cfg.name} 연결이 끊겼습니다."))
+                    # 줄에서 꺼내지도 못한 요청은 보내지 않은 것이 확실하다: 다시 실행해도 된다.
+                    future.set_exception(_NotSent(f"{self.cfg.name} 연결이 끊겼습니다."))
 
     async def call(self, name: str, arguments: dict[str, Any],
                    admit: Optional[Callable[[], Awaitable[bool]]] = None):
@@ -370,6 +374,15 @@ class _Connection:
             self.last_used = time.monotonic()
 
     async def _call(self, name: str, arguments: dict[str, Any], admit: Optional[Callable[[], Awaitable[bool]]] = None):
+        # 닫히는 연결에 걸린 요청은 보내지 않은 채로 돌아온다. 그때는 한 번 더 연결을 열어 보낸다.
+        for attempt in range(2):
+            try:
+                return await self._call_once(name, arguments, admit)
+            except _NotSent:
+                if attempt:
+                    raise RuntimeError(f"{self.cfg.name} 연결이 닫혀 요청을 보내지 못했습니다. 다시 시도해 주세요.")
+
+    async def _call_once(self, name: str, arguments: dict[str, Any], admit: Optional[Callable[[], Awaitable[bool]]] = None):
         if self._closing and self._task and not self._task.done():
             try:  # 닫히는 중인 연결이 다 정리된 뒤 새로 연다
                 await asyncio.wait_for(asyncio.shield(self._task), 10)
@@ -386,16 +399,24 @@ class _Connection:
         try:
             await asyncio.wait_for(self.ready.wait(), CONNECT_TIMEOUT_S)
         except asyncio.TimeoutError:
+            if self._closing:  # 기다리는 사이 닫혔다: 보내지 않았으니 다시 열어 보낸다
+                raise _NotSent(f"{self.cfg.name} 연결이 닫혔습니다.")
             raise RuntimeError(f"{self.cfg.name} 에 연결하지 못했습니다. {self.error or ''}".strip())
+        if self._closing or not self.running:
+            raise _NotSent(f"{self.cfg.name} 연결이 닫혔습니다.")
         future = asyncio.get_running_loop().create_future()
         await self._queue.put((name, arguments, future))
         try:
             # 실행 시간 제한은 연결 작업이 꺼낸 뒤에 건다. 여기서는 앞 요청을 기다리는 시간까지 넉넉히 둔다.
             return await asyncio.wait_for(future, CALL_TIMEOUT_S * 3)
-        except asyncio.CancelledError:
+        except (asyncio.CancelledError, _NotSent):
             raise
         except Exception as exc:
             raise SentRequestError(exc) from exc
+
+
+class _NotSent(RuntimeError):
+    """연결이 닫혀 상대에게 보내지 못한 요청. 다시 실행해도 두 번 가지 않는다."""
 
 
 class SentRequestError(Exception):

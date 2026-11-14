@@ -495,3 +495,22 @@ def test_session_limits_come_from_env(monkeypatch):
     assert gw._env_number("MCP_IDLE_TIMEOUT_S", 600.0, 30.0) == 600.0
     monkeypatch.delenv("MCP_IDLE_TIMEOUT_S")
     assert gw._env_number("MCP_IDLE_TIMEOUT_S", 600.0, 30.0) == 600.0
+
+
+def test_call_racing_an_idle_close_reopens_instead_of_reporting_uncertain(tmp_path, monkeypatch):
+    """유휴 정리로 닫히는 순간 들어온 요청은 닫히는 연결에 줄 서지 않고 다시 열어 보낸다(확인 필요로 남지 않음)."""
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        await gw.ensure_user("alice", wait_s=20)
+        conn = gw._user_conns("alice")["fake"]
+        assert conn.running
+        closing = asyncio.create_task(gw._close(conn))
+        result = await gw.call("who", {}, user="alice")
+        await closing
+        assert not result.get("uncertain")
+        assert json.loads(result["content"])["token"] == "tok-alice"
+        await gw.stop()
+
+    asyncio.run(run())
