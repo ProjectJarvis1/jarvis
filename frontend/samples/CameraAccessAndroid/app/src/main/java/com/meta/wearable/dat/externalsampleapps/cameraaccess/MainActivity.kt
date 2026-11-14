@@ -82,14 +82,19 @@ class MainActivity : ComponentActivity() {
     // Keep screen on while streaming
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
-    // First, ensure the app has necessary Android permissions
-    checkPermissions {
-      // Initialize the glasses SDK once the permissions are granted (nothing to do on the phone build)
+    if (BuildConfig.GLASSES) {
+      // The glasses SDK needs its Bluetooth permissions before it starts, so the glasses build asks up front.
+      checkPermissions {
+        GlassesPlatform.initialize(this)
+        viewModel.startMonitoring()
+        askCalendarForOffers()
+      }
+    } else {
+      // The phone build asks one permission at a time in the first-run guide (OnboardingScreen), and the
+      // microphone again when a conversation starts. A "no" turns off only that one thing.
       GlassesPlatform.initialize(this)
-
-      // Start observing Wearables state after SDK is initialized
       viewModel.startMonitoring()
-      askCalendarForOffers()
+      if (SettingsManager.onboardingDone) askCalendarForOffers()
     }
 
     setContent {
@@ -108,8 +113,18 @@ class MainActivity : ComponentActivity() {
         }
         wasSignedIn = user != null
       }
+      var onboarded by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(SettingsManager.onboardingDone) }
       if (user == null) {
         com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.SignInScreen()
+      } else if (!onboarded) {
+        // Once, right after the first sign-in on this phone.
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.ui.OnboardingScreen(onDone = {
+          SettingsManager.onboardingDone = true
+          // The guide was the one start-up ask for the calendar ("먼저 알려 주기"); a skipped or declined row is not
+          // asked again at the next launch. Settings explains why nothing arrives and can ask then.
+          getSharedPreferences("proactive_permission", MODE_PRIVATE).edit().putBoolean("asked", true).apply()
+          onboarded = true
+        })
       } else {
         CameraAccessScaffold(
             viewModel = viewModel,
@@ -159,9 +174,7 @@ class MainActivity : ComponentActivity() {
           if (granted) {
             onPermissionsGranted()
           } else {
-            viewModel.setRecentError(
-                "Allow All Permissions (Bluetooth scan/connect, notifications, microphone, camera)"
-            )
+            viewModel.setRecentError("안경 연결에는 블루투스, 마이크, 카메라, 알림 권한이 필요해요. 휴대폰 설정에서 허용해 주세요.")
           }
         }
         .launch(PERMISSIONS)

@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -46,6 +47,18 @@ fun HomeScreen(viewModel: WearablesViewModel, modifier: Modifier = Modifier) {
 @Composable
 private fun PhoneHome(onStart: () -> Unit, modifier: Modifier = Modifier) {
     val byWord = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    // The conversation needs the microphone (and the camera to show things). Asked here if the first-run guide
+    // was skipped or declined; the conversation opens either way, and the permission line says what is off.
+    val needed = arrayOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
+    fun missing() = needed.filter { context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
+    var micOff by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val ask = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { result ->
+        micOff = result[android.Manifest.permission.RECORD_AUDIO] == false
+        onStart()
+    }
+    val start = { if (missing().isEmpty()) onStart() else ask.launch(missing().toTypedArray()) }
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
             JarvisWordmark(Modifier.weight(1f))
@@ -62,7 +75,10 @@ private fun PhoneHome(onStart: () -> Unit, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(24.dp))
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
-            JarvisPrimaryButton("대화 시작", onStart, Modifier.fillMaxWidth())
+            if (micOff) Text("마이크를 허용하지 않아 말로는 대화할 수 없어요. 휴대폰 설정에서 마이크를 허용해 주세요.",
+                Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall.copy(lineBreak = byWord),
+                color = MaterialTheme.colorScheme.onSurfaceVariant)
+            JarvisPrimaryButton("대화 시작", start, Modifier.fillMaxWidth())
         }
     }
 }

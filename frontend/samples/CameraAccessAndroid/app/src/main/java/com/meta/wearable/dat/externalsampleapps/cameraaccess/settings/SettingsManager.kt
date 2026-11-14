@@ -96,6 +96,11 @@ object SettingsManager {
 
     /** When a business card comes into view, Jarvis asks whether to save it (nothing is saved without a yes). */
     /** Brief the user on the glasses a few minutes before a calendar meeting. */
+    /** The first-run guide (what Jarvis does, permissions one by one, first words) was shown on this phone. */
+    var onboardingDone: Boolean
+        get() = prefs.getBoolean("onboardingDone", false)
+        set(value) = prefs.edit().putBoolean("onboardingDone", value).apply()
+
     var meetingBriefingEnabled: Boolean
         get() = prefs.getBoolean("meetingBriefingEnabled", true)
         set(value) = prefs.edit().putBoolean("meetingBriefingEnabled", value).apply()
