@@ -7,6 +7,12 @@ import re
 _QUALIFIER = r"\s*(?:쯤|즈음|무렵|전후|이전|전에|까지|안에|이내|(?:전|경)(?![가-힣]))"
 
 
+def _whole_span(text: str, evidence: str) -> bool:
+    """The quoted date starts a word in the evidence, so a cut-off "다음 주" from "다다음 주" is refused."""
+    at = evidence.find(text)
+    return bool(text) and at >= 0 and not (at > 0 and re.match(r"[가-힣]", evidence[at - 1]))
+
+
 def normalize_followups(items, transcript: str) -> list[dict]:
     if not isinstance(items, list):
         return []
@@ -19,12 +25,13 @@ def normalize_followups(items, transcript: str) -> list[dict]:
             continue
         owner, due = item.get("owner", ""), item.get("due_at", "")
         due_text = item.get("due_text", "")
-        if not isinstance(due_text, str) or due_text not in evidence:
+        if not isinstance(due_text, str) or not _whole_span(due_text, evidence):
             due_text = ""
-        if not due_text and isinstance(due, str) and due and due in evidence:
+        if not due_text and isinstance(due, str) and due and _whole_span(due, evidence):
             due_text = due
         if not due_text:
-            match = re.search(r"(?:오늘|내일|모레|이번\s*주|다음\s*주|다음\s*달|\d{1,2}월\s*\d{1,2}일)", evidence)
+            # Not inside a longer word: "다다음 주" is not "다음 주".
+            match = re.search(r"(?<![가-힣])(?:오늘|내일|모레|이번\s*주|다음\s*주|다음\s*달|\d{1,2}월\s*\d{1,2}일)", evidence)
             due_text = match.group(0) if match else ""
         if due_text:
             # A date the model quoted without its "쯤"/"전에" is completed from the evidence, so an approximate

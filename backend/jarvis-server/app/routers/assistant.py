@@ -12,6 +12,7 @@ from ..db import get_conn
 from ..idempotency import run_after_commit
 from ..embeddings import embed_text
 from ..meeting_projection import sync_meeting_memory
+from ..person_projection import sync_person_profile
 
 router = APIRouter(prefix="/assistant", tags=["assistant"], dependencies=[Depends(require_api_key)])
 FIELDS = {
@@ -119,6 +120,8 @@ def apply_values(cur, kind, record_id, values, metadata=None):
     updated = cur.fetchone()
     if kind == "meeting":
         sync_meeting_memory(cur, updated)
+    if kind == "person":
+        sync_person_profile(cur, updated)
 
 
 def change_state(change_id, undo=False):

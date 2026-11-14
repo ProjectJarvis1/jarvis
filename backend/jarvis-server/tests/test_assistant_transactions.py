@@ -287,3 +287,23 @@ def test_service_sign_in_finishing_after_account_deletion_keeps_no_tokens(api):
         assert conn.execute("SELECT access_token_encrypted FROM user_integrations WHERE user_id='default' AND provider='google'").fetchone()["access_token_encrypted"] == "tok-live"
         conn.execute("DELETE FROM user_integrations WHERE user_id='default' AND provider='google'")
         conn.commit()
+
+
+def test_person_correction_updates_the_searchable_profile(api):
+    client, get_conn = api
+    with get_conn() as conn:
+        person = conn.execute("INSERT INTO people(name, org) VALUES('이영희', '옛회사') RETURNING id").fetchone()["id"]
+        conn.execute("""INSERT INTO memories(captured_at, text, related_person_ids, source, metadata)
+                        VALUES(now(), '사람: 이영희\n소속: 옛회사', %s, 'derived', %s)""",
+                     ([person], Jsonb({"memory_type": "person_profile", "origin_person_id": str(person)})))
+        conn.commit()
+    preview = post(client, "/assistant/changes", {"kind": "person", "record_id": str(person), "changes": {"org": "새회사"}}).json()
+    assert post(client, f"/assistant/changes/{preview['id']}/apply").status_code == 200
+    with get_conn() as conn:
+        text = conn.execute("SELECT text FROM memories WHERE metadata->>'origin_person_id'=%s", (str(person),)).fetchone()["text"]
+    assert "새회사" in text and "옛회사" not in text
+    assert post(client, f"/assistant/changes/{preview['id']}/undo").status_code == 200
+    with get_conn() as conn:
+        text = conn.execute("SELECT text FROM memories WHERE metadata->>'origin_person_id'=%s", (str(person),)).fetchone()["text"]
+    assert "옛회사" in text
+

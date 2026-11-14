@@ -34,7 +34,7 @@ def followups_scope():
     tree = ast.parse((ROOT / "app/followups.py").read_text())
     qualifier = next(ast.literal_eval(n.value) for n in tree.body
                      if isinstance(n, ast.Assign) and n.targets[0].id == "_QUALIFIER")
-    return functions("app/followups.py", {"normalize_followups"}, {"re": __import__("re"), "_QUALIFIER": qualifier})
+    return functions("app/followups.py", {"normalize_followups", "_whole_span"}, {"re": __import__("re"), "_QUALIFIER": qualifier})
 
 
 def projection():
@@ -227,3 +227,7 @@ def test_fallback_due_text_keeps_approximate_and_before_words():
     out = scope["normalize_followups"]([{"task": "견적", "evidence": "민수: 내일쯤 견적서를 보내겠습니다.", "due_text": "내일"}],
                                        "민수: 내일쯤 견적서를 보내겠습니다.")
     assert out[0]["due_text"] == "내일쯤"
+    # A date cut out of a longer one ("다다음 주") is dropped rather than read as next week.
+    ev = "민수: 다다음 주 금요일까지 드릴게요."
+    out = scope["normalize_followups"]([{"task": "견적", "evidence": ev, "due_text": "다음 주 금요일"}], ev)
+    assert out[0]["due_text"] == ""
