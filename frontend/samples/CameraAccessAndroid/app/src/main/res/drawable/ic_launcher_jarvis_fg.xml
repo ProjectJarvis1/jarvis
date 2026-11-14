@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 앱 아이콘 앞면: 홈페이지와 스토어의 파란 Jarvis 캐릭터. 적응형 아이콘 안전 영역(가운데 66dp) 안에 들어가게 줄였다. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp" android:viewportWidth="108" android:viewportHeight="108">
+    <group android:scaleX="0.32" android:scaleY="0.32" android:translateX="15.6" android:translateY="20.72">
+        <path android:strokeColor="#FF3B6CF6" android:strokeWidth="6" android:strokeLineCap="round"
+            android:pathData="M120,46 C120,34 124,26 130,20" />
+        <path android:fillColor="#FFFFC85A" android:pathData="M124,17 a7,7 0 1,0 14,0 a7,7 0 1,0 -14,0" />
+        <path android:fillColor="#FF3B6CF6" android:pathData="M120,46c52,0 84,34 84,78s-30,74 -84,74 -84,-30 -84,-74 32,-78 84,-78z" />
+        <path android:strokeColor="#59FFFFFF" android:strokeWidth="7" android:strokeLineCap="round"
+            android:pathData="M70,96c6,-18 20,-30 38,-34" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M83,122 a11,15 0 1,0 22,0 a11,15 0 1,0 -22,0 M135,122 a11,15 0 1,0 22,0 a11,15 0 1,0 -22,0" />
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="5" android:strokeLineCap="round"
+            android:pathData="M110,152c6,6 14,6 20,0" />
+        <path android:fillColor="#73FF9DB0" android:pathData="M65,148 a9,5 0 1,0 18,0 a9,5 0 1,0 -18,0 M157,148 a9,5 0 1,0 18,0 a9,5 0 1,0 -18,0" />
+    </group>
+</vector>

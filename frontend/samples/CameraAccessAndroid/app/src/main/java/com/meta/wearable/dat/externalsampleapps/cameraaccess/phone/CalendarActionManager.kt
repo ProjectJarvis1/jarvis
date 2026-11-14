@@ -5,9 +5,6 @@ import android.provider.CalendarContract
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.AppContextProvider
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
 import java.time.Duration
-import java.time.Instant
-import java.time.ZoneId
-import java.time.ZonedDateTime
 
 class CalendarActionManager {
     private val context
@@ -39,21 +36,9 @@ class CalendarActionManager {
         return ToolResult.Success("$title 일정 등록 화면을 열었습니다. 내용을 확인한 뒤 저장해주세요.")
     }
 
-    private fun parseMillis(value: String): Long? {
-        return try {
-            ZonedDateTime.parse(value).toInstant().toEpochMilli()
-        } catch (_: Exception) {
-            try {
-                Instant.parse(value).toEpochMilli()
-            } catch (_: Exception) {
-                try {
-                    ZonedDateTime.parse("${value}+09:00").withZoneSameInstant(ZoneId.of("Asia/Seoul"))
-                        .toInstant()
-                        .toEpochMilli()
-                } catch (_: Exception) {
-                    null
-                }
-            }
-        }
-    }
+    // Same reading as the approval card and the server's Google Calendar write: the clock time as said, in
+    // Korea time, whatever offset the model attached.
+    private fun parseMillis(value: String): Long? =
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.CalendarEventPreview.koreaWallTime(value)
+            ?.toInstant()?.toEpochMilli()
 }

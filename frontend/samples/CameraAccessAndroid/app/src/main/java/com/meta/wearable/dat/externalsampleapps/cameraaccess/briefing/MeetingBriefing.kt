@@ -102,13 +102,24 @@ object MeetingBriefing {
             else same.filter { p -> p.org.isNotBlank() && titleWords.any { p.org.contains(it, ignoreCase = true) } }
                 .takeIf { it.size == 1 } ?: run { ambiguous += name; emptyList() }
         }.take(3)
+        // A name shared by several saved people was settled by company above. That name alone still fits the
+        // other person's meetings, so for it a record must also name the chosen company.
+        val homonyms: Map<String, String> = found.groupBy { it.name }.filterValues { it.size > 1 }.keys
+            .mapNotNull { n -> persons.firstOrNull { it.name == n }?.let { n to it.org } }.toMap()
+        val sharedNames = homonyms.keys + persons.filter { it.name in homonyms }.flatMap { it.allNames }
         val anchors = (names - ambiguous.toSet() + persons.flatMap { it.allNames } + persons.map { it.org })
-            .filter { it.length >= 2 }.distinct()
+            .filter { it.length >= 2 && it !in sharedNames }.distinct()
+        // Each settled homonym: (its names, its company).
+        val pinned = persons.filter { it.name in homonyms }.map { p -> p.allNames.filter { it.length >= 2 } to p.org }
         // The title fallback never matches on an unsettled name: "김민수 미팅" with two saved 김민수 would
         // otherwise pull in either one's history.
         val fallbackWords = titleWords.filter { w -> ambiguous.none { a -> w.contains(a, ignoreCase = true) } }
         fun about(vararg texts: String) =
             anchors.any { a -> texts.any { it.contains(a, ignoreCase = true) } } ||
+                pinned.any { (aliases, org) ->
+                    aliases.any { a -> texts.any { it.contains(a, ignoreCase = true) } } &&
+                        texts.any { it.contains(org, ignoreCase = true) }
+                } ||
                 (fallbackWords.isNotEmpty() && fallbackWords.size == titleWords.size &&
                     fallbackWords.all { w -> texts.any { it.contains(w, ignoreCase = true) } })
         // Only meetings that already happened; a scheduled one is not "지난 회의".

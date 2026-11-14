@@ -14,6 +14,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingFollowups
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -25,7 +26,8 @@ object MeetingBriefer {
     private const val TAG = "MeetingBriefer"
     private const val PREFS = "meeting_briefing"
     private val client = OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard).connectTimeout(10, TimeUnit.SECONDS).readTimeout(20, TimeUnit.SECONDS).build()
-    @Volatile private var dedupe: BriefingDedupe? = null
+    /** Delivered briefings of the signed-in account only: one account's briefing never silences another's. */
+    @Volatile private var dedupe: Pair<String, BriefingDedupe>? = null
 
     fun hasCalendarPermission(context: Context) =
         context.checkSelfPermission(Manifest.permission.READ_CALENDAR) == PackageManager.PERMISSION_GRANTED
@@ -36,7 +38,7 @@ object MeetingBriefer {
      * (the screen closed during a slow search) leaves the meeting to be briefed on the next poll.
      */
     fun due(context: Context, nowMs: Long = System.currentTimeMillis()): List<Pair<UpcomingMeeting, Brief>> {
-        if (!hasCalendarPermission(context)) return emptyList()
+        if (!hasCalendarPermission(context) || !JarvisAccount.isSignedIn) return emptyList()
         val delivered = dedupe(context)
         return upcoming(context, nowMs)
             .filter { MeetingBriefing.isDue(it, nowMs) && !delivered.contains(it.key, nowMs) }
@@ -44,8 +46,9 @@ object MeetingBriefer {
     }
 
     fun markDelivered(context: Context, key: String) {
-        val delivered = dedupe(context)
-        if (delivered.claim(key, System.currentTimeMillis())) save(context, delivered)
+        val uid = JarvisAccount.userId
+        val delivered = dedupe(context, uid)
+        if (delivered.claim(key, System.currentTimeMillis())) save(context, uid, delivered)
     }
 
     /**
@@ -193,8 +196,10 @@ object MeetingBriefer {
         ?.map { m ->
             val metadata = m.optJSONObject("metadata") ?: JSONObject()
             val items = metadata.optJSONArray("action_items")
+            val legacy = (0 until (items?.length() ?: 0)).mapNotNull { items?.optString(it)?.takeIf(String::isNotBlank) }
+            // Verified follow-ups when the meeting has them (an empty verified list stays empty).
             MeetingHit(m.optString("title"), m.optNullable("started_at"), m.optNullable("summary"),
-                (0 until (items?.length() ?: 0)).mapNotNull { items?.optString(it)?.takeIf(String::isNotBlank) })
+                MeetingFollowups.parse(metadata.optJSONArray("followups"), legacy).filterNot { it.stale }.map { it.task })
         }.orEmpty()
 
     private fun searchMemories(query: String): List<MemoryHit> = post("/memory/search", JSONObject().put("query", query).put("top_k", 5))
@@ -219,15 +224,25 @@ object MeetingBriefer {
 
     private fun JSONObject.optNullable(key: String): String = if (isNull(key)) "" else optString(key)
 
-    private fun dedupe(context: Context): BriefingDedupe = dedupe ?: synchronized(this) {
-        dedupe ?: run {
-            val p = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            BriefingDedupe(p.all.mapNotNull { (k, v) -> (v as? Long)?.let { k to it } }.toMap()).also { dedupe = it }
+    private fun dedupe(context: Context, uid: String = JarvisAccount.userId): BriefingDedupe =
+        dedupe?.takeIf { it.first == uid }?.second ?: synchronized(this) {
+            dedupe?.takeIf { it.first == uid }?.second ?: run {
+                // The shared file from before records were kept per account says nothing about whose they were.
+                context.deleteSharedPreferences(PREFS)
+                val p = prefs(context, uid)
+                BriefingDedupe(p.all.mapNotNull { (k, v) -> (v as? Long)?.let { k to it } }.toMap()).also { dedupe = uid to it }
+            }
         }
-    }
 
-    private fun save(context: Context, claimed: BriefingDedupe) {
-        val edit = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear()
+    /** One preferences file per account; the user ID is hashed so the file name never holds it as is. */
+    private fun prefs(context: Context, uid: String) = context.getSharedPreferences(
+        "${PREFS}_" + java.security.MessageDigest.getInstance("SHA-256").digest(uid.toByteArray())
+            .take(8).joinToString("") { "%02x".format(it) },
+        Context.MODE_PRIVATE,
+    )
+
+    private fun save(context: Context, uid: String, claimed: BriefingDedupe) {
+        val edit = prefs(context, uid).edit().clear()
         claimed.snapshot().forEach { (k, v) -> edit.putLong(k, v) }
         edit.apply()
     }

@@ -612,7 +612,8 @@ class GeminiSessionViewModel : ViewModel() {
             geminiService.connect(
                 requireWakeWord = wakeWordSessionActive && !liveConversation,
                 liveConversation = liveConversation,
-                speechContextHint = contactActionManager.speechContextHint(),
+                // Contact names leave the phone only when the user turned on "이름 인식 돕기" (D71).
+                speechContextHint = if (SettingsManager.nameHintsEnabled) contactActionManager.speechContextHint() else null,
                 taskContext = taskManager.contextJson().toString(),
             ) { setupOk ->
                 if (!setupOk) {

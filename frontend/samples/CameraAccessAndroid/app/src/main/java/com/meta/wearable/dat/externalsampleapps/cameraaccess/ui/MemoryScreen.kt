@@ -675,6 +675,10 @@ private fun FollowupCard(meeting: MeetingHistoryItem) {
                 Icon(Icons.Default.TaskAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Text("후속 할 일", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            if (meeting.followupsNeedReview) {
+                Text("회의 원문이 바뀌었어요. 아래 할 일과 기한이 지금 원문과 맞는지 다시 확인해 주세요.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
             meeting.followups.forEachIndexed { index, item ->
                 val steps = remember(version) { MeetingFollowupStatus.read(context, meeting.id, index) }
                 val done = MeetingFollowupStatus.Step.DONE in steps
@@ -701,6 +705,8 @@ private fun FollowupCard(meeting: MeetingHistoryItem) {
                                 ).joinToString(", ")
                                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary)
+                                if (item.stale) Text("회의 원문을 고친 뒤 이 할 일의 근거 문장이 없어졌어요. 아직 할 일인지 확인해 주세요.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                 if (item.evidence.isNotBlank()) Text("\u201C${item.evidence}\u201D", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (MeetingFollowupStatus.Step.CALENDAR_OPENED in steps) Text("일정 화면을 열었어요. 저장했는지는 캘린더에서 확인해 주세요.",
@@ -716,7 +722,7 @@ private fun FollowupCard(meeting: MeetingHistoryItem) {
                     }
                 }
             }
-            val draft = remember(meeting.id) { MeetingFollowups.draftMessage(meeting.decisions, meeting.followups, start) }
+            val draft = remember(meeting.id, meeting.decisions, meeting.followups, start) { MeetingFollowups.draftMessage(meeting.decisions, meeting.followups, start) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 JarvisSecondaryButton("문자 초안", {
                     if (openDraft(context, android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:"))

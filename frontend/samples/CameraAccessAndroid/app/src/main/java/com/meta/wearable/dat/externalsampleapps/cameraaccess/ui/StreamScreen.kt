@@ -774,6 +774,19 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
     val externalPreview = if (external) com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools
         .preview(task.tool, task.argsJson).split("\n", limit = 2) else emptyList()
     val person = task.tool == "save_person" && name.isNotBlank()
+    if (task.tool == "create_calendar_event") {
+        // The entry is approved on its real day, time and place, not on a title alone.
+        val event = remember(task.argsJson) {
+            com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.CalendarEventPreview.of(task.argsJson)
+        }
+        ConfirmSheet(
+            headline = "'${event.title}' 일정을 등록할까요?",
+            actionLabel = "일정 등록", onAction = onSave, onCancel = onCancel,
+            facts = listOfNotNull("일시" to event.time, event.place?.let { "장소" to it }),
+            hint = "\"확인\"이라고 말하거나 일정 등록 버튼을 누르세요.",
+        )
+        return
+    }
     // A person is approved field by field; other saves show what will be kept, so a misheard note is caught.
     val facts = if (person) listOfNotNull(arg("org")?.let { "회사" to it }, arg("role")?.let { "직책" to it },
         arg("notes_summary")?.let { "메모" to it }, if (face) "얼굴" to "함께 저장" else null) else emptyList()

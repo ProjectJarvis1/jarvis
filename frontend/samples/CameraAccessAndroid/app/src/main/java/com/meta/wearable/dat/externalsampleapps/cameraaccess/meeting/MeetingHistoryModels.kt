@@ -13,6 +13,8 @@ data class MeetingHistoryItem(
     val actionItems: List<String>,
     val keywords: List<String>,
     val followups: List<MeetingFollowup> = actionItems.map { MeetingFollowup(it) },
+    /** The transcript was edited after the follow-ups were drawn, and they could not be re-checked against it. */
+    val followupsNeedReview: Boolean = false,
 )
 
 data class MeetingHistoryUiState(

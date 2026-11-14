@@ -14,6 +14,7 @@ from ..config import settings
 from ..db import get_conn
 from ..media import safe_unlink, user_dir
 from ..embeddings import embed_text
+from ..followups import revalidate_followups
 from ..meeting_projection import meeting_memory_text as _meeting_memory_text, sync_meeting_memory
 from ..meeting_ai import summarize_transcript, transcribe_audio
 from ..schemas import MeetingCreate, MeetingOut, MeetingSearchRequest, MeetingUpdate
@@ -324,6 +325,15 @@ def update_meeting(meeting_id: UUID, body: MeetingUpdate) -> MeetingOut:
             raw_transcript = (
                 body.raw_transcript if body.raw_transcript is not None else existing["raw_transcript"]
             )
+            if body.raw_transcript is not None and body.raw_transcript != (existing["raw_transcript"] or ""):
+                # 원문이 바뀌면 예전 후속 할 일과 기한의 근거가 사라질 수 있다. 근거 문장이 새 원문에 남은
+                # 할 일은 다시 검증하고, 근거가 사라진 할 일은 자리를 지킨 채 stale 로 표시한다(앱이 완료 여부를
+                # 순서로 기억하므로 지우면 다른 할 일이 앞 할 일의 완료 표시를 물려받는다). 검증할 근거가 없던
+                # 예전 기록은 「원문이 바뀜」으로 표시한다.
+                if isinstance(metadata.get("followups"), list):
+                    metadata["followups"] = revalidate_followups(metadata["followups"], raw_transcript or "")
+                    metadata["action_items"] = [item["task"] for item in metadata["followups"] if not item.get("stale")]
+                metadata["transcript_changed_at"] = datetime.now(timezone.utc).isoformat()
             decisions = metadata.get("decisions") if isinstance(metadata.get("decisions"), list) else []
             action_items = metadata.get("action_items") if isinstance(metadata.get("action_items"), list) else []
 
