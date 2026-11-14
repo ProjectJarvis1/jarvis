@@ -8,6 +8,7 @@
 
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.ui
 
+import androidx.lifecycle.compose.currentStateAsState
 import android.content.Intent
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -577,7 +578,8 @@ fun StreamScreen(
                 SaveConfirmCard(save, onSave = { geminiViewModel.controlTask(save.id, save.revision, "approve") },
                     onCancel = { geminiViewModel.controlTask(save.id, save.revision, "cancel") },
                     loadChange = geminiViewModel::readChange,
-                    onPreviewShown = { shown -> geminiViewModel.setRecordPreviewShown(save.id, save.revision, shown) })
+                    onPreviewShown = { shown -> geminiViewModel.setRecordPreviewShown(save.id, save.revision, shown) },
+                    visible = isForeground)
             } }
             if (geminiUiState.userTranscript.isNotBlank()) item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -736,11 +738,11 @@ private fun ContactActionConfirmCard(
 /** Shown the moment Jarvis waits on a save, so the user can tap or just say "확인". */
 @Composable
 private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskRecord, onSave: () -> Unit, onCancel: () -> Unit,
-    loadChange: suspend (String) -> org.json.JSONObject, onPreviewShown: (Boolean) -> Unit = {}) {
+    loadChange: suspend (String) -> org.json.JSONObject, onPreviewShown: (Boolean) -> Unit = {}, visible: Boolean = true) {
     val args = remember(task.argsJson) { runCatching { org.json.JSONObject(task.argsJson) }.getOrNull() }
     if (task.tool == "apply_record_change" || task.tool == "undo_record_change") {
         RecordChangeCard(task.tool == "undo_record_change", args?.optString("change_id").orEmpty(), onSave, onCancel, loadChange,
-            onPreviewShown)
+            onPreviewShown, visible)
         return
     }
     fun arg(key: String) = args?.optString(key)?.takeIf { it.isNotBlank() && it != "null" }
@@ -783,14 +785,20 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
  */
 @Composable
 private fun RecordChangeCard(undo: Boolean, changeId: String, onApprove: () -> Unit, onCancel: () -> Unit,
-    loadChange: suspend (String) -> org.json.JSONObject, onPreviewShown: (Boolean) -> Unit = {}) {
+    loadChange: suspend (String) -> org.json.JSONObject, onPreviewShown: (Boolean) -> Unit = {}, visible: Boolean = true) {
     var change by remember(changeId) { mutableStateOf<org.json.JSONObject?>(null) }
     var failed by remember(changeId) { mutableStateOf<String?>(null) }
     LaunchedEffect(changeId) {
-        onPreviewShown(false)
-        runCatching { loadChange(changeId) }.onSuccess { change = it; onPreviewShown(true) }
-            .onFailure { failed = it.message ?: "변경 내용을 불러오지 못했어요."; onPreviewShown(false) }
+        runCatching { loadChange(changeId) }.onSuccess { change = it }
+            .onFailure { failed = it.message ?: "변경 내용을 불러오지 못했어요." }
     }
+    // A spoken "확인" counts only while the loaded preview is actually in front of the user: not while loading,
+    // after a failure, or while another screen (기억, 설정) covers the conversation (D70).
+    // The app sent to the background (screen off, another app) hides the card too.
+    val lifecycle = androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle
+    val appState by lifecycle.currentStateAsState()
+    val inFront = appState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)
+    LaunchedEffect(changeId, change, visible, inFront) { onPreviewShown(change != null && visible && inFront) }
     // Off screen, the preview is no longer in front of the user: a spoken "확인" stops counting (D70).
     androidx.compose.runtime.DisposableEffect(changeId) { onDispose { onPreviewShown(false) } }
     val loaded = change

@@ -47,8 +47,8 @@ class MeetingRecordingRepository {
             val responseBody = response.body?.string().orEmpty()
             if (response.code == 429) {
                 // Today's limit: the server says so in plain Korean ("오늘 정리할 수 있는 회의 녹음 수를 모두 썼어요...").
-                throw IllegalStateException(runCatching { JSONObject(responseBody).getString("detail") }
-                    .getOrDefault("오늘 쓸 수 있는 양을 모두 썼어요. 내일 다시 올려 주세요."))
+                throw QuotaExceeded(runCatching { JSONObject(responseBody).getString("detail") }
+                    .getOrDefault("오늘 쓸 수 있는 양을 모두 썼어요."))
             }
             if (!response.isSuccessful) {
                 throw IllegalStateException("HTTP ${response.code}: ${responseBody.take(300)}")
@@ -85,3 +85,7 @@ data class MeetingRecordingResult(
     val followups: List<MeetingFollowup> = actionItems.map { MeetingFollowup(it) },
     val startedAt: String = "",
 )
+
+
+/** The server refused the upload because today's meeting limit is used up; the recording is kept for later. */
+class QuotaExceeded(message: String) : Exception(message)
