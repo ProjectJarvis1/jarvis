@@ -504,7 +504,13 @@ fun StreamScreen(
     )
 
     val problems = statusChips.take(3).filter { it.color == AppColor.Red }.map { it.label }
+    // Checked again each time the screen comes back (e.g. from the phone's settings), so the line follows the switch.
+    val screenState by androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val micAllowed = remember(screenState) {
+        context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED
+    }
     val listening = when {
+        !micAllowed -> "마이크가 꺼져 있어요. 휴대폰 설정에서 마이크를 허용해 주세요."
         meetingRecordingUiState.isRecording -> "회의를 기록하고 있어요"
         geminiUiState.isModelSpeaking -> "자비스가 답하고 있어요"
         geminiUiState.isGeminiActive -> "듣고 있어요"

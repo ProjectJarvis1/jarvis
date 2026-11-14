@@ -432,6 +432,7 @@ class McpGateway:
         self.admin_user = admin_user
         self._token = _per_user(token_provider, admin_user)
         self._sessions: dict[str, dict[str, _Connection]] = {}
+        self._admit_lock: Optional[asyncio.Lock] = None  # 상한 확인, 정리, 시작을 한 번에 하나씩(이벤트 루프 안에서 만든다)
         # 관리자 연결(예전의 서버 하나짜리 연결). 시험과 상태 확인이 이 이름으로 본다.
         self.connections = self._user_conns(admin_user)
         self.tools: dict[str, ExportedTool] = {t.name: t for s in servers.values() for t in s.tools.values()}
@@ -461,6 +462,20 @@ class McpGateway:
         await self._close(idle[0])
         return True
 
+    async def _admit(self, conn: _Connection, fingerprint: Optional[str] = None) -> bool:
+        """연결을 연다. 상한 확인, 오래된 연결 정리, 시작을 잠금 하나로 묶어 동시에 들어온 요청들이 같은 자리를
+        나눠 갖고 상한을 넘기지 않게 한다. 이미 열려 있으면 그대로 둔다."""
+        if self._admit_lock is None:
+            self._admit_lock = asyncio.Lock()
+        async with self._admit_lock:
+            if conn.running:
+                return True
+            if not await self._make_room():
+                return False
+            conn.fingerprint = fingerprint if fingerprint is not None else await asyncio.to_thread(conn.credential_fingerprint)
+            conn.start()
+            return True
+
     @staticmethod
     async def _close(conn: _Connection) -> None:
         await conn.stop()
@@ -486,9 +501,8 @@ class McpGateway:
                 continue
             if conn.running and fingerprint != conn.fingerprint:
                 await self._close(conn)
-            if not conn.running and ok and await self._make_room():
-                conn.fingerprint = fingerprint
-                conn.start()
+            if not conn.running and ok:
+                await self._admit(conn, fingerprint)
         pending = [asyncio.create_task(c.ready.wait()) for c in conns.values() if c.running and not c.ready.is_set()]
         if pending:
             _, late = await asyncio.wait(pending, timeout=wait_s)
@@ -616,9 +630,9 @@ class McpGateway:
             if not await asyncio.to_thread(conn.credentials_present):
                 return {"is_error": True, "needs_auth": True,
                         "error": f"{tool.title}: 계정 연결이 필요합니다. 앱 설정의 서비스 연결에서 연결해 달라고 안내하세요."}
-            if not await self._make_room():
-                return {"is_error": True, "error": f"{tool.title}: 지금은 연결이 많아 잠시 뒤에 다시 시도해 주세요."}
             conn = self._user_conns(user)[tool.server]
+            if not await self._admit(conn):
+                return {"is_error": True, "error": f"{tool.title}: 지금은 연결이 많아 잠시 뒤에 다시 시도해 주세요."}
         try:
             result = await conn.call(tool.upstream, args)
         except SentRequestError as exc:

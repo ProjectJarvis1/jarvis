@@ -37,4 +37,11 @@ class MailDraftTest {
         val d = MailDraft.from("a@x.example", "s", "가".repeat(MailDraft.MAX_BODY + 50)).getOrThrow()
         assertEquals(MailDraft.MAX_BODY, d.body.length)
     }
+
+    @Test fun keepsTheWholeAddressNeverAFragment() {
+        assertEquals("support/ticket@example.com", MailDraft.address("support/ticket@example.com").getOrThrow())
+        assertEquals("sales=uk@example.com", MailDraft.address("영업 <sales=uk@example.com>").getOrThrow())
+        assertTrue(MailDraft.address("문의는 kim@x.example 로").isFailure)  // a sentence is not an address
+        assertTrue(MailDraft.address("<a@x.example> <b@y.example>").isFailure)
+    }
 }

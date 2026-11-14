@@ -663,6 +663,8 @@ def _gmail_read_thread(args: dict[str, Any], user_id: str) -> dict[str, Any]:
         body = (full or "")[:min(_MAIL_BODY_LIMIT, max(budget, 0))]
         item = {
             "from": head.get("from", "")[:200],
+            # 답장은 이 주소로 간다(없으면 from). 회사 메일은 보낸 주소가 noreply 이고 담당자가 여기에 있는 경우가 많다.
+            "reply_to": head.get("reply-to", "")[:200],
             "to": head.get("to", "")[:200],
             "subject": head.get("subject", "(제목 없음)")[:200],
             "date": _kst(message.get("internalDate")),

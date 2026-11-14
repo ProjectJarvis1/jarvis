@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.lifecycle.compose.currentStateAsState
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -52,12 +53,13 @@ private fun PhoneHome(onStart: () -> Unit, modifier: Modifier = Modifier) {
     // was skipped or declined; the conversation opens either way, and the permission line says what is off.
     val needed = arrayOf(android.Manifest.permission.RECORD_AUDIO, android.Manifest.permission.CAMERA)
     fun missing() = needed.filter { context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
-    var micOff by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
-    val ask = androidx.activity.compose.rememberLauncherForActivityResult(
-        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { result ->
-        micOff = result[android.Manifest.permission.RECORD_AUDIO] == false
-        onStart()
+    // Read from the system each time home comes back, not remembered, so it is right after a trip to settings.
+    val screenState by androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle.currentStateAsState()
+    val micOff = androidx.compose.runtime.remember(screenState) {
+        context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED
     }
+    val ask = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { onStart() }
     val start = { if (missing().isEmpty()) onStart() else ask.launch(missing().toTypedArray()) }
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -75,7 +77,7 @@ private fun PhoneHome(onStart: () -> Unit, modifier: Modifier = Modifier) {
             Spacer(Modifier.height(24.dp))
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
-            if (micOff) Text("마이크를 허용하지 않아 말로는 대화할 수 없어요. 휴대폰 설정에서 마이크를 허용해 주세요.",
+            if (micOff) Text("마이크가 꺼져 있으면 말로는 대화할 수 없어요. 대화 시작을 누르면 다시 여쭤볼게요.",
                 Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall.copy(lineBreak = byWord),
                 color = MaterialTheme.colorScheme.onSurfaceVariant)
             JarvisPrimaryButton("대화 시작", start, Modifier.fillMaxWidth())

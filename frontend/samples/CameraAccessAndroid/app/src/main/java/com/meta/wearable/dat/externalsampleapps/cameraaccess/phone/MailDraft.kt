@@ -14,7 +14,26 @@ import java.net.URLEncoder
 data class MailDraft(val to: String, val subject: String, val body: String) {
     companion object {
         const val MAX_BODY = 8_000
-        private val ADDRESS = Regex("""[A-Za-z0-9._%+'-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}""")
+        /** A whole address (RFC 5322 dot-atom local part). Matched against the full candidate, never searched inside it. */
+        private val ADDRESS = Regex("""[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+(\.[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+)*@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}""")
+        private val BRACKETED = Regex("""<([^<>]*)>""")
+
+        /**
+         * The one address in [header]: either a bare address, or "이름 <address>" with exactly one bracket. Anything
+         * else (a list, a malformed header) is refused rather than guessed at, so a reply never goes to a fragment.
+         */
+        fun address(header: String?): Result<String> {
+            val raw = header.orEmpty().trim()
+            if (raw.count { it == '@' } > 1) return Result.failure(IllegalArgumentException("받는 사람은 한 명만 넣어 주세요."))
+            val inside = BRACKETED.findAll(raw).map { it.groupValues[1].trim() }.toList()
+            val candidate = when (inside.size) {
+                0 -> raw
+                1 -> inside.single()
+                else -> return Result.failure(IllegalArgumentException("받는 사람은 한 명만 넣어 주세요."))
+            }
+            return if (ADDRESS.matches(candidate)) Result.success(candidate)
+            else Result.failure(IllegalArgumentException("받는 사람 메일 주소가 필요합니다. 읽은 메일의 답장 주소(없으면 보낸 사람 주소)를 넣어 주세요."))
+        }
 
         /**
          * Builds a draft from the tool's arguments, or returns why it cannot. [to] may be a header such as
@@ -22,12 +41,10 @@ data class MailDraft(val to: String, val subject: String, val body: String) {
          * list of people the user did not see.
          */
         fun from(to: String?, subject: String?, body: String?): Result<MailDraft> {
-            val found = ADDRESS.findAll(to.orEmpty()).map { it.value }.distinct().toList()
-            if (found.isEmpty()) return Result.failure(IllegalArgumentException("받는 사람 메일 주소가 필요합니다. 읽은 메일의 보낸 사람 주소를 넣어 주세요."))
-            if (found.size > 1) return Result.failure(IllegalArgumentException("받는 사람은 한 명만 넣어 주세요."))
+            val address = address(to).getOrElse { return Result.failure(it) }
             val text = body.orEmpty().trim()
             if (text.isBlank()) return Result.failure(IllegalArgumentException("답장 내용이 비어 있습니다."))
-            return Result.success(MailDraft(found.single(), replySubject(subject), text.take(MAX_BODY)))
+            return Result.success(MailDraft(address, replySubject(subject), text.take(MAX_BODY)))
         }
 
         /** "Re:" once, whatever the original had ("RE:", "Re: Re:", or a Korean "회신:"). */

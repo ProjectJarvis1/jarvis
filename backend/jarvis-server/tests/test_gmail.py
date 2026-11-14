@@ -36,6 +36,7 @@ THREAD = {
         {"id": "m1", "threadId": "t1", "internalDate": "1762995600000",  # 2025-11-13 10:00 KST
          "payload": {"mimeType": "multipart/alternative", "headers": [
              {"name": "From", "value": "김 팀장 <kim@hanbit.example>"}, {"name": "To", "value": "me@example.com"},
+             {"name": "Reply-To", "value": "구매팀 <buy@hanbit.example>"},
              {"name": "Subject", "value": "견적서 요청"}],
              "parts": [{"mimeType": "text/plain", "body": {"data": b64("금요일까지 견적서 부탁드립니다.\n> 지난 메일 인용")}},
                        {"mimeType": "text/html", "body": {"data": b64("<p>무시될 HTML</p>")}}]}},
@@ -161,6 +162,8 @@ def test_read_thread_prefers_plain_drops_quotes_strips_html(gmail, monkeypatch):
     assert "무시될" not in first["body"] and "x()" not in second["body"]
     assert "네, 보내 드리겠습니다." in second["body"]
     assert result["structured_content"]["notice"] == t.MAIL_NOTICE
+    # 답장 초안은 Reply-To 로 간다(없으면 From). 그 주소가 결과에 있어야 모델이 고를 수 있다.
+    assert first["reply_to"] == "구매팀 <buy@hanbit.example>" and second["reply_to"] == ""
 
 
 def test_thread_body_budget_keeps_latest_mail(gmail, monkeypatch):

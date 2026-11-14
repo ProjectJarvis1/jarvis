@@ -365,3 +365,18 @@ def test_session_cap_closes_least_recently_used_idle_connection(tmp_path, monkey
         await gw.stop()
 
     asyncio.run(run())
+
+
+def test_concurrent_users_never_exceed_the_session_cap(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    monkeypatch.setattr(g, "MAX_SESSIONS", 1)
+    tokens = {"alice": "a", "bob": "b", "carol": "c"}
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), lambda auth, user: tokens.get(user) if auth == "fake" else None)
+        await gw.ensure_user("alice", wait_s=20)
+        await asyncio.gather(gw.ensure_user("bob", wait_s=20), gw.ensure_user("carol", wait_s=20))
+        assert sum(c.running for c in gw._all_conns()) == 1
+        await gw.stop()
+
+    asyncio.run(run())
