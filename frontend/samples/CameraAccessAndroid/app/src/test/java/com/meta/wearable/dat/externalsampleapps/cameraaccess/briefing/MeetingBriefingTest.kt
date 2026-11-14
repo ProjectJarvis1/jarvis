@@ -106,4 +106,19 @@ class MeetingBriefingTest {
         assertTrue(dedupe.claim("b", 500L))
         assertTrue(dedupe.claim("a", 2_000L)) // forgotten after keepMs
     }
+
+    @Test
+    fun settledHomonymDoesNotPullInTheOtherPersonsMeetings() {
+        // Two saved 홍길동; the title's 한빛산업 settles which one. 다른상사 홍길동's meeting names only the
+        // shared name, so it must not be read out as this 홍길동's history.
+        val brief = MeetingBriefing.compose(meeting,
+            listOf(PersonHit("홍길동", "한빛산업"), PersonHit("홍길동", "다른상사")),
+            listOf(
+                MeetingHit("홍길동 미수금 정리", "2026-10-01T01:00:00Z", "다른상사 홍길동과 미수금 3억 정리."),
+                MeetingHit("홍길동 샘플 협의", "2026-10-03T01:00:00Z", "한빛산업 홍길동과 샘플 일정 협의."),
+            ), emptyList(), now)
+        assertTrue(brief.spoken.contains("상대는 한빛산업 홍길동 님이에요."))
+        assertTrue(brief.detail.contains("샘플 일정 협의"))
+        assertFalse(brief.detail.contains("미수금"))
+    }
 }
