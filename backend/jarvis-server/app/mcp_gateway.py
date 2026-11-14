@@ -353,7 +353,7 @@ class _Connection:
             except Exception:
                 pass
         if self._task is None or self._task.done():
-            self.fingerprint = await asyncio.to_thread(self.credential_fingerprint)
+            self.fingerprint = await _isolated(self.credential_fingerprint)
         self.start()
         try:
             await asyncio.wait_for(self.ready.wait(), CONNECT_TIMEOUT_S)
@@ -410,6 +410,12 @@ def _content_text(result: Any) -> tuple[str, bool]:
     if not parts and structured is not None:
         parts.append(json.dumps(structured, ensure_ascii=False))
     return "\n".join(parts), bool(getattr(result, "is_error", False))
+
+
+async def _isolated(fn: Callable[..., Any], *args: Any) -> Any:
+    """작업자 스레드에서 빈 문맥으로 실행한다. 키 조회와 토큰 갱신이 요청의 DB 트랜잭션(문맥 변수)을 물려받으면
+    갱신한 토큰의 커밋이 그 요청을 따라 늦어지거나 롤백될 수 있다."""
+    return await asyncio.to_thread(contextvars.Context().run, fn, *args)
 
 
 def _per_user(token_provider: Callable[..., Optional[str]], admin_user: str) -> Callable[[str, str], Optional[str]]:
@@ -472,7 +478,7 @@ class McpGateway:
                 return True
             if not await self._make_room():
                 return False
-            conn.fingerprint = fingerprint if fingerprint is not None else await asyncio.to_thread(conn.credential_fingerprint)
+            conn.fingerprint = fingerprint if fingerprint is not None else await _isolated(conn.credential_fingerprint)
             conn.start()
             return True
 
@@ -490,8 +496,8 @@ class McpGateway:
         """이 사용자의 연결 가운데 키가 있는 것을 연다(이미 열려 있으면 그대로). 새로 연 연결은 wait_s 까지 기다린다.
         키가 없어졌거나 바뀐 연결은 닫거나 다시 연다."""
         conns = self._user_conns(user)
-        checks = await asyncio.to_thread(lambda: {n: (c.credentials_present(), c.credential_fingerprint())
-                                                  for n, c in conns.items()})
+        checks = await _isolated(lambda: {n: (c.credentials_present(), c.credential_fingerprint())
+                                          for n, c in conns.items()})
         now = time.monotonic()
         for name, (ok, fingerprint) in checks.items():
             conn = conns[name]
@@ -522,7 +528,7 @@ class McpGateway:
     async def _reconnect(self) -> None:
         conns = self._all_conns()
         # 키 확인은 DB 를 볼 수 있어 작업자 스레드에서, 연결 시작은 이 이벤트 루프에서 한다.
-        checks = await asyncio.to_thread(lambda: [(c.credentials_present(), c.credential_fingerprint()) if (c.running or c.user == self.admin_user)
+        checks = await _isolated(lambda: [(c.credentials_present(), c.credential_fingerprint()) if (c.running or c.user == self.admin_user)
                                                   else (False, "") for c in conns])
         now = time.monotonic()
         for conn, (ok, fingerprint) in zip(conns, checks):
@@ -547,8 +553,7 @@ class McpGateway:
                 await self._close(conn)
                 continue
             if not running and ok and admin:
-                conn.fingerprint = fingerprint
-                conn.start()
+                await self._admit(conn, fingerprint)
 
     async def _watch(self) -> None:
         """키를 나중에 넣었거나 연결이 끊긴 관리자 서버를 30초마다 다시 열고, 쓰지 않는 사용자 연결을 닫는다."""
@@ -627,7 +632,7 @@ class McpGateway:
         conn = self._user_conns(user)[tool.server]
         if not conn.running:
             # 키가 없으면 남의 키나 빈 키로 연결하지 않고, 연결이 필요하다고 돌려준다(아무것도 실행하지 않음).
-            if not await asyncio.to_thread(conn.credentials_present):
+            if not await _isolated(conn.credentials_present):
                 return {"is_error": True, "needs_auth": True,
                         "error": f"{tool.title}: 계정 연결이 필요합니다. 앱 설정의 서비스 연결에서 연결해 달라고 안내하세요."}
             conn = self._user_conns(user)[tool.server]

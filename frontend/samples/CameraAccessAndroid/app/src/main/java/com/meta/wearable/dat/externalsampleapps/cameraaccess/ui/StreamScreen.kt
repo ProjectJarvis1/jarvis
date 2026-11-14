@@ -297,14 +297,17 @@ fun StreamScreen(
     val calendarPermission = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestPermission(),
     ) { }
-    // Asked when the screen opens, and again the moment the switch is turned on in Settings.
+    // Asked when the screen opens only if the calendar was never asked (the first-run guide or the start-up ask
+    // count, so a "no" there is respected), and again the moment the switch is turned on in Settings.
     DisposableEffect(Unit) {
+        val asked = context.getSharedPreferences("proactive_permission", android.content.Context.MODE_PRIVATE)
         fun askCalendar() {
             if (SettingsManager.meetingBriefingEnabled && !MeetingBriefer.hasCalendarPermission(context)) {
+                asked.edit().putBoolean("asked", true).apply()
                 calendarPermission.launch(android.Manifest.permission.READ_CALENDAR)
             }
         }
-        askCalendar()
+        if (!asked.getBoolean("asked", false)) askCalendar()
         val unobserve = SettingsManager.observe("meetingBriefingEnabled") {
             // Off also silences a briefing being read or queued.
             if (!SettingsManager.meetingBriefingEnabled) speaker.stop()

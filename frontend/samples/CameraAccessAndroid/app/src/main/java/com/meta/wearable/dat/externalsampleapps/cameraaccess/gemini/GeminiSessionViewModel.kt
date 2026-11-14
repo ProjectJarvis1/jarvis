@@ -1127,6 +1127,9 @@ class GeminiSessionViewModel : ViewModel() {
         // A "네" said before this write existed is never its approval: it may have answered another question
         // ("이 분 이윤아 님 맞나요?"). Every write waits on its card; a "네" to the card's own question, or a tap,
         // approves it (onUserSpeech).
+        if (task.tool == "draft_mail_reply" && !task.reviewed) {
+            return TaskOutcome(result = "아직 메일 앱을 열지 않았습니다. 화면에 답장 초안 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 지메일에서 열기를 누르면 메일 앱 작성 화면이 열리고, 보내기는 사용자가 메일 앱에서 직접 누릅니다. 한 문장으로만 안내한 뒤 기다리세요.", waitingForUser = true)
+        }
         if (needsReview(task.tool) && !task.reviewed) {
             val external = ExternalTools.isExternal(task.tool)
             return TaskOutcome(result = if (external)

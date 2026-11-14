@@ -380,3 +380,37 @@ def test_concurrent_users_never_exceed_the_session_cap(tmp_path, monkeypatch):
         await gw.stop()
 
     asyncio.run(run())
+
+
+def test_admin_reconnect_respects_the_session_cap(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    monkeypatch.setattr(g, "MAX_SESSIONS", 1)
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        await gw.ensure_user("alice", wait_s=20)
+        monkeypatch.setenv("FAKE_TOKEN", "env-admin")  # 관리자 키가 나중에 들어옴
+        await gw._reconnect()
+        assert sum(c.running for c in gw._all_conns()) == 1 and gw.connections["fake"].running
+        await gw.stop()
+
+    asyncio.run(run())
+
+
+def test_token_lookup_does_not_see_the_request_context(tmp_path, monkeypatch):
+    import contextvars
+    request_tx = contextvars.ContextVar("request_tx", default=None)
+    seen = []
+
+    def provider(auth, user):
+        seen.append(request_tx.get())
+        return None
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), provider)
+        request_tx.set("open transaction")
+        await gw.call("who", {}, user="alice")
+        await gw.ensure_user("alice", wait_s=0)
+        assert seen and all(v is None for v in seen)
+
+    asyncio.run(run())

@@ -202,9 +202,9 @@ private fun Permissions(byWord: LineBreak) {
 
 @Composable
 private fun FirstWords(byWord: LineBreak) {
-    Heading("이렇게 말을 걸어 보세요", "홈에서 대화 시작을 누르고 편하게 말하면 돼요.", byWord)
+    Heading("이렇게 말을 걸어 보세요", "홈에서 대화 시작을 누른 뒤 \u201C자비스\u201D라고 부르고 이어서 말하면 돼요.", byWord)
     JarvisGroup {
-        listOf("오늘 일정 뭐 있어?", "이 명함 기억해 줘", "김 팀장님이랑 지난번에 무슨 얘기 했지?").forEach { phrase ->
+        listOf("자비스, 오늘 일정 뭐 있어?", "자비스, 이 명함 기억해 줘", "자비스, 김 팀장님이랑 지난번에 무슨 얘기 했지?").forEach { phrase ->
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
                 Surface(shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp), color = MaterialTheme.colorScheme.primaryContainer) {
