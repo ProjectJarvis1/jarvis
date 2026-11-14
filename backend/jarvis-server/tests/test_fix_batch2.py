@@ -3,7 +3,7 @@ import os
 
 os.environ.setdefault("DATABASE_URL", os.getenv("TEST_DATABASE_URL") or "postgresql://unused@127.0.0.1:1/unused")
 
-from app.followups import normalize_followups, stored_followups
+from app.followups import live_followups, normalize_followups, revalidate_followups, stored_followups
 
 
 def test_verified_empty_followups_do_not_fall_back_to_action_items():
@@ -27,3 +27,16 @@ def test_edited_transcript_keeps_only_items_whose_evidence_remains():
     kept = normalize_followups(old, new_transcript)
     assert [i["task"] for i in kept] == ["견적서 보내기"]
     assert kept[0]["due_text"].startswith("금요일")
+
+
+def test_revalidation_keeps_positions_so_completion_marks_stay_with_their_task():
+    # A(0) 는 원문에서 근거가 사라지고 B(1) 는 남는다. B 가 0번으로 당겨지면 앱에 남은 A 의 완료 표시를 물려받는다.
+    old = [
+        {"task": "A 견적서", "evidence": "견적서는 제가 보낼게요", "due_text": ""},
+        {"task": "B 샘플", "evidence": "샘플은 금요일까지 보내요", "due_text": "금요일"},
+    ]
+    out = revalidate_followups(old, "김 팀장: 샘플은 금요일까지 보내요.")
+    assert [i["task"] for i in out] == ["A 견적서", "B 샘플"]
+    assert out[0]["stale"] is True and out[0]["due_text"] == "" and not out[1].get("stale")
+    # 아침 브리핑과 메일 준비 자료는 stale 을 빼되, B 의 자리는 1번 그대로다.
+    assert [(i, it["task"]) for i, it in live_followups(out)] == [(1, "B 샘플")]

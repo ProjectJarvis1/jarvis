@@ -705,6 +705,8 @@ private fun FollowupCard(meeting: MeetingHistoryItem) {
                                 ).joinToString(", ")
                                 if (meta.isNotEmpty()) Text(meta, style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary)
+                                if (item.stale) Text("회의 원문을 고친 뒤 이 할 일의 근거 문장이 없어졌어요. 아직 할 일인지 확인해 주세요.",
+                                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
                                 if (item.evidence.isNotBlank()) Text("\u201C${item.evidence}\u201D", style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 if (MeetingFollowupStatus.Step.CALENDAR_OPENED in steps) Text("일정 화면을 열었어요. 저장했는지는 캘린더에서 확인해 주세요.",

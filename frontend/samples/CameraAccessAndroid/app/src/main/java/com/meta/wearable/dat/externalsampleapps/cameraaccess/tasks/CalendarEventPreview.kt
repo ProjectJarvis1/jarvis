@@ -9,7 +9,8 @@ import org.json.JSONObject
 /**
  * What a calendar entry will hold, in the words the approval card shows: title, the real day and time in
  * Korea time, and the place. The time is what the user must catch before approving, so it is spelled out
- * ("11월 20일 (목) 오후 4:00") instead of the raw ISO text the model produced.
+ * ("11월 20일 (목) 오후 4:00") instead of the raw ISO text the model produced, read the same way as
+ * the calendar write itself ([koreaWallTime]).
  */
 object CalendarEventPreview {
     private val KST: ZoneId = ZoneId.of("Asia/Seoul")
@@ -39,8 +40,18 @@ object CalendarEventPreview {
     /** Lines for a task list or card body: the time first, then the place. */
     fun lines(argsJson: String): List<String> = of(argsJson).let { listOfNotNull(it.title, it.time, it.place?.let { p -> "장소 $p" }) }
 
-    private fun parse(value: String?) = value?.let { v ->
-        runCatching { OffsetDateTime.parse(v).atZoneSameInstant(KST) }.getOrNull()
-            ?: runCatching { java.time.LocalDateTime.parse(v).atZone(KST) }.getOrNull()
+    private fun parse(value: String?) = value?.let(::koreaWallTime)
+
+    /**
+     * The time as said, in Korea time. The user always speaks Korean time, and the model sometimes tags
+     * it with a wrong offset ("16:00Z"), so the offset is dropped and the clock reading kept: the card,
+     * the phone calendar and the server's Google Calendar write all register the same 16:00 KST.
+     */
+    fun koreaWallTime(value: String): java.time.ZonedDateTime? {
+        val v = value.trim()
+        return (runCatching { OffsetDateTime.parse(v).toLocalDateTime() }.getOrNull()
+            ?: runCatching { java.time.ZonedDateTime.parse(v).toLocalDateTime() }.getOrNull()
+            ?: runCatching { java.time.LocalDateTime.parse(v.removeSuffix("Z")) }.getOrNull())
+            ?.atZone(KST)
     }
 }

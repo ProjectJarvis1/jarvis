@@ -62,3 +62,37 @@ def stored_followups(metadata) -> list[dict]:
         return [item for item in meta["followups"] if isinstance(item, dict)]
     return [{"task": str(item), "owner": "", "due_text": "", "due_at": "", "evidence": ""}
             for item in meta.get("action_items") or [] if str(item).strip()]
+
+
+def revalidate_followups(items, transcript: str) -> list[dict]:
+    """원문이 바뀐 회의의 후속 할 일을 다시 검증한다. 순서(자리)는 그대로 둔다.
+
+    근거 문장이 새 원문에 남은 할 일은 새 원문으로 다시 검증한 값으로 바꾸고, 근거가 사라진 할 일은
+    기한을 지우고 stale 로 표시해 같은 자리에 남긴다. 앱은 완료 여부를 회의 안의 순서로 기억하므로,
+    빼 버리면 뒤의 할 일이 앞 할 일의 완료 표시를 물려받는다.
+    """
+    if not isinstance(items, list):
+        return []
+    result = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        checked = normalize_followups([item], transcript)
+        if checked:
+            result.append(checked[0])
+        else:
+            result.append({**item, "due_text": "", "due_at": "", "stale": True})
+    return result
+
+
+def live_followups(items) -> list[tuple[int, dict]]:
+    """(자리, 할 일) 목록. 자리는 빈 항목을 뺀 순서로 매기고(앱과 같은 순서), stale 은 자리만 차지하고 뺀다."""
+    out = []
+    index = 0
+    for item in items or []:
+        if not isinstance(item, dict) or not str(item.get("task") or "").strip():
+            continue
+        if not item.get("stale"):
+            out.append((index, item))
+        index += 1
+    return out

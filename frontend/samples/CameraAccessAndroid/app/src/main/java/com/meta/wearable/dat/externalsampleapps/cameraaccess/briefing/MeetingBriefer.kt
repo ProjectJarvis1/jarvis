@@ -199,7 +199,7 @@ object MeetingBriefer {
             val legacy = (0 until (items?.length() ?: 0)).mapNotNull { items?.optString(it)?.takeIf(String::isNotBlank) }
             // Verified follow-ups when the meeting has them (an empty verified list stays empty).
             MeetingHit(m.optString("title"), m.optNullable("started_at"), m.optNullable("summary"),
-                MeetingFollowups.parse(metadata.optJSONArray("followups"), legacy).map { it.task })
+                MeetingFollowups.parse(metadata.optJSONArray("followups"), legacy).filterNot { it.stale }.map { it.task })
         }.orEmpty()
 
     private fun searchMemories(query: String): List<MemoryHit> = post("/memory/search", JSONObject().put("query", query).put("top_k", 5))

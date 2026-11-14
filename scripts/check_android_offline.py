@@ -37,7 +37,7 @@ import tempfile
 working = tempfile.TemporaryDirectory(prefix='jarvis-kotlin-check-')
 work = Path(working.name)
 out=work / 'main';out.mkdir()
-args=['-no-stdlib','-no-reflect','-jvm-target','1.8','-classpath',cp,'-Xplugin='+str(plugin),'-d',str(out)]
+args=['-no-stdlib','-no-reflect','-jvm-target','17','-classpath',cp,'-Xplugin='+str(plugin),'-d',str(out)]
 # The flavor's own sources (src/phone or src/glasses) complete src/main, like the Gradle variant does.
 args+=list(map(str,(base/'src/main/java').rglob('*.kt')))+list(map(str,(base/f'src/{flavor}/java').rglob('*.kt')))
 # Kotlin compiler argfile preserves spaces safely.
@@ -48,7 +48,7 @@ r=subprocess.run([java,'-Xmx3g','-cp',os.pathsep.join(map(str,compiler)),'org.je
 print(r.stdout[:20000]); print('Compiler exit:',r.returncode)
 if r.returncode: raise SystemExit(r.returncode)
 testout=work / 'test';testout.mkdir()
-testargs=['-no-stdlib','-no-reflect','-jvm-target','1.8','-classpath',str(out)+os.pathsep+cp,'-Xfriend-paths='+str(out),'-d',str(testout)]
+testargs=['-no-stdlib','-no-reflect','-jvm-target','17','-classpath',str(out)+os.pathsep+cp,'-Xfriend-paths='+str(out),'-d',str(testout)]
 testargs+=list(map(str,(base/'src/test/java').rglob('*.kt')))
 testfile=work / 'tests.args';testfile.write_text('\n'.join('"'+a.replace('\\','\\\\').replace('"','\\"')+'"' for a in testargs))
 r=subprocess.run([java,'-Xmx2g','-cp',os.pathsep.join(map(str,compiler)),'org.jetbrains.kotlin.cli.jvm.K2JVMCompiler','@'+str(testfile)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)

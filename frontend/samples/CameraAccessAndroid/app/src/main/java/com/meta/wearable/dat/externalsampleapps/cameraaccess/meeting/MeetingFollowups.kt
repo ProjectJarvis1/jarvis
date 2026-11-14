@@ -19,6 +19,8 @@ data class MeetingFollowup(
     val dueText: String = "",
     val dueAt: String = "",
     val evidence: String = "",
+    /** The transcript was edited and no longer holds [evidence]; kept in place so completion marks stay put. */
+    val stale: Boolean = false,
 )
 
 object MeetingFollowups {
@@ -31,7 +33,7 @@ object MeetingFollowups {
             val task = o.optString("task").trim()
             if (task.isEmpty()) null
             else MeetingFollowup(task, o.optString("owner").trim(), o.optString("due_text").trim(),
-                o.optString("due_at").trim(), o.optString("evidence").trim())
+                o.optString("due_at").trim(), o.optString("evidence").trim(), o.optBoolean("stale", false))
         }
         // A verified list that came back empty stays empty: every item failed the check against the transcript.
         // Only records made before `followups` existed fall back to the unverified `action_items`.
@@ -86,10 +88,11 @@ object MeetingFollowups {
                 appendLine("정한 내용")
                 decisions.forEach { appendLine("- $it") }
             }
-            if (items.isNotEmpty()) {
+            val live = items.filterNot { it.stale }
+            if (live.isNotEmpty()) {
                 appendLine()
                 appendLine("할 일")
-                items.forEach { item ->
+                live.forEach { item ->
                     val due = meetingStart?.let { start -> dueDate(item, start)?.let { dueLabel(it, start) } }
                         ?: item.dueText.takeIf { it.isNotBlank() }
                     val extra = listOfNotNull(item.owner.takeIf { it.isNotBlank() }, due).joinToString(", ")
