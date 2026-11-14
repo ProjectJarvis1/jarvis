@@ -400,11 +400,9 @@ fun StreamScreen(
     // follow-ups. Jarvis says them when a conversation is on; otherwise a phone notification does.
     LaunchedEffect(meetingRecordingViewModel) {
         val owner = com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.userId
-        meetingRecordingViewModel.uiState.map { it.result }.distinctUntilChanged().collect { result ->
-            if (result == null) return@collect
+        meetingRecordingViewModel.results.collect { result ->
             val app = context.applicationContext
             Toast.makeText(app, "회의 저장 완료: ${result.summary.take(120)}", Toast.LENGTH_LONG).show()
-            meetingRecordingViewModel.clearMessage()
             if (result.followups.isEmpty()) return@collect
             val start = MeetingFollowups.parseStart(result.startedAt)
             val lines = result.followups.take(8).mapIndexed { i, item ->

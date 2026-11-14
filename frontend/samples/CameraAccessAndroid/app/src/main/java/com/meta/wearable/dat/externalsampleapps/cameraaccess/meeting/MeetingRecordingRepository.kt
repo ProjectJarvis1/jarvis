@@ -51,6 +51,9 @@ class MeetingRecordingRepository {
                     .getOrDefault("오늘 쓸 수 있는 양을 모두 썼어요."))
             }
             if (!response.isSuccessful) {
+                val detail = runCatching { JSONObject(responseBody).getString("detail") }.getOrDefault(responseBody.take(300))
+                // The same file will fail the same way (no speech, bad format, too large): do not retry it forever.
+                if (PendingRecordingQueue.isPermanentFailure(response.code)) throw PermanentUploadFailure(response.code, detail)
                 throw IllegalStateException("HTTP ${response.code}: ${responseBody.take(300)}")
             }
             val json = JSONObject(responseBody)
@@ -89,3 +92,6 @@ data class MeetingRecordingResult(
 
 /** The server refused the upload because today's meeting limit is used up; the recording is kept for later. */
 class QuotaExceeded(message: String) : Exception(message)
+
+/** The server refused this recording for good (for example 422: no speech was transcribed). */
+class PermanentUploadFailure(val code: Int, message: String) : Exception(message)

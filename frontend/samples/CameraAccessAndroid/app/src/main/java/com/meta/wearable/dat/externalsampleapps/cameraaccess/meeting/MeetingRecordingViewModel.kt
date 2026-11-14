@@ -9,7 +9,14 @@ import java.io.File
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.time.format.DateTimeFormatter
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.ProcessLifecycleOwner
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -21,7 +28,6 @@ data class MeetingRecordingUiState(
     val isProcessing: Boolean = false,
     val recordingStartedAtMs: Long? = null,
     val errorMessage: String? = null,
-    val result: MeetingRecordingResult? = null,
 )
 
 class MeetingRecordingViewModel(application: Application) : AndroidViewModel(application) {
@@ -34,46 +40,54 @@ class MeetingRecordingViewModel(application: Application) : AndroidViewModel(app
 
     private val repository = MeetingRecordingRepository()
 
+    // Each finished upload is its own event: several kept recordings sent in a row must each reach the screen,
+    // which a single state field would overwrite before it is read.
+    private val _results = Channel<MeetingRecordingResult>(Channel.UNLIMITED)
+    val results: Flow<MeetingRecordingResult> = _results.receiveAsFlow()
+
+    private val drainLock = Mutex()
+
+    // Kept recordings go up again whenever the app comes to the front, not only on a fresh start.
+    private val foregroundObserver = LifecycleEventObserver { _, event ->
+        if (event == Lifecycle.Event.ON_START) viewModelScope.launch { uploadPending() }
+    }
+
     init {
-        // A recording kept because the day's limit was used up goes up again the next time the app opens.
+        ProcessLifecycleOwner.get().lifecycle.addObserver(foregroundObserver)
         viewModelScope.launch { uploadPending() }
     }
 
     /** Recordings refused by the daily limit wait here, in the account's own folder (account deletion erases it). */
-    private fun pendingDir(): File = File(com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount
-        .dataDir(getApplication()), "pending-recordings")
+    private fun queue(): PendingRecordingQueue {
+        val dir = com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.dataDir(getApplication())
+        return PendingRecordingQueue(File(dir, "pending-recordings"), File(dir, "failed-recordings"))
+    }
 
-    private fun keepForLater(file: File, title: String, startedAt: String, endedAt: String): Boolean = runCatching {
-        val dir = pendingDir().apply { mkdirs() }
-        val kept = File(dir, file.name)
-        if (!file.renameTo(kept)) { file.copyTo(kept, overwrite = true); file.delete() }
-        File(dir, "${file.name}.json").writeText(org.json.JSONObject().put("title", title).put("started_at", startedAt)
-            .put("ended_at", endedAt).toString())
-        true
-    }.getOrDefault(false)
+    private fun keepForLater(file: File, title: String, startedAt: String, endedAt: String): Boolean =
+        queue().keep(file, title, startedAt, endedAt)
 
-    /** Sends kept recordings, oldest first; stops at the first that is still refused or cannot be sent. */
+    /** Sends kept recordings, oldest first. One run at a time; a new recording pauses it. */
     private suspend fun uploadPending() {
-        val files = withContext(Dispatchers.IO) {
-            pendingDir().listFiles { f -> f.name.endsWith(".m4a") }?.sortedBy { it.name }.orEmpty()
-        }
-        for (file in files) {
+        if (!drainLock.tryLock()) return
+        try {
             if (_uiState.value.isRecording || _uiState.value.isProcessing) return
-            val meta = File(file.parentFile, "${file.name}.json")
-            // Kept a week at most: an old recording that never went up is dropped with its details.
-            if (System.currentTimeMillis() - file.lastModified() > 7 * 24 * 3_600_000L) { file.delete(); meta.delete(); continue }
-            val info = runCatching { org.json.JSONObject(meta.readText()) }.getOrNull() ?: run { file.delete(); meta.delete(); null } ?: continue
-            _uiState.value = MeetingRecordingUiState(isProcessing = true)
-            try {
-                val result = withContext(Dispatchers.IO) {
-                    repository.upload(file, info.optString("title"), info.optString("started_at"), info.optString("ended_at"))
-                }
-                file.delete(); meta.delete()
-                _uiState.value = MeetingRecordingUiState(result = result)
-            } catch (e: Exception) {
-                _uiState.value = MeetingRecordingUiState()
-                return
-            }
+            val q = withContext(Dispatchers.IO) { queue() }
+            var showing = false
+            q.drain(
+                upload = { item ->
+                    if (!showing) { _uiState.value = _uiState.value.copy(isProcessing = true); showing = true }
+                    withContext(Dispatchers.IO) { repository.upload(item.file, item.title, item.startedAt, item.endedAt) }
+                },
+                onResult = { _results.send(it) },
+                onPermanentFailure = { item, e ->
+                    _uiState.value = _uiState.value.copy(errorMessage =
+                        "보관해 둔 ${item.title} 녹음은 정리하지 못했어요. ${e.message.orEmpty()}".trim())
+                },
+                shouldStop = { _uiState.value.isRecording },
+            )
+            if (showing && !_uiState.value.isRecording) _uiState.value = _uiState.value.copy(isProcessing = false)
+        } finally {
+            drainLock.unlock()
         }
     }
     private var recorder: MediaRecorder? = null
@@ -140,7 +154,8 @@ class MeetingRecordingViewModel(application: Application) : AndroidViewModel(app
                 val result = withContext(Dispatchers.IO) {
                     repository.upload(file = file, title = title, startedAt = startedText, endedAt = endedText)
                 }
-                _uiState.value = MeetingRecordingUiState(result = result)
+                _uiState.value = MeetingRecordingUiState()
+                _results.send(result)
             } catch (e: QuotaExceeded) {
                 // The day's limit, not a broken recording: keep it and send it again the next time the app opens.
                 val kept = withContext(Dispatchers.IO) { keepForLater(file, title, startedText, endedText) }
@@ -173,7 +188,7 @@ class MeetingRecordingViewModel(application: Application) : AndroidViewModel(app
     }
 
     fun clearMessage() {
-        _uiState.value = _uiState.value.copy(errorMessage = null, result = null)
+        _uiState.value = _uiState.value.copy(errorMessage = null)
     }
 
     private fun releaseRecorder() {
@@ -182,6 +197,7 @@ class MeetingRecordingViewModel(application: Application) : AndroidViewModel(app
     }
 
     override fun onCleared() {
+        ProcessLifecycleOwner.get().lifecycle.removeObserver(foregroundObserver)
         cancelRecording()
         super.onCleared()
     }
