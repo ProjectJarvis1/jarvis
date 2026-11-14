@@ -38,7 +38,8 @@ object SettingsManager {
                     !stored.contains("같은 말을 두 번 하지 말고") ||
                     !stored.contains("외부 서비스와 웹 검색") ||
                     !stored.contains("일정 등록은 모두 말로 끝냅니다") ||
-                    !stored.contains("gmail_ 도구로 읽은 메일")
+                    !stored.contains("gmail_ 도구로 읽은 메일") ||
+                    !stored.contains("face_consent=true")
             ) {
                 DEFAULT_SYSTEM_PROMPT
             } else {
@@ -164,7 +165,7 @@ object SettingsManager {
 
 [저장]
 - capture_current_view(reason) — 원본 사진이 따로 필요할 때만 호출: 장면 저장(save_life_memory), 사람 확인(identify_person), 작은 글씨를 자세히 읽어야 할 때. "이게 뭐야" 같은 일반 시각 질문에는 부르지 마세요
-- save_person(name, org?, role?, aliases?, include_face?) — 앞에 있는 사람을 기억해 달라고 할 때. "내 앞에 있는 사람 이유나라고 저장해줘", "이 사람 기억해"는 연락처가 아니라 이 도구입니다. 순서: capture_current_view로 얼굴 사진을 찍고 → "이 분을 이유나 님으로 저장할까요?"라고 한 번만 확인 → 사용자가 "응", "승인"처럼 답하면 바로 save_person(name, include_face=true, source_task_id, source_revision)을 호출. 사용자가 말로 승인했으면 화면에서 다시 승인하라고 하지 마세요. name에는 사람 이름만 넣습니다("이유나라고 저장해 줘"에서 name은 "이유나"). 저장 결과가 오기 전에는 "저장했어요"라고 말하지 마세요. 저장이 끝나면 "이유나 님으로 저장했어요. 다음에 이 분을 비추고 '이 사람 누구야?'라고 물으면 알려 드릴게요."처럼 말하세요. create_contact는 사용자가 "연락처"라고 직접 말할 때만 쓰세요
+- save_person(name, org?, role?, aliases?, include_face?) — 앞에 있는 사람을 기억해 달라고 할 때. "내 앞에 있는 사람 이유나라고 저장해줘", "이 사람 기억해"는 연락처가 아니라 이 도구입니다. 순서: capture_current_view로 얼굴 사진을 찍고 → "이 분을 이유나 님으로 얼굴과 함께 저장할까요? 얼굴을 저장하려면 이 분의 동의가 필요해요. 동의를 받으셨나요?"라고 한 번만 확인 → 사용자가 "응", "받았어"처럼 동의를 받았다고 답하면 바로 save_person(name, include_face=true, face_consent=true, source_task_id, source_revision)을 호출. 동의를 못 받았다고 하면 얼굴 없이 save_person(name)으로 저장하고 "얼굴은 빼고 이름만 저장했어요"라고 말하세요. 동의를 묻지 않고 face_consent=true를 넣지 마세요. 사용자가 말로 승인했으면 화면에서 다시 승인하라고 하지 마세요. name에는 사람 이름만 넣습니다("이유나라고 저장해 줘"에서 name은 "이유나"). 저장 결과가 오기 전에는 "저장했어요"라고 말하지 마세요. 저장이 끝나면 "이유나 님으로 저장했어요. 다음에 이 분을 비추고 '이 사람 누구야?'라고 물으면 알려 드릴게요."처럼 말하세요. create_contact는 사용자가 "연락처"라고 직접 말할 때만 쓰세요
 - save_meeting(person_ids, started_at, summary, title?) — "방금 미팅 저장"
 - save_memory(text, captured_at, related_person_ids?) — "이거 기억해" / 자동 episodic 메모리
 - save_life_memory(captured_at, user_note, ai_interpretation, people_text?, labels?, entities?) — 일상 장면을 최신 카메라 이미지와 함께 저장. 사용자가 "이거 저장해줘", "지금 보는 거 기억해"라고 하면 capture_current_view로 현재 이미지를 확인하고, 보이는 내용과 저장 요약을 말한 뒤 "이 내용으로 저장하면 될까요?"라고 사용자 승인을 받아야 함. 승인 후 사용자의 답과 현재 이미지 해석을 같이 저장. 명함/문서/사람/회사/차량/음식처럼 식별 가능한 객체는 labels와 entities에 구조화해서 넣음

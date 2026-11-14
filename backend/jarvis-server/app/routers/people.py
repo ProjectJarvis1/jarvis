@@ -199,6 +199,15 @@ def _find_existing_person(cur, name: str, org: Optional[str]):
     return cur.fetchone()
 
 
+FACE_CONSENT_REQUIRED = "얼굴을 저장하려면 상대방이 얼굴 저장에 동의했는지 먼저 확인해야 해요. 동의를 받았다면 다시 저장해 주세요."
+
+
+def _require_face_consent(consent: bool) -> None:
+    """얼굴은 생체 정보라 찍힌 사람의 동의 없이 저장하지 않는다(D37). 이름과 소속만 저장하는 경우는 해당 없음."""
+    if not consent:
+        raise HTTPException(422, FACE_CONSENT_REQUIRED)
+
+
 def _insert_face(cur, person_id, embedding: List[float], quality: Optional[FaceQuality], source: Optional[str]):
     """Adds one reference photo for a person, and mirrors it onto people.face_embedding.
 
@@ -209,8 +218,8 @@ def _insert_face(cur, person_id, embedding: List[float], quality: Optional[FaceQ
     """
     cur.execute(
         """
-        INSERT INTO person_faces (person_id, embedding, quality, source)
-        VALUES (%s, %s::vector, %s, %s)
+        INSERT INTO person_faces (person_id, embedding, quality, source, consent_at)
+        VALUES (%s, %s::vector, %s, %s, now())
         RETURNING *
         """,
         (person_id, embedding, Jsonb(quality.as_dict() if quality else {}), source),
@@ -227,6 +236,8 @@ def _insert_face(cur, person_id, embedding: List[float], quality: Optional[FaceQ
 def create_person(body: PersonCreate) -> PersonOut:
     face_embedding = body.face_embedding
     face_quality = None
+    if face_embedding is not None or body.image_base64:
+        _require_face_consent(body.face_consent)
     if face_embedding is None and body.image_base64:
         face_embedding, face_count, face_quality = embed_face_from_base64(body.image_base64)
         if face_embedding is None:
@@ -416,6 +427,7 @@ def add_person_face(person_id: UUID, body: PersonFaceAddRequest) -> PersonFaceOu
     _match_faces and is what makes recognition get better with use rather than staying
     stuck at whatever the first capture happened to look like.
     """
+    _require_face_consent(body.face_consent)
     embedding, face_count, quality = embed_face_from_base64(body.image_base64)
     if embedding is None:
         raise _face_error(face_count)

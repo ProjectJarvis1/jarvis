@@ -202,8 +202,13 @@ class OpenClawBridge {
                     "save_person" -> {
                         val body = pick(args, "name", "aliases", "org", "role", "first_met_at", "last_met_at", "notes_summary")
                         if (args["include_face"] == true) {
+                            // A face is biometric data: kept only after the user confirms the person agreed (D37).
+                            require(args["face_consent"] == true) {
+                                "얼굴을 저장하려면 상대방이 얼굴 저장에 동의했는지 먼저 확인해야 해요. 사용자에게 동의를 받았는지 묻고, 받았다면 face_consent=true로 다시 저장하세요."
+                            }
                             requireNotNull(visualFrame) { "얼굴을 등록할 사진이 없습니다." }
                             body.put("image_base64", visualFrame.base64)
+                            body.put("face_consent", true)
                         }
                         post("/people", body)
                     }

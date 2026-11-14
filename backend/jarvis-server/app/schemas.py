@@ -24,6 +24,8 @@ class PersonCreate(BaseModel):
     image_mime_type: str = "image/jpeg"
     notes_summary: Optional[str] = None
     metadata: dict = Field(default_factory=dict)
+    # 얼굴은 찍힌 사람의 동의가 있어야 저장한다(D37). 사용자가 "상대방이 동의했다"고 확인한 경우만 true.
+    face_consent: bool = False
 
 
 class PersonOut(BaseModel):
@@ -103,6 +105,7 @@ class PersonFaceAddRequest(BaseModel):
     image_base64: str
     image_mime_type: str = "image/jpeg"
     source: Optional[str] = None
+    face_consent: bool = False
 
 
 # ─── Meetings ─────────────────────────────────────────────────

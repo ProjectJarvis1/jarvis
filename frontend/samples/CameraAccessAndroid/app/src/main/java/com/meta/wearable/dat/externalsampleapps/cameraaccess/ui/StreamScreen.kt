@@ -756,16 +756,20 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
     ConfirmSheet(
         headline = when {
             external -> externalPreview.first()
+            person && face -> "$name 님을 얼굴과 함께 저장할까요?"
             person -> "$name 님을 저장할까요?"
             else -> "${task.title}, 저장할까요?"
         },
-        actionLabel = action, onAction = onSave, onCancel = onCancel,
+        actionLabel = if (person && face) "동의받고 저장" else action, onAction = onSave, onCancel = onCancel,
         initial = if (person) name.take(1) else null,
         facts = facts,
         // What goes to an outside service is shown in full; a note to keep may be clipped.
-        lines = listOfNotNull(externalPreview.getOrNull(1)),
+        // A face is saved only with the person's consent (D37), so the card asks the user to confirm it.
+        lines = listOfNotNull(externalPreview.getOrNull(1),
+            if (person && face) "상대방이 얼굴 저장에 동의했나요? 동의를 받은 경우에만 저장해 주세요." else null),
         body = saveContent,
-        hint = "\"확인\"이라고 말하거나 $action 버튼을 누르세요.",
+        hint = if (person && face) "동의를 받았다면 \"확인\"이라고 말하거나 동의받고 저장 버튼을 누르세요."
+            else "\"확인\"이라고 말하거나 $action 버튼을 누르세요.",
     )
 }
 

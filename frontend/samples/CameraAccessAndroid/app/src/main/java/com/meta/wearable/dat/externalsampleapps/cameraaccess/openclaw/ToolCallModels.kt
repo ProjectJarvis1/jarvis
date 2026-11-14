@@ -286,6 +286,7 @@ object ToolDeclarations {
         description = "사용자가 새 사람을 메모리에 저장하라고 할 때. 예: '이 사람 저장해줘', '방금 만난 박부장 등록'.",
         properties = JSONObject()
             .put("include_face", JSONObject().put("type", "boolean").put("description", "사용자가 얼굴 등록을 요청한 경우만 true. 확인한 사진의 source_task_id/source_revision 필수"))
+            .put("face_consent", JSONObject().put("type", "boolean").put("description", "얼굴을 저장할 때 필수. 상대방이 얼굴 저장에 동의했느냐는 질문에 사용자가 그렇다고 답한 경우만 true. 묻지 않았거나 동의를 못 받았으면 false로 두고 얼굴 없이 저장"))
             .put("name", strProp("사람 이름 (한국어/영어)"))
             .put("aliases", arrStrProp("별칭/닉네임 목록 (선택)"))
             .put("org", strProp("소속 회사/조직 (선택)"))
