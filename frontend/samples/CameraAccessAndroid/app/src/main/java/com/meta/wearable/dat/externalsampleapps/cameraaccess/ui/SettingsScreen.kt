@@ -89,6 +89,8 @@ fun SettingsScreen(
     var proactiveOffersEnabled by remember { mutableStateOf(SettingsManager.proactiveOffersEnabled) }
     var morningBriefingEnabled by remember { mutableStateOf(SettingsManager.morningBriefingEnabled) }
     var morningBriefingMinute by remember { mutableStateOf(SettingsManager.morningBriefingMinute) }
+    var nameHintsEnabled by remember { mutableStateOf(SettingsManager.nameHintsEnabled) }
+    var showNameHintsConsent by remember { mutableStateOf(false) }
     val settingsContext = LocalContext.current
     // "먼저 알려 주기" reads the calendar and shows notifications; ask for both when it is turned on.
     fun calendarAllowed() = settingsContext.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) ==
@@ -137,6 +139,7 @@ fun SettingsScreen(
         SettingsManager.meetingBriefingEnabled = meetingBriefingEnabled
         SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
         SettingsManager.morningBriefingMinute = morningBriefingMinute
+        if (SettingsManager.nameHintsEnabled != nameHintsEnabled) SettingsManager.nameHintsEnabled = nameHintsEnabled
         if (SettingsManager.proactiveOffersEnabled != proactiveOffersEnabled ||
             SettingsManager.morningBriefingEnabled != morningBriefingEnabled) {
             SettingsManager.proactiveOffersEnabled = proactiveOffersEnabled
@@ -159,6 +162,7 @@ fun SettingsScreen(
         proactiveOffersEnabled = SettingsManager.proactiveOffersEnabled
         morningBriefingEnabled = SettingsManager.morningBriefingEnabled
         morningBriefingMinute = SettingsManager.morningBriefingMinute
+        nameHintsEnabled = SettingsManager.nameHintsEnabled
         liveConversationEnabled = SettingsManager.liveConversationEnabled
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
     }
@@ -167,7 +171,7 @@ fun SettingsScreen(
     LaunchedEffect(systemPrompt, jarvisApiBase, webrtcSignalingURL,
         videoStreamingEnabled, cardOfferEnabled, backgroundWakeWordEnabled, meetingBriefingEnabled, proactiveNotificationsEnabled,
         proactiveOffersEnabled, morningBriefingEnabled, morningBriefingMinute, liveConversationEnabled,
-        whisperSttEnabled) {
+        whisperSttEnabled, nameHintsEnabled) {
         save()
     }
     var promptOpen by remember { mutableStateOf(false) }
@@ -226,6 +230,11 @@ fun SettingsScreen(
                         .takeIf { it >= 0 } ?: choices.indexOfFirst { it.first >= morningBriefingMinute }.coerceAtLeast(0)
                     JarvisSegmented(choices.map { it.second }, selected, { morningBriefingMinute = choices[it].first })
                 }
+                // Turning it on first shows where the names go; it stays off unless the user agrees (D71).
+                SettingSwitch("이름 인식 돕기",
+                    if (nameHintsEnabled) "대화를 시작할 때 연락처 이름을 함께 보내 이름을 더 잘 알아들어요."
+                    else "켜면 연락처 이름을 음성 인식에 함께 보내요. 지금은 보내지 않아요.",
+                    nameHintsEnabled) { on -> if (on) showNameHintsConsent = true else nameHintsEnabled = false }
                 SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
                     videoStreamingEnabled) { videoStreamingEnabled = it }
                 SettingSwitch("명함 보이면 저장 제안", "명함이 보이면 Jarvis가 저장할지 먼저 물어요. 대답하기 전에는 저장하지 않아요.",
@@ -259,6 +268,17 @@ fun SettingsScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
+
+    if (showNameHintsConsent) AlertDialog(
+        onDismissRequest = { showNameHintsConsent = false },
+        title = { Text("연락처 이름을 보낼까요?") },
+        text = {
+            Text("휴대폰 연락처의 이름이 음성 인식을 돕기 위해 AI 처리 업체(Google, Mindlogic)로 전송됩니다. " +
+                "대화를 시작할 때마다 최대 80명의 이름을 보내고, 전화번호는 보내지 않아요. 언제든 다시 끌 수 있어요.")
+        },
+        confirmButton = { TextButton(onClick = { nameHintsEnabled = true; showNameHintsConsent = false }) { Text("동의하고 켜기") } },
+        dismissButton = { TextButton(onClick = { showNameHintsConsent = false }) { Text("취소") } },
+    )
 
     if (showDisconnectDialog && onDisconnect != null) AlertDialog(
         onDismissRequest = { showDisconnectDialog = false }, title = { Text("글라스 앱 등록을 해제할까요?") },

@@ -114,6 +114,18 @@ object SettingsManager {
         get() = prefs.getInt("morningBriefingMinute", 8 * 60)
         set(value) = prefs.edit().putInt("morningBriefingMinute", value).apply()
 
+    /**
+     * Send contact names to the speech model as recognition hints (D71). Off by default: the names go to
+     * the AI processors (Google, Mindlogic), so the user turns it on only after reading that.
+     */
+    var nameHintsEnabled: Boolean
+        get() = prefs.getBoolean("nameHintsEnabled", false)
+        set(value) = prefs.edit().putBoolean("nameHintsEnabled", value)
+            .putLong("nameHintsConsentAt", if (value) System.currentTimeMillis() else 0L).apply()
+
+    /** When the user agreed to the name hints (epoch ms), 0 when they are off. */
+    val nameHintsConsentAt: Long get() = prefs.getLong("nameHintsConsentAt", 0L)
+
     /** Keep listening for "자비스" with the screen off (a microphone foreground service). */
     var backgroundWakeWordEnabled: Boolean
         get() = prefs.getBoolean("backgroundWakeWordEnabled", true)
