@@ -27,7 +27,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 log = logging.getLogger("jarvis.mcp")
 
@@ -337,24 +337,31 @@ class _Connection:
                 if not future.done():
                     future.set_exception(RuntimeError(f"{self.cfg.name} 연결이 끊겼습니다."))
 
-    async def call(self, name: str, arguments: dict[str, Any]):
+    async def call(self, name: str, arguments: dict[str, Any],
+                   admit: Optional[Callable[[], Awaitable[bool]]] = None):
+        """admit: 연결을 (다시) 열 때 거치는 관문(게이트웨이의 상한, 세대 확인). 없으면 여기서 바로 연다."""
         self.in_flight += 1
         self.last_used = time.monotonic()
         try:
-            return await self._call(name, arguments)
+            return await self._call(name, arguments, admit)
         finally:
             self.in_flight -= 1
             self.last_used = time.monotonic()
 
-    async def _call(self, name: str, arguments: dict[str, Any]):
+    async def _call(self, name: str, arguments: dict[str, Any], admit: Optional[Callable[[], Awaitable[bool]]] = None):
         if self._closing and self._task and not self._task.done():
             try:  # 닫히는 중인 연결이 다 정리된 뒤 새로 연다
                 await asyncio.wait_for(asyncio.shield(self._task), 10)
             except Exception:
                 pass
         if self._task is None or self._task.done():
-            self.fingerprint = await _isolated(self.credential_fingerprint)
-        self.start()
+            if admit is not None:
+                # 다시 열 때도 게이트웨이 관문을 거친다: 그사이 닫힌(연결 해제, 계정 삭제) 연결은 되살리지 않는다.
+                if not await admit():
+                    raise RuntimeError(f"{self.cfg.name} 연결이 닫혀 다시 열지 않았습니다.")
+            else:
+                self.fingerprint = await _isolated(self.credential_fingerprint)
+                self.start()
         try:
             await asyncio.wait_for(self.ready.wait(), CONNECT_TIMEOUT_S)
         except asyncio.TimeoutError:
@@ -439,7 +446,8 @@ class McpGateway:
         self._token = _per_user(token_provider, admin_user)
         self._sessions: dict[str, dict[str, _Connection]] = {}
         self._gen: dict[str, int] = {}  # 사용자별 세대. close_user 가 올리면 그 전에 시작한 준비는 연결을 열지 못한다
-        self._admit_lock: Optional[asyncio.Lock] = None  # 상한 확인, 정리, 시작을 한 번에 하나씩(이벤트 루프 안에서 만든다)
+        self._admit_lock: Optional[asyncio.Lock] = None
+        self._preparing: dict[str, int] = {}  # 준비나 호출이 진행 중인 사용자. 이 사용자의 연결 묶음은 정리하지 않는다  # 상한 확인, 정리, 시작을 한 번에 하나씩(이벤트 루프 안에서 만든다)
         # 관리자 연결(예전의 서버 하나짜리 연결). 시험과 상태 확인이 이 이름으로 본다.
         self.connections = self._user_conns(admin_user)
         self.tools: dict[str, ExportedTool] = {t.name: t for s in servers.values() for t in s.tools.values()}
@@ -500,9 +508,35 @@ class McpGateway:
         await self._reconnect()
         self._watcher = asyncio.create_task(self._watch(), name="mcp:watch", context=contextvars.Context())
 
+    @contextlib.contextmanager
+    def _hold(self, user: str):
+        self._preparing[user] = self._preparing.get(user, 0) + 1
+        try:
+            yield
+        finally:
+            left = self._preparing[user] - 1
+            if left:
+                self._preparing[user] = left
+            else:
+                del self._preparing[user]
+            self._prune(user)
+
+    def _prune(self, user: str) -> None:
+        """연결이 하나도 열려 있지 않은(관리자 밖) 사용자의 연결 묶음을 잊는다. 사용자가 늘어도 메모리와 감시 대상이
+        열린 연결 수만큼만 남는다. 준비나 호출이 진행 중이면 두고, 다음에 쓸 때 새로 만든다."""
+        if user == self.admin_user or self._preparing.get(user):
+            return
+        conns = self._sessions.get(user)
+        if conns is not None and not any(c.running or c.in_flight for c in conns.values()):
+            del self._sessions[user]
+
     async def ensure_user(self, user: str, wait_s: float = USER_WAIT_S) -> None:
         """이 사용자의 연결 가운데 키가 있는 것을 연다(이미 열려 있으면 그대로). 새로 연 연결은 wait_s 까지 기다린다.
         키가 없어졌거나 바뀐 연결은 닫거나 다시 연다."""
+        with self._hold(user):
+            await self._ensure_user(user, wait_s)
+
+    async def _ensure_user(self, user: str, wait_s: float) -> None:
         gen = self._gen.get(user, 0)
         conns = self._user_conns(user)
         checks = await _isolated(lambda: {n: (c.credentials_present(), c.credential_fingerprint())
@@ -565,6 +599,8 @@ class McpGateway:
                 continue
             if not running and ok and admin:
                 await self._admit(conn, fingerprint)
+        for user in list(self._sessions):
+            self._prune(user)
 
     async def _watch(self) -> None:
         """키를 나중에 넣었거나 연결이 끊긴 관리자 서버를 30초마다 다시 열고, 쓰지 않는 사용자 연결을 닫는다."""
@@ -640,6 +676,10 @@ class McpGateway:
         except (KeyError, TypeError, ValueError) as exc:
             return {"is_error": True, "error": f"{tool.title} 입력이 올바르지 않습니다: {exc}"}
         args = {**tool.fixed, **args}
+        with self._hold(user):
+            return await self._dispatch(tool, args, user)
+
+    async def _dispatch(self, tool: ExportedTool, args: dict[str, Any], user: str) -> dict[str, Any]:
         gen = self._gen.get(user, 0)
         conn = self._user_conns(user)[tool.server]
         if not conn.running:
@@ -654,7 +694,7 @@ class McpGateway:
                             "error": f"{tool.title}: 연결이 해제되었습니다. 다시 연결해 달라고 안내하세요."}
                 return {"is_error": True, "error": f"{tool.title}: 지금은 연결이 많아 잠시 뒤에 다시 시도해 주세요."}
         try:
-            result = await conn.call(tool.upstream, args)
+            result = await conn.call(tool.upstream, args, admit=lambda: self._admit(conn, gen=gen))
         except SentRequestError as exc:
             if tool.confirm:
                 # 보냈는지 모르는 쓰기는 다시 실행하면 두 번 갈 수 있다. 성공 응답(200)으로 기록해 자동 재시도를 막는다.

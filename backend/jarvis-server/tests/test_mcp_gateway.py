@@ -136,7 +136,7 @@ def test_notion_error_payload_is_not_success(tmp_path, monkeypatch):
         ready = asyncio.Event()
         running = True
 
-        async def call(self, name, args):
+        async def call(self, name, args, **_):
             class R:
                 content = [type("T", (), {"text": json.dumps({"object": "error", "status": 401, "code": "unauthorized", "message": "API token is invalid."})})()]
                 structured_content = None
@@ -182,7 +182,7 @@ def test_timed_out_write_is_marked_uncertain_not_retryable(tmp_path, monkeypatch
         ready = asyncio.Event()
         running = True
 
-        async def call(self, name, args):
+        async def call(self, name, args, **_):
             raise g.SentRequestError(TimeoutError("늦음"))
 
     async def run():
@@ -204,7 +204,7 @@ def test_notion_string_error_status(tmp_path, monkeypatch):
         ready = asyncio.Event()
         running = True
 
-        async def call(self, name, args):
+        async def call(self, name, args, **_):
             class R:
                 content = [type("T", (), {"text": json.dumps({"status": "error", "data": "Bad Gateway"})})()]
                 structured_content = None
@@ -437,6 +437,41 @@ def test_closing_a_user_cancels_a_connection_still_being_prepared(tmp_path, monk
         await task
         assert not prepared.running  # 관리 밖에 남는 연결이 생기지 않음
         assert not any(c.running for c in gw._all_conns())
+        await gw.stop()
+
+    asyncio.run(run())
+
+
+
+def test_users_without_open_connections_are_not_kept(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        for i in range(50):
+            await gw.ensure_user(f"nobody{i}", wait_s=0)  # 연결한 계정이 없는 사용자들
+            await gw.call("who", {}, user=f"nobody{i}")
+        assert set(gw._sessions) == {"default"}
+        await gw.ensure_user("alice", wait_s=20)
+        assert "alice" in gw._sessions  # 연결이 열린 사용자는 남는다
+        await gw.close_user("alice")
+        await gw.stop()
+
+    asyncio.run(run())
+
+
+def test_a_connection_closed_mid_call_is_not_reopened_after_the_user_is_removed(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        await gw.ensure_user("alice", wait_s=20)
+        conn = gw._user_conns("alice")["fake"]
+        gen = gw._gen.get("alice", 0)
+        await gw.close_user("alice")  # 계정 삭제
+        # 앞서 시작된 호출이 이제야 다시 열려고 한다
+        assert await gw._admit(conn, gen=gen) is False
+        assert not conn.running
         await gw.stop()
 
     asyncio.run(run())
