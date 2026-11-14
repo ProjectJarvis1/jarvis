@@ -624,7 +624,9 @@ class GeminiSessionViewModel : ViewModel() {
                 liveConversation = liveConversation,
                 // Contact names leave the phone only when the user turned on "이름 인식 돕기" (D71).
                 speechContextHint = if (SettingsManager.nameHintsEnabled) contactActionManager.speechContextHint() else null,
-                taskContext = taskManager.contextJson().toString(),
+                // The work context that opens a new session is AI-bound too: phone numbers leave it the same way (D78).
+                taskContext = com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.ContactCandidates
+                    .redact(taskManager.contextJson().toString()).toString(),
             ) { setupOk ->
                 if (!setupOk) {
                     val msg = when (val state = geminiService.connectionState.value) {
@@ -1141,9 +1143,12 @@ class GeminiSessionViewModel : ViewModel() {
         if (name.isBlank()) {
             return ToolResult.Failure("저장할 연락처 이름을 알려주세요.")
         }
+        // A number the AI only knows as a candidate_id (a saved business card) is filled in on the device.
+        val candidate = com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.ContactCandidates
+            .resolve(call.args["candidate_id"]?.toString())
         return contactActionManager.createContact(
             name = name,
-            phone = call.args["phone"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
+            phone = call.args["phone"]?.toString()?.trim()?.takeIf { it.isNotBlank() && it != "null" } ?: candidate?.number,
             email = call.args["email"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
             org = call.args["org"]?.toString()?.trim()?.takeIf { it.isNotBlank() },
             role = call.args["role"]?.toString()?.trim()?.takeIf { it.isNotBlank() },

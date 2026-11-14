@@ -101,4 +101,12 @@ class ContactCandidatesTest {
             assertTrue(out.contains("[전화번호]"))
         }
     }
+
+    @Test fun sessionContextStringIsRedacted() {
+        val context = JSONObject().put("references", JSONArray().put(JSONObject()
+            .put("excerpt", "박과장 메모: 휴대폰 010-1234-5678로 연락").put("task_id", "t1"))).toString()
+        val out = ContactCandidates.redact(context).toString()
+        assertNoNumber(out)
+        assertTrue(out.contains("t1"))
+    }
 }

@@ -340,7 +340,8 @@ object ToolDeclarations {
         description = "Android 연락처 앱의 새 연락처 등록 화면을 엽니다. 사용자가 이름/전화번호/회사/직책을 알려주고 연락처에 저장하라고 할 때 사용하세요. 앱이 바로 자동 저장하지 않고 사용자가 확인 후 저장합니다.",
         properties = JSONObject()
             .put("name", strProp("연락처 이름"))
-            .put("phone", strProp("전화번호 (선택)"))
+            .put("phone", strProp("사용자가 직접 말한 전화번호 (선택)"))
+            .put("candidate_id", strProp("검색 결과에 전화번호 대신 있던 candidate_id (선택). 저장된 명함의 번호를 기기가 채웁니다"))
             .put("email", strProp("이메일 (선택)"))
             .put("org", strProp("회사/소속 (선택)"))
             .put("role", strProp("직책 (선택)"))
