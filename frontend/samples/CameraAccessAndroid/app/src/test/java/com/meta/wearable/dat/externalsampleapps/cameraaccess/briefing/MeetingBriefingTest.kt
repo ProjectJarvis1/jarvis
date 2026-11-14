@@ -63,6 +63,16 @@ class MeetingBriefingTest {
     }
 
     @Test
+    fun unsettledNameInTheTitleDoesNotPullInEitherPersonsHistory() {
+        val brief = MeetingBriefing.compose(UpcomingMeeting("e9:1", "김민수 미팅", now + 10 * 60_000L),
+            listOf(PersonHit("김민수", "가나상사"), PersonHit("김민수", "다른상사")),
+            listOf(MeetingHit("김민수 예산 협의", "2026-10-01T01:00:00Z", "다른상사 김민수와 예산 3억 논의.")), emptyList(), now)
+        assertTrue(brief.spoken.contains("김민수 님은 같은 이름이 여러 명 저장돼 있어서"))
+        assertFalse(brief.spoken.contains("예산"))
+        assertFalse(brief.hasRecords)
+    }
+
+    @Test
     fun sharedTopicWordAloneDoesNotLinkAnotherCompanysMeeting() {
         val brief = MeetingBriefing.compose(meeting, emptyList(),
             listOf(MeetingHit("다른회사 견적 회의", "2026-10-05T01:00:00Z", "다른회사는 견적을 3억으로 받았다.")), emptyList(), now)

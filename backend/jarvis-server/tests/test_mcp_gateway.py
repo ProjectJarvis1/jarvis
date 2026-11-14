@@ -226,3 +226,24 @@ def test_write_failure_from_mcp_is_uncertain_unless_clearly_rejected():
     assert not g._definitely_rejected(None, "upstream 503 Service Unavailable")
     assert not g._definitely_rejected(None, "request timed out")
     assert not g._definitely_rejected(None, "something went wrong")
+
+
+def test_disconnected_account_closes_connection_and_hides_tools(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    token = {"v": "account-a"}
+    cfg = _config(tmp_path)
+    cfg["fake"].env = {"FAKE_TOKEN": "$FAKE_TOKEN|db:fake"}
+
+    async def run():
+        gw = g.McpGateway(cfg, lambda p: token["v"] if p == "fake" else None)
+        await gw.start()
+        conn = gw.connections["fake"]
+        await asyncio.wait_for(conn.ready.wait(), 20)
+        assert gw.manifest()
+        token["v"] = None  # the account was disconnected in the app
+        await gw._reconnect()
+        assert not conn.ready.is_set() and (conn._task is None or conn._task.done())
+        assert gw.manifest() == []
+        await gw.stop()
+
+    asyncio.run(run())

@@ -66,6 +66,18 @@ def _bind_user(conn) -> None:
                  (user, user))
 
 
+class UserGone(Exception):
+    """The account no longer exists (deleted while a sign-in to another service was in progress)."""
+
+
+def hold_live_user(conn, user: str) -> None:
+    """For writes made outside the user's own request (an OAuth callback): hold the user's lock like their
+    requests do, so an account deletion cannot interleave, and refuse when the account is already gone."""
+    conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended('jarvis-user:' || %s, 0))", (user,))
+    if conn.execute("SELECT 1 FROM app_users WHERE id = %s", (user,)).fetchone() is None:
+        raise UserGone(user)
+
+
 def lock_user_exclusively(conn, user: str) -> None:
     """Waits for the user's running transactions and blocks new ones until this transaction ends."""
     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('jarvis-user:' || %s, 0))", (user,))

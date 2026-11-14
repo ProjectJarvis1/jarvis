@@ -259,4 +259,18 @@ class TaskManagerTest {
         assertFalse(manager.get(task.id)!!.dispatched)
     }
 
+    @Test fun successfulResultSurvivesAnArchiveFailure() = test {
+        val long = "검색 결과 ".repeat(TaskResults.INLINE_LIMIT / 4)
+        val store = object : TaskStore {
+            override suspend fun load() = emptyList<TaskRecord>()
+            override suspend fun save(tasks: List<TaskRecord>) {}
+            override suspend fun archiveResult(key: String, result: String): String? = error("result store full")
+        }
+        val manager = TaskManager(this, store, { _, _ -> TaskOutcome(result = long) })
+        manager.initialize()
+        val task = manager.submit("search_memory", "{}", "search")
+        val done = manager.until(task.id, TaskState.COMPLETED)
+        assertNotNull(done.result)
+        assertNull(done.resultFile)
+    }
 }

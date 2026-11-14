@@ -15,7 +15,7 @@ from .. import notion_mcp_auth
 from ..auth import require_api_key
 from ..auth import user_id as current_user_id
 from ..config import settings
-from ..db import get_conn
+from ..db import UserGone, get_conn, hold_live_user
 
 
 router = APIRouter(
@@ -55,6 +55,7 @@ def _upsert_integration(
     metadata: Optional[dict[str, Any]] = None,
 ) -> None:
     with get_conn() as conn:
+        hold_live_user(conn, user_id)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -221,6 +222,14 @@ def connect(provider: str, state: str = Query(...)):
 
 @router.get("/{provider}/callback")
 def callback(provider: str, code: str = Query(...), state: str = Query(...)):
+    try:
+        return _callback(provider, code, state)
+    except UserGone:
+        # The Jarvis account was deleted while this sign-in was open: keep no tokens for it.
+        return _failed_html("계정", "Jarvis 계정이 삭제되어 연결하지 않았어요.")
+
+
+def _callback(provider: str, code: str, state: str):
     user_id = _check_state(provider, state)
     if provider == "google":
         data = _form_post(

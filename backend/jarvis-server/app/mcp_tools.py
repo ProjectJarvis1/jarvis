@@ -1,3 +1,4 @@
+import http.client
 import json
 import urllib.parse
 import urllib.error
@@ -60,7 +61,8 @@ def call_tool(name: str, arguments: dict[str, Any], user_id: str = "default") ->
         if isinstance(exc, urllib.error.HTTPError):
             sent_maybe = exc.code >= 500
         else:
-            sent_maybe = isinstance(exc, (TimeoutError, OSError, ResponseUnreadable))
+            # http.client.HTTPException: the reply was cut off (IncompleteRead) or malformed after sending.
+            sent_maybe = isinstance(exc, (TimeoutError, OSError, ResponseUnreadable, http.client.HTTPException))
         return {
             "is_error": True,
             "uncertain": bool(tool.requires_confirmation and sent_maybe),

@@ -20,7 +20,7 @@ from typing import Any, Optional
 from psycopg.types.json import Jsonb
 
 from .config import settings
-from .db import get_conn
+from .db import get_conn, hold_live_user
 
 ISSUER = "https://mcp.notion.com"
 RESOURCE = "https://mcp.notion.com/mcp"
@@ -117,6 +117,7 @@ def authorize_url(state: str) -> str:
 def _save_tokens(user_id: str, data: dict[str, Any]) -> None:
     expires_at = time.time() + float(data.get("expires_in") or 3600)
     with get_conn() as conn:
+        hold_live_user(conn, user_id)
         with conn.cursor() as cur:
             cur.execute(
                 """

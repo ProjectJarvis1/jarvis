@@ -98,9 +98,13 @@ object MeetingBriefing {
         }.take(3)
         val anchors = (names - ambiguous.toSet() + persons.flatMap { it.allNames } + persons.map { it.org })
             .filter { it.length >= 2 }.distinct()
+        // The title fallback never matches on an unsettled name: "김민수 미팅" with two saved 김민수 would
+        // otherwise pull in either one's history.
+        val fallbackWords = titleWords.filter { w -> ambiguous.none { a -> w.contains(a, ignoreCase = true) } }
         fun about(vararg texts: String) =
             anchors.any { a -> texts.any { it.contains(a, ignoreCase = true) } } ||
-                (titleWords.isNotEmpty() && titleWords.all { w -> texts.any { it.contains(w, ignoreCase = true) } })
+                (fallbackWords.isNotEmpty() && fallbackWords.size == titleWords.size &&
+                    fallbackWords.all { w -> texts.any { it.contains(w, ignoreCase = true) } })
         // Only meetings that already happened; a scheduled one is not "지난 회의".
         val pastMeetings = meetings.filter { about(it.title, it.summary) && (epochMs(it.startedAt)?.let { t -> t < nowMs } ?: false) }
             .sortedByDescending { it.startedAt }.take(2)

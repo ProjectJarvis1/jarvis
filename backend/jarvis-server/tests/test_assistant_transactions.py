@@ -51,7 +51,9 @@ def api():
 
     app.add_middleware(IdempotencyMiddleware)
     with TestClient(app) as client:
-        client.headers["X-API-Key"] = os.environ["API_KEY"]
+        # Settings are read once per process; another test file may have loaded them first.
+        from app.config import settings
+        client.headers["X-API-Key"] = settings.api_key
         yield client, get_conn
     close_pool()
     sys.modules.pop("app.embeddings", None)
@@ -272,3 +274,16 @@ def test_remote_tool_token_lookup_does_not_wait_for_the_pool(api, monkeypatch):
         raise AssertionError("pool used while every pooled connection is taken")
     monkeypatch.setattr(db.pool, "connection", exhausted)
     assert integration_token("slack_user", "default") == "tok-1"
+
+
+def test_service_sign_in_finishing_after_account_deletion_keeps_no_tokens(api):
+    _, get_conn = api
+    from app.db import UserGone
+    from app.routers.integrations import _upsert_integration
+    with pytest.raises(UserGone):
+        _upsert_integration(user_id="u_deleted_" + str(uuid4())[:6], provider="google", access_token="tok")
+    _upsert_integration(user_id="default", provider="google", access_token="tok-live")
+    with get_conn() as conn:
+        assert conn.execute("SELECT access_token_encrypted FROM user_integrations WHERE user_id='default' AND provider='google'").fetchone()["access_token_encrypted"] == "tok-live"
+        conn.execute("DELETE FROM user_integrations WHERE user_id='default' AND provider='google'")
+        conn.commit()

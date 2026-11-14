@@ -30,6 +30,13 @@ class Cursor:
         return self.row
 
 
+def followups_scope():
+    tree = ast.parse((ROOT / "app/followups.py").read_text())
+    qualifier = next(ast.literal_eval(n.value) for n in tree.body
+                     if isinstance(n, ast.Assign) and n.targets[0].id == "_QUALIFIER")
+    return functions("app/followups.py", {"normalize_followups"}, {"re": __import__("re"), "_QUALIFIER": qualifier})
+
+
 def projection():
     embedded = []
     scope = {"Optional": Optional, "List": List, "Jsonb": lambda x: x,
@@ -84,7 +91,7 @@ def test_migrations_have_atomic_ledger_and_all_writer_revision_triggers():
 
 
 def test_followups_reject_ungrounded_evidence():
-    scope = functions("app/followups.py", {"normalize_followups"}, {"re": __import__("re")})
+    scope = followups_scope()
     result = scope["normalize_followups"]([
         {"task": "send", "evidence": "not in transcript", "owner": "invented", "due_at": "2026-10-20"}
     ], "actual transcript")
@@ -92,7 +99,7 @@ def test_followups_reject_ungrounded_evidence():
 
 
 def test_relative_due_expression_is_preserved_without_invented_iso_date():
-    scope = functions("app/followups.py", {"normalize_followups"}, {"re": __import__("re")})
+    scope = followups_scope()
     result = scope["normalize_followups"]([
         {"task": "견적 발송", "owner": "민수", "evidence": "민수: 내일 견적을 보내겠습니다.", "due_at": "2026-10-18T09:00:00+09:00"}
     ], "민수: 내일 견적을 보내겠습니다.")
@@ -157,6 +164,12 @@ def test_unreadable_write_response_is_uncertain():
     with mock.patch.object(t, "_integration_token", return_value="tok"), mock.patch.object(t, "_http_json", side_effect=broken):
         out = t.call_tool("calendar_create_event", {"title": "a", "start": "2026-11-07"})
     assert out["is_error"] and out["uncertain"]
+    import http.client
+    def cut_off(*a, **k):
+        raise http.client.IncompleteRead(b"{", 10)
+    with mock.patch.object(t, "_integration_token", return_value="tok"), mock.patch.object(t, "_http_json", side_effect=cut_off):
+        out = t.call_tool("calendar_create_event", {"title": "a", "start": "2026-11-07"})
+    assert out["is_error"] and out["uncertain"]
 
 
 def test_calendar_times_are_korean_wall_clock():
@@ -202,10 +215,15 @@ def test_unconnected_account_is_a_failed_dispatch_not_a_success():
 
 
 def test_fallback_due_text_keeps_approximate_and_before_words():
-    scope = functions("app/followups.py", {"normalize_followups"}, {"re": __import__("re")})
+    scope = followups_scope()
     def due(evidence):
         return scope["normalize_followups"]([{"task": "견적", "evidence": evidence}], evidence)[0]["due_text"]
     assert due("내일쯤 견적서를 보내겠습니다") == "내일쯤"
     assert due("11월 15일 전에 드릴게요") == "11월 15일 전에"
     assert due("다음 주까지 정리할게요") == "다음 주까지"
     assert due("모레 보내드릴게요") == "모레"
+    assert due("내일 전화 드릴게요") == "내일"
+    # A date the model quoted without its qualifier gets it back from the evidence.
+    out = scope["normalize_followups"]([{"task": "견적", "evidence": "민수: 내일쯤 견적서를 보내겠습니다.", "due_text": "내일"}],
+                                       "민수: 내일쯤 견적서를 보내겠습니다.")
+    assert out[0]["due_text"] == "내일쯤"
