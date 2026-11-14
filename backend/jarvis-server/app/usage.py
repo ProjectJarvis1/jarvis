@@ -131,17 +131,37 @@ def add(user: str, kind: Kind, amount: int) -> None:
         logging.getLogger("jarvis.usage").warning("사용량 기록 실패(%s)", kind.name)
 
 
-def refund(user: str, kind: Kind, amount: int = 1) -> None:
-    """take 로 센 호출이 비용 없이 실패했을 때 되돌린다(0 아래로는 내려가지 않는다)."""
+def refund(user: str, kind: Kind, amount: int = 1, day: date | None = None) -> None:
+    """take 로 센 양을 쓰지 않았을 때 되돌린다(0 아래로는 내려가지 않는다). day 를 주면 그 날짜에서 뺀다."""
     if exempt(user) or amount <= 0 or not limit(kind):
         return
     try:
         with _conn(user) as conn:
             conn.execute("UPDATE ai_usage SET amount = GREATEST(amount - %s, 0) WHERE user_id = %s AND day = %s AND kind = %s",
-                         (amount, user, today(), kind.name))
+                         (amount, user, day or today(), kind.name))
             conn.commit()
     except Exception:
         pass
+
+
+def reserve(user: str, kind: Kind, want: int) -> tuple[int, date | None]:
+    """want 까지 미리 떼어 둔다(동시에 연 대화도 같은 한도를 나눠 쓰게). (떼어 둔 양, 그 날짜).
+    한도가 없거나 관리자면 (want, None), 남은 양이 없으면 (0, 날짜). 남은 양이 want 보다 적으면 남은 만큼만."""
+    cap = limit(kind)
+    if exempt(user) or not cap:
+        return want, None
+    for _ in range(3):  # 남은 양을 읽은 뒤 다른 요청이 먼저 뗄 수 있다. 몇 번 다시 시도한다.
+        day = today()
+        left = remaining(user, kind) or 0
+        amount = min(want, left)
+        if amount <= 0:
+            return 0, day
+        try:
+            take(user, kind, amount)
+            return amount, day
+        except HTTPException:
+            continue
+    return 0, today()
 
 
 def remaining(user: str, kind: Kind) -> int | None:

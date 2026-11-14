@@ -89,17 +89,21 @@ object CrashReporter {
      */
     fun uploadPending(context: Context, nowMs: Long = System.currentTimeMillis()) {
         if (!JarvisAccount.isSignedIn || !GeminiConfig.isJarvisConfigured) return
+        // The account and its session are taken once: a switch while sending stops the run, so one account's
+        // reports never go out under another's session.
         val uid = JarvisAccount.userId
+        val auth = GeminiConfig.jarvisAuthorization
         val files = (listOf(dir(context, uid), dir(context, "")).flatMap { it.listFiles()?.toList().orEmpty() })
             .sortedBy { it.name }
         for (file in files) {
+            if (!JarvisAccount.isSignedIn || JarvisAccount.userId != uid || GeminiConfig.jarvisAuthorization != auth) return
             val json = runCatching { JSONObject(file.readText()) }.getOrNull()
             val age = nowMs - (file.name.removeSuffix(".json").toLongOrNull() ?: 0L)
             if (json == null || age > KEEP_MS) { file.delete(); continue }
             val code = runCatching {
                 client.newCall(Request.Builder()
                     .url("${GeminiConfig.jarvisApiBase.trimEnd('/')}/client-errors")
-                    .addHeader("Authorization", GeminiConfig.jarvisAuthorization)
+                    .addHeader("Authorization", auth)
                     .post(json.toString().toRequestBody("application/json".toMediaType()))
                     .build()).execute().use { it.code }
             }.onFailure { Log.w(TAG, "Crash report not sent: ${it.javaClass.simpleName}") }.getOrNull() ?: return

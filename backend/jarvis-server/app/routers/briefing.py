@@ -96,8 +96,27 @@ def _prep(mail: mb.MailMeta, match: mb.Match, meetings: list[dict[str, Any]]) ->
     return lines
 
 
+_MAX_NEW_MAILS = 100  # 한 번에 살펴보는 새 메일 수의 상한. 그보다 많이 밀려 있으면 최근 것부터 이만큼만 본다.
+
+
+def _list_ids(token: str, query: str, page_size: int, cap: int) -> list[str]:
+    """검색에 맞는 메일 id 를 다음 쪽(nextPageToken)까지 따라가며 cap 개까지 모은다(최근 것부터)."""
+    ids: list[str] = []
+    page: Optional[str] = None
+    while len(ids) < cap:
+        params = [("q", query), ("maxResults", str(min(page_size, cap - len(ids))))]
+        if page:
+            params.append(("pageToken", page))
+        listing = mcp_tools._gmail_get("messages", token, params)
+        ids += [str(item.get("id")) for item in listing.get("messages") or [] if item.get("id")]
+        page = listing.get("nextPageToken")
+        if not page:
+            break
+    return ids[:cap]
+
+
 @router.get("/mail/new")
-def new_mail(after_ms: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=30)):
+def new_mail(after_ms: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100)):
     user = current_user_id()
     token, connected = _token(user)
     now_ms = int(time.time() * 1000)
@@ -106,8 +125,8 @@ def new_mail(after_ms: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=30)
     since = max(after_ms, now_ms - _LOOKBACK_MAX_MS)
     query = f"in:inbox after:{since // 1000} -category:promotions -category:social -category:forums"
     try:
-        listing = mcp_tools._gmail_get("messages", token, [("q", query), ("maxResults", str(limit))])
-        metas = [_meta(token, str(item.get("id"))) for item in (listing.get("messages") or [])[:limit]]
+        ids = _list_ids(token, query, limit, _MAX_NEW_MAILS)
+        metas = [_meta(token, message_id) for message_id in ids]
     except Exception as exc:
         handled = _handled(exc, user)
         if handled is not None:
@@ -115,7 +134,7 @@ def new_mail(after_ms: int = Query(0, ge=0), limit: int = Query(20, ge=1, le=30)
         raise
     mails = [m for m in (_mail(meta) for meta in metas) if m.date_ms > since]
     # 다음 확인은 이번에 본 가장 늦은 메일 뒤부터. 하나도 없으면 지금까지 본 것으로 친다.
-    checked_until = max([m.date_ms for m in mails], default=now_ms if not listing.get("messages") else since)
+    checked_until = max([m.date_ms for m in mails], default=now_ms if not ids else since)
     people = _people()
     meetings = _meetings(90)
     out = []

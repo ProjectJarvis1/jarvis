@@ -265,3 +265,110 @@ def test_mail_context_and_followups(api, monkeypatch):
     items = client.get("/briefing/followups", headers=auth(users, "p1b")).json()["items"]
     assert items and items[0]["task"] == "수정 견적서 보내기" and items[0]["meeting_title"] == "대성테크 견적 미팅"
     assert client.get("/briefing/followups", headers=auth(users, "p1a")).json()["items"] == []
+
+
+@db
+def test_live_time_is_reserved_so_parallel_sessions_share_it(api, monkeypatch):
+    from app import usage
+    _, users, pool = api
+    monkeypatch.setenv("AI_LIMIT_LIVE_MINUTES", "1")
+    uid = users["p1b"][0]
+    with pool.connection() as conn:
+        conn.execute("DELETE FROM ai_usage WHERE user_id = %s", (uid,))
+        conn.commit()
+    first, day = usage.reserve(uid, usage.LIVE_SECONDS, 45)
+    second, _ = usage.reserve(uid, usage.LIVE_SECONDS, 45)  # 두 번째 대화는 남은 15초만
+    third, _ = usage.reserve(uid, usage.LIVE_SECONDS, 45)
+    assert (first, second, third) == (45, 15, 0)
+    usage.refund(uid, usage.LIVE_SECONDS, 10, day)  # 쓰지 않은 만큼 돌려받으면 다시 쓸 수 있다
+    assert usage.reserve(uid, usage.LIVE_SECONDS, 45)[0] == 10
+    assert usage.reserve("default", usage.LIVE_SECONDS, 45) == (45, None)
+
+
+@db
+def test_new_mail_follows_next_pages(api, monkeypatch):
+    from app import mcp_tools
+    client, users, _ = api
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    noise = [{"id": f"n{i}", "from": "친구 <f@x.example>", "subject": "주말 사진", "snippet": "", "ms": now - 1000 - i} for i in range(60)]
+    quote = {"id": "q", "from": "구매팀 <buy@y.example>", "subject": "견적 요청드립니다", "snippet": "", "ms": now - 100_000}
+    everything = noise + [quote]
+    base = _fake_gmail(everything)
+
+    def get(path, token, query=None):
+        if path != "messages":
+            return base(path, token, query)
+        q = dict(query or [])
+        start = int(q.get("pageToken") or 0)
+        size = int(q["maxResults"])
+        page = everything[start:start + size]
+        out = {"messages": [{"id": m["id"]} for m in page]}
+        if start + size < len(everything):
+            out["nextPageToken"] = str(start + size)
+        return out
+    monkeypatch.setattr(mcp_tools, "_gmail_token_or_reauth", lambda user: ("tok", None))
+    monkeypatch.setattr(mcp_tools, "_gmail_get", get)
+    r = client.get("/briefing/mail/new", params={"after_ms": now - 3_600_000, "limit": 20}, headers=auth(users, "p1a")).json()
+    assert [m["id"] for m in r["mails"]] == ["q"]
+
+
+@db
+def test_live_relay_stops_when_time_runs_out_and_refunds_unused(api, monkeypatch):
+    import asyncio
+    import threading
+    import websockets
+    from app import usage
+    from app.config import settings
+    from app.routers import gemini_relay
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from starlette.websockets import WebSocketDisconnect
+    _, users, pool = api
+    uid, token = users["p1a"]
+
+    ready = threading.Event()
+    holder = {}
+
+    async def upstream(ws):
+        async for message in ws:
+            await ws.send(message)
+
+    def serve():
+        async def main():
+            async with websockets.serve(upstream, "127.0.0.1", 0) as server:
+                holder["port"] = server.sockets[0].getsockname()[1]
+                ready.set()
+                await asyncio.Future()
+        asyncio.run(main())
+    threading.Thread(target=serve, daemon=True).start()
+    assert ready.wait(5)
+    object.__setattr__(settings, "gemini_live_url", f"ws://127.0.0.1:{holder['port']}")
+    object.__setattr__(settings, "gemini_live_key", "test")
+    monkeypatch.setattr(gemini_relay, "_LIVE_CHUNK_S", 1)
+    real_limit = usage.limit
+    monkeypatch.setattr(usage, "limit", lambda kind: 2 if kind is usage.LIVE_SECONDS else real_limit(kind))
+    with pool.connection() as conn:
+        conn.execute("DELETE FROM ai_usage WHERE user_id = %s", (uid,))
+        conn.commit()
+    app = FastAPI()
+    app.include_router(gemini_relay.router)
+    try:
+        with TestClient(app) as client:
+            with client.websocket_connect("/live/gemini", headers={"Authorization": f"Bearer {token}"}) as ws:
+                ws.send_text("hello")
+                assert ws.receive_text() == "hello"
+                with pytest.raises(WebSocketDisconnect) as closed:
+                    for _ in range(50):
+                        ws.receive_text()
+                assert closed.value.code == usage.LIVE_CLOSE_CODE
+            # 다 썼으니 새 대화는 바로 막힌다.
+            with client.websocket_connect("/live/gemini", headers={"Authorization": f"Bearer {token}"}) as ws:
+                with pytest.raises(WebSocketDisconnect) as closed:
+                    ws.receive_text()
+                assert closed.value.code == usage.LIVE_CLOSE_CODE
+    finally:
+        object.__setattr__(settings, "gemini_live_url", "")
+        object.__setattr__(settings, "gemini_live_key", "")
+    with pool.connection() as conn:
+        used = conn.execute("SELECT amount FROM ai_usage WHERE user_id = %s AND kind = 'live_seconds'", (uid,)).fetchone()
+    assert used and used["amount"] == 2

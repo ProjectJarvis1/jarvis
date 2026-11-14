@@ -108,4 +108,22 @@ class AssistantP1Test {
         assertFalse(withMail.spoken.contains("연락처를 지우세요"))
         assertEquals(empty, MeetingBriefing.withMail(empty, emptyList()))
     }
+
+    @Test
+    fun morningWithoutCalendarSaysItCouldNotCheck() {
+        assertEquals("캘린더 권한이 없어 오늘 일정과 마감은 확인하지 못했어요. 챙길 할 일은 2개 있어요.",
+            ProactivePlanner.morningMessage(0, 0, 2, null, calendarOk = false))
+        val detail = ProactivePlanner.morningDetail(emptyList(), emptyList(), null, morning, calendarOk = false)
+        assertTrue(detail.contains("캘린더 권한이 없어 확인하지 못했어요"))
+        assertFalse(detail.contains("챙길 일정이 없어요"))
+    }
+
+    @Test
+    fun ambiguousNamesAreKeptForTheMailLookupToSkip() {
+        val meeting = UpcomingMeeting("k", "정기 미팅", kst(2026, 11, 13, 14), attendees = listOf("김민수"))
+        val people = listOf(PersonHit("김민수", "한빛정밀"), PersonHit("김민수", "대성테크"))
+        val brief = MeetingBriefing.compose(meeting, people, emptyList(), emptyList(), kst(2026, 11, 13, 13, 52))
+        assertEquals(listOf("김민수"), brief.ambiguous)
+        assertTrue(brief.people.isEmpty())
+    }
 }

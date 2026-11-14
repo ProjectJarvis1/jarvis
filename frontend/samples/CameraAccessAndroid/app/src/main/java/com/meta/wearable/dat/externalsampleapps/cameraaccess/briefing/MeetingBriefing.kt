@@ -34,7 +34,7 @@ data class MemoryHit(val text: String, val peopleText: String = "", val captured
  */
 data class Brief(val spoken: String, val detail: String, val people: List<String> = emptyList(), val hasRecords: Boolean = true,
     val hasHistory: Boolean = true, val historyWith: List<String> = emptyList(), val mentioned: List<String> = emptyList(),
-    val orgs: List<String> = emptyList())
+    val orgs: List<String> = emptyList(), val ambiguous: List<String> = emptyList())
 
 /** A recent mail with someone in the meeting, as the server found it in Gmail ([date] is "2026-11-12 10:00", KST). */
 data class MailHit(val sender: String, val subject: String, val date: String, val snippet: String = "")
@@ -160,7 +160,8 @@ object MeetingBriefing {
                 val texts = notes.flatMap { listOf(it.text, it.peopleText) }
                 p.allNames.any { n -> texts.any { it.contains(n) } }
             }.map { it.name },
-            orgs = persons.map { it.org }.filter { it.isNotBlank() }.distinct())
+            orgs = persons.map { it.org }.filter { it.isNotBlank() }.distinct(),
+            ambiguous = ambiguous.toList())
     }
 
     /**

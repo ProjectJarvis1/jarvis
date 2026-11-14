@@ -59,11 +59,12 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             fun sameAccount() = JarvisAccount.isSignedIn && JarvisAccount.userId == uid
 
             // Without the calendar permission there are no events, but mail offers and the morning briefing still work.
-            val items = if (MeetingBriefer.hasCalendarPermission(app))
+            val calendarOk = MeetingBriefer.hasCalendarPermission(app)
+            val items = if (calendarOk)
                 MeetingBriefer.calendarItems(app, nowMs - 24 * 3_600_000L, ProactivePlanner.windowEnd(nowMs)) else emptyList()
             val sent = mutableListOf<ProactiveOffer>()
             if (SettingsManager.morningBriefingEnabled) {
-                morningOffer(app, items, nowMs)?.let { (key, o) ->
+                morningOffer(app, items, nowMs, calendarOk)?.let { (key, o) ->
                     if (stillWanted() && SettingsManager.morningBriefingEnabled && sameAccount() && ProactivePlanner.withinHours(current()) &&
                         ProactiveStore.recordAndPost(app, uid, key, o) { JarvisNotifications.postOffer(app, o) }) sent += o
                 }
@@ -123,7 +124,7 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
          * The day's morning briefing, once, from the chosen time until noon. Null when it is not due, was sent,
          * or a server call failed (tried again on the next run). Gmail not linked: the briefing goes without mail.
          */
-        private fun morningOffer(app: Context, items: List<CalendarItem>, nowMs: Long): Pair<String, ProactiveOffer>? {
+        private fun morningOffer(app: Context, items: List<CalendarItem>, nowMs: Long, calendarOk: Boolean): Pair<String, ProactiveOffer>? {
             if (!ProactivePlanner.morningDue(nowMs, SettingsManager.morningBriefingMinute)) return null
             val key = ProactivePlanner.morningKey(nowMs)
             if (key in ProactiveStore.claimed(app, nowMs)) return null
@@ -132,10 +133,10 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             val mails = if (mail?.connected == true) mail.mails else null
             val today = ProactivePlanner.morningToday(items, nowMs)
             val deadlines = ProactivePlanner.morningDeadlines(items, nowMs)
-            val detail = ProactivePlanner.morningDetail(items, followups, mails, nowMs, mailFailed = mail == null)
+            val detail = ProactivePlanner.morningDetail(items, followups, mails, nowMs, mailFailed = mail == null, calendarOk = calendarOk)
             val title = "${ProactivePlanner.dateLabel(ProactivePlanner.today(nowMs))} 아침 브리핑"
             return key to ProactiveOffer("morning-${ProactivePlanner.today(nowMs)}", OfferKind.MORNING, title,
-                ProactivePlanner.morningMessage(today.size, deadlines.size, followups.size, mails?.size), detail, nowMs, nowMs)
+                ProactivePlanner.morningMessage(today.size, deadlines.size, followups.size, mails?.size, calendarOk), detail, nowMs, nowMs)
         }
 
         /** Offered only when stored records are about this meeting; otherwise there is nothing to sum up. */

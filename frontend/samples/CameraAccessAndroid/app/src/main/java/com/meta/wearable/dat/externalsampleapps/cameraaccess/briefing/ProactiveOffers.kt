@@ -110,14 +110,19 @@ object ProactivePlanner {
         today(nowMs).minusDays(1).atTime(QUIET_FROM_HOUR, 0).atZone(KST).toInstant().toEpochMilli()
 
     /** "오늘 일정 2개, 다가오는 마감 1개, 챙길 할 일 3개가 있어요. 밤사이 업무 메일 2통도 왔어요." [mailCount] null: Gmail not connected. */
-    fun morningMessage(todayCount: Int, deadlineCount: Int, followupCount: Int, mailCount: Int?): String {
+    fun morningMessage(todayCount: Int, deadlineCount: Int, followupCount: Int, mailCount: Int?, calendarOk: Boolean = true): String {
         val parts = listOfNotNull(
             todayCount.takeIf { it > 0 }?.let { "오늘 일정 ${it}개" },
             deadlineCount.takeIf { it > 0 }?.let { "다가오는 마감 ${it}개" },
             followupCount.takeIf { it > 0 }?.let { "챙길 할 일 ${it}개" },
         )
-        val first = if (parts.isEmpty()) "오늘은 등록된 일정이나 마감, 챙길 할 일이 없어요."
-            else parts.joinToString(", ") + "가 있어요."
+        val first = when {
+            // Without the calendar, "no events" would be a guess; say that it could not be checked.
+            !calendarOk -> "캘린더 권한이 없어 오늘 일정과 마감은 확인하지 못했어요." +
+                (if (followupCount > 0) " 챙길 할 일은 ${followupCount}개 있어요." else "")
+            parts.isEmpty() -> "오늘은 등록된 일정이나 마감, 챙길 할 일이 없어요."
+            else -> parts.joinToString(", ") + "가 있어요."
+        }
         val mail = if (mailCount != null && mailCount > 0) " 밤사이 업무 메일 ${mailCount}통도 왔어요." else ""
         return first + mail
     }
@@ -127,9 +132,10 @@ object ProactivePlanner {
      * and the overnight mail count. [items] may hold other days; only today and the deadline window are used.
      */
     fun morningDetail(items: List<CalendarItem>, followups: List<FollowupItem>, mails: List<MailCandidate>?, nowMs: Long,
-        mailFailed: Boolean = false): String {
+        mailFailed: Boolean = false, calendarOk: Boolean = true): String {
         val day = today(nowMs)
         val lines = mutableListOf("${dateLabel(day)} 아침 브리핑")
+        if (!calendarOk) lines += "오늘 일정: 캘린더 권한이 없어 확인하지 못했어요. 설정에서 캘린더를 허용해 주세요."
         morningToday(items, nowMs).forEach { item ->
             lines += "오늘 일정: " + (if (item.allDay) "하루 종일" else clock(item.beginMs)) + " ${item.title}" +
                 (if (item.location.isNotBlank()) " (${item.location})" else "")
@@ -145,7 +151,7 @@ object ProactivePlanner {
             mails.isEmpty() -> lines += "밤사이 메일: 새로 온 업무 메일은 없어요."
             else -> mails.take(3).forEach { m -> lines += "밤사이 메일: ${m.sender.ifBlank { "보낸 사람 모름" }}, ${m.subject}" }
         }
-        if (lines.size == 1) lines += "오늘은 챙길 일정이 없어요."
+        if (lines.size == 1) lines += "오늘은 챙길 일정이 없어요."  // never reached without the calendar: that line is there
         return lines.joinToString("\n")
     }
 

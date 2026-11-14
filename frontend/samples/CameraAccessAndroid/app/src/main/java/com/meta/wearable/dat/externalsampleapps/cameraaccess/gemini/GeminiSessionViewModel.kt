@@ -266,7 +266,7 @@ class GeminiSessionViewModel : ViewModel() {
             try {
                 if (action == "approve") {
                     require(taskManager.get(id)?.tool?.let(::needsReview) == true) { "이 작업은 전용 확인 화면을 사용하세요." }
-                    taskManager.approve(id, revision)
+                    taskManager.approve(id, withFaceConsent(id, revision))
                 } else {
                     taskManager.control(id, revision, action)
                     if (action in setOf("cancel", "hold")) openClawBridge.durableRequests.cancel("$id:$revision")
@@ -274,6 +274,19 @@ class GeminiSessionViewModel : ViewModel() {
                 }
             } catch (e: Exception) { _uiState.value = _uiState.value.copy(errorMessage = e.message) }
         }
+    }
+
+    /**
+     * A face save shown on screen asks "상대방이 얼굴 저장에 동의했나요?" (D37); pressing its button is the user's
+     * answer. That consent goes into the task before it runs, as a new revision. Returns the revision to approve.
+     */
+    private fun withFaceConsent(id: String, revision: Int): Int {
+        val task = taskManager.get(id) ?: return revision
+        if (task.tool != "save_person" || task.revision != revision) return revision
+        val args = runCatching { JSONObject(task.argsJson) }.getOrNull() ?: return revision
+        if (!args.optBoolean("include_face") || args.optBoolean("face_consent")) return revision
+        taskManager.editDraft(id, revision, args.put("face_consent", true).toString())
+        return revision + 1
     }
 
     fun editTask(id: String, revision: Int, args: String) {
