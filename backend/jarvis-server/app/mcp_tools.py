@@ -643,17 +643,18 @@ def _gmail_read_thread(args: dict[str, Any], user_id: str) -> dict[str, Any]:
                 return _gmail_get(path, token).get("data") or ""
             except urllib.error.URLError:
                 return ""
-        full = _mail_text(message.get("payload") or {}, fetch)
-        body = full[:min(_MAIL_BODY_LIMIT, max(budget, 0))]
+        # 본문 길이를 다 쓴 뒤의 오래된 메일은 본문을 받아 오지도 읽지도 않는다(따로 저장된 본문 요청이 쌓여 늦어지지 않게).
+        full = _mail_text(message.get("payload") or {}, fetch) if budget > 0 else None
+        body = (full or "")[:min(_MAIL_BODY_LIMIT, max(budget, 0))]
         item = {
             "from": head.get("from", "")[:200],
             "to": head.get("to", "")[:200],
             "subject": head.get("subject", "(제목 없음)")[:200],
             "date": _kst(message.get("internalDate")),
             "body": body,
-            "body_cut": len(body) < len(full),
+            "body_cut": full is None or len(body) < len(full),
         }
-        if not full:
+        if full == "":
             item["body_missing"] = True  # 본문을 읽지 못함(첨부만 있거나 받아 오지 못함). 지어내지 말 것
         size = len(json.dumps(item, ensure_ascii=False)) + 2
         if out and used + size > _THREAD_JSON_BUDGET:

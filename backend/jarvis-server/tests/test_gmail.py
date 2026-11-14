@@ -373,3 +373,15 @@ def test_rejected_token_shows_connect_button_until_reconnected(monkeypatch):
     monkeypatch.setattr(integ, "_form_post", lambda *a, **k: {"access_token": "a", "scope": f"{integ._CALENDAR_SCOPE} {t.GMAIL_SCOPE}"})
     integ.callback("google", "code", _state("gmail"))
     assert saved[0]["metadata"]["needs_reconnect"] is False and saved[0]["metadata"]["gmail_enabled"] is True
+
+
+def test_no_body_fetch_after_budget_is_used(gmail, monkeypatch):
+    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE], "metadata": ON}])
+    monkeypatch.setattr(t, "_integration_token", lambda *a: "good-token")
+    monkeypatch.setattr(t, "_THREAD_BODY_BUDGET", 5)
+    monkeypatch.setitem(THREAD, "messages", [
+        {"id": "big", "internalDate": "1", "payload": {"mimeType": "text/plain", "headers": [], "body": {"attachmentId": "att1"}}},
+        {"id": "m9", "internalDate": "2", "payload": {"mimeType": "text/plain", "headers": [], "body": {"data": b64("최근 메일")}}}])
+    old, new = t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1", app=True)["structured_content"]["messages"]
+    assert new["body"] == "최근 메일"[:5] and old["body"] == "" and old["body_cut"] and "body_missing" not in old
+    assert not any("/attachments/" in c for c in FakeGmail.calls)
