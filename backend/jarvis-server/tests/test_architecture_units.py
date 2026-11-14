@@ -231,3 +231,6 @@ def test_fallback_due_text_keeps_approximate_and_before_words():
     ev = "민수: 다다음 주 금요일까지 드릴게요."
     out = scope["normalize_followups"]([{"task": "견적", "evidence": ev, "due_text": "다음 주 금요일"}], ev)
     assert out[0]["due_text"] == ""
+    assert due("민수: 내일모레 견적을 보내겠습니다.") == ""
+    ev = "오늘내일 중에 드릴게요"
+    assert scope["normalize_followups"]([{"task": "견적", "evidence": ev, "due_text": "오늘"}], ev)[0]["due_text"] == ""

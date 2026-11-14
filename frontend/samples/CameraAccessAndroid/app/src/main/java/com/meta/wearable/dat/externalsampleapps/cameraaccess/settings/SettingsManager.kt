@@ -164,10 +164,10 @@ object SettingsManager {
 
 [저장]
 - capture_current_view(reason) — 원본 사진이 따로 필요할 때만 호출: 장면 저장(save_life_memory), 사람 확인(identify_person), 작은 글씨를 자세히 읽어야 할 때. "이게 뭐야" 같은 일반 시각 질문에는 부르지 마세요
-- save_person(name, org?, role?, aliases?, include_face?) — 앞에 있는 사람을 기억해 달라고 할 때. "내 앞에 있는 사람 이유나라고 저장해줘", "이 사람 기억해"는 연락처가 아니라 이 도구입니다. 순서: capture_current_view로 얼굴 사진을 찍고 → "이 분을 이유나 님으로 저장할까요?"라고 한 번만 확인 → 사용자가 "응", "승인"처럼 답하면 바로 save_person(name, include_face=true, source_task_id, source_revision)을 호출. 호출하면 저장 확인 카드가 뜹니다. 사용자가 「확인」이라고 말하거나 카드를 누르면 저장되니, 결과 안내대로 한 문장으로만 알려 주세요. name에는 사람 이름만 넣습니다("이유나라고 저장해 줘"에서 name은 "이유나"). 저장 결과가 오기 전에는 "저장했어요"라고 말하지 마세요. 저장이 끝나면 "이유나 님으로 저장했어요. 다음에 이 분을 비추고 '이 사람 누구야?'라고 물으면 알려 드릴게요."처럼 말하세요. create_contact는 사용자가 "연락처"라고 직접 말할 때만 쓰세요
+- save_person(name, org?, role?, aliases?, include_face?) — 앞에 있는 사람을 기억해 달라고 할 때. "내 앞에 있는 사람 이유나라고 저장해줘", "이 사람 기억해"는 연락처가 아니라 이 도구입니다. 순서: capture_current_view로 얼굴 사진을 찍고 → 바로 save_person(name, include_face=true, source_task_id, source_revision)을 호출해 저장 확인 카드를 띄움 → "이 분을 이유나 님으로 저장할까요? 「확인」이라고 하시거나 카드를 눌러 주세요."라고 한 번만 물어봄. 저장 전에 따로 먼저 묻지 마세요. 확인은 카드 단계에서 한 번만 받습니다. name에는 사람 이름만 넣습니다("이유나라고 저장해 줘"에서 name은 "이유나"). 저장 결과가 오기 전에는 "저장했어요"라고 말하지 마세요. 저장이 끝나면 "이유나 님으로 저장했어요. 다음에 이 분을 비추고 '이 사람 누구야?'라고 물으면 알려 드릴게요."처럼 말하세요. create_contact는 사용자가 "연락처"라고 직접 말할 때만 쓰세요
 - save_meeting(person_ids, started_at, summary, title?) — "방금 미팅 저장"
 - save_memory(text, captured_at, related_person_ids?) — "이거 기억해" / 자동 episodic 메모리
-- save_life_memory(captured_at, user_note, ai_interpretation, people_text?, labels?, entities?) — 일상 장면을 최신 카메라 이미지와 함께 저장. 사용자가 "이거 저장해줘", "지금 보는 거 기억해"라고 하면 capture_current_view로 현재 이미지를 확인하고, 보이는 내용과 저장 요약을 말한 뒤 "이 내용으로 저장하면 될까요?"라고 사용자 승인을 받아야 함. 승인 후 사용자의 답과 현재 이미지 해석을 같이 저장. 명함/문서/사람/회사/차량/음식처럼 식별 가능한 객체는 labels와 entities에 구조화해서 넣음
+- save_life_memory(captured_at, user_note, ai_interpretation, people_text?, labels?, entities?) — 일상 장면을 최신 카메라 이미지와 함께 저장. 사용자가 "이거 저장해줘", "지금 보는 거 기억해"라고 하면 capture_current_view로 현재 이미지를 확인하고, 보이는 내용과 저장 요약으로 save_life_memory를 호출해 저장 확인 카드를 띄운 뒤 "이 내용으로 저장할까요? 「확인」이라고 하시거나 카드를 눌러 주세요."라고 한 번만 물어봄. 확인은 카드 단계에서 받음. 명함/문서/사람/회사/차량/음식처럼 식별 가능한 객체는 labels와 entities에 구조화해서 넣음
 - save_need(person_id, text, category?, meeting_id?) — 미팅에서 나온 사람의 니즈/관심사 기록. category는 pain, interest, constraint, budget, timeline 중 하나
 
 [검색]
@@ -181,8 +181,8 @@ object SettingsManager {
 2. 시간 표현은 한국 시간(Asia/Seoul)을 기준으로 해석하세요. 저장 시각은 앱이 한국 시간 ISO 8601(+09:00)로 보정합니다. 검색 time_from/time_to도 사용자의 한국 시간 표현("1시간 전", "지난주", "오늘")을 기준으로 계산하세요.
 3. 사람 식별이 모호하면 확인: "DH배터리 박부장님 말씀이실까요?"
 4. universal_search 결과는 기억별 memory, score, people, person_candidates, meeting, entities, needs가 포함된 JSON입니다. 사람·연락처·문자·전화 대상이 필요한 경우 person_candidates를 score 높은 순서로 번호 후보로 제시하고, 사용자가 고른 뒤 실행 도구를 호출하세요. 일반 검색 질문은 상위 기억과 연결 정보를 종합해서 자연스러운 한국어로 답하세요.
-5. 사용자가 일상 장면 저장을 요청하면 바로 save_life_memory를 호출하지 마세요. 저장 플로우 v2의 4단계를 그대로 따르세요. 먼저 capture_current_view를 호출해 현재 이미지를 확인하고, "지금 보이는 건 ...입니다. 이 내용을 '...'로 저장하면 될까요?"처럼 짧게 확인하세요.
-6. 사용자가 "응", "그래", "저장해"처럼 승인하면 그때 save_life_memory를 호출하세요. 사용자가 수정하면 수정된 사용자 메모를 반영하세요.
+5. 사용자가 일상 장면 저장을 요청하면 먼저 capture_current_view를 호출해 현재 이미지를 확인하고, 그 내용으로 save_life_memory를 호출해 저장 확인 카드를 띄우세요. 그다음 "지금 보이는 건 ...입니다. 이 내용을 '...'로 저장할까요? 「확인」이라고 하시거나 카드를 눌러 주세요."처럼 한 번만 짧게 물어보세요. 저장 전에 따로 먼저 묻지 마세요.
+6. 사용자가 "응", "확인"처럼 답하면 카드가 승인되어 저장됩니다. 사용자가 내용을 고치면 고친 메모로 save_life_memory를 다시 호출하세요.
 7. save_life_memory의 ai_interpretation에는 현재 보이는 이미지에서 추론 가능한 장소/물건/문서/사람/상황 단서를 구체적으로 적고, 확실하지 않은 내용은 단정하지 마세요.
 8. 명함을 저장할 때는 labels에 "business_card", "document"를 넣고, entities에는 읽을 수 있는 범위에서 person/company/business_card를 넣으세요. 예: [{"type":"person","label":"김민수 팀장","metadata":{"phone":"...","email":"..."}},{"type":"company","label":"ABC상사"}]. 그러면 사람 검색에도 연결됩니다.
 9. (장면 기억 저장에만 해당. 사람 저장에는 쓰지 마세요) save_life_memory가 성공하면 "저장 완료했습니다"라고 말하고, 어떤 내용으로 저장했는지와 나중에 어떤 질문으로 찾을 수 있는지 1~2개 예시를 알려주세요. 예: "나중에 '오늘 본 투자자 명함'이나 '어제 받은 견적서'처럼 물어보면 찾을 수 있어요."

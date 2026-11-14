@@ -309,3 +309,24 @@ def test_person_correction_updates_the_searchable_profile(api):
         text = conn.execute("SELECT text FROM memories WHERE metadata->>'origin_person_id'=%s", (str(person),)).fetchone()["text"]
     assert "옛회사" in text
 
+
+
+def test_notion_refresh_never_brings_back_a_removed_connection(api):
+    _, get_conn = api
+    from app import notion_mcp_auth, token_crypto
+    with get_conn() as conn:
+        conn.execute("DELETE FROM user_integrations WHERE user_id='default' AND provider='notion_mcp'")
+        conn.commit()
+    # Removed while the refresh was in flight: nothing is written back.
+    assert notion_mcp_auth._save_refreshed("default", "r-old", {"access_token": "a-new", "refresh_token": "r-new"}) is False
+    with get_conn() as conn:
+        assert conn.execute("SELECT 1 FROM user_integrations WHERE user_id='default' AND provider='notion_mcp'").fetchone() is None
+        conn.execute("INSERT INTO user_integrations(user_id, provider, access_token_encrypted, refresh_token_encrypted) "
+                     "VALUES('default','notion_mcp',%s,%s)", (token_crypto.encrypt("a-old"), token_crypto.encrypt("r-old")))
+        conn.commit()
+    assert notion_mcp_auth._save_refreshed("default", "r-old", {"access_token": "a-new", "refresh_token": "r-new"}) is True
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM user_integrations WHERE user_id='default' AND provider='notion_mcp'").fetchone()
+        assert token_crypto.decrypt(row["access_token_encrypted"]) == "a-new"
+        conn.execute("DELETE FROM user_integrations WHERE user_id='default' AND provider='notion_mcp'")
+        conn.commit()
