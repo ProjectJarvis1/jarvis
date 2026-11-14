@@ -73,8 +73,8 @@ def connected_providers(user_id: str = "") -> set[str]:
 def app_tools() -> list[dict[str, Any]]:
     """앱이 Gemini 에 넘길 도구 목록: 연결된 외부 MCP 도구 + 계정이 연결된 서버 자체 도구."""
     gw = mcp_gateway.gateway
-    # 외부 MCP 연결은 관리자 계정 하나로 열려 있어 다른 사용자에게는 보여 주지 않는다.
-    tools = gw.manifest() if gw and current_user_id() == _GATEWAY_USER else []
+    # 외부 MCP 연결은 사용자마다 따로 열린다. 이 사용자의 연결에서 나온 도구만 보여 준다.
+    tools = gw.manifest(current_user_id()) if gw else []
     taken = {t["name"] for t in tools}
     connected = connected_providers()
     for manifest in list_tools(app=True):
@@ -94,20 +94,28 @@ def app_tools() -> list[dict[str, Any]]:
     return tools
 
 
+async def _user_tools() -> list[dict[str, Any]]:
+    """이 사용자의 외부 연결을 (키가 있으면) 열고 도구 목록을 만든다."""
+    gw = mcp_gateway.gateway
+    if gw:
+        try:
+            await gw.ensure_user(current_user_id())
+        except Exception:  # 외부 연결이 안 돼도 서버 자체 도구는 내보낸다
+            import logging
+            logging.getLogger("jarvis.mcp").exception("사용자 MCP 연결 준비 실패")
+    return await run_in_threadpool(app_tools)
+
+
 @router.get("/tools")
-def get_tools():
-    return {"tools": app_tools()}
+async def get_tools():
+    return {"tools": await _user_tools()}
 
 
 @router.get("/status")
-def status():
+async def status():
     gw = mcp_gateway.gateway
-    return {"servers": gw.status() if gw else {}}
-
-
-# 외부 MCP 연결은 서버 하나에 계정 하나(.env 키 또는 "default" 사용자의 계정 연결)로 연다.
-# 다른 user_id 로 외부 도구를 부르면 남의 계정으로 실행되지 않게 거절한다.
-_GATEWAY_USER = ADMIN_USER
+    user = current_user_id()
+    return {"servers": await run_in_threadpool(gw.status, user) if gw else {}}
 
 
 def _with_details(result: dict[str, Any]) -> dict[str, Any]:
@@ -168,12 +176,13 @@ async def _run(name: str, arguments: dict[str, Any], user_id: str) -> dict[str, 
     gw = mcp_gateway.gateway
     native = _ALIASES.get(name, name)
     if gw and gw.is_external(name):
-        if user_id != _GATEWAY_USER:
-            return {"is_error": True, "error": "외부 도구는 기본 사용자 계정으로만 실행합니다."}
+        # 그 사용자의 연결로만 실행한다(남의 계정으로 실행되지 않음).
+        if not gw.is_ready(name, user_id):
+            await gw.ensure_user(user_id)
         # 노션 MCP 가 아직 안 붙었으면, 예전 계정 연결로 동작하던 서버 자체 노션 검색을 쓴다.
-        if not gw.is_ready(name) and get_tool(native, app=True) is not None:
+        if not gw.is_ready(name, user_id) and get_tool(native, app=True) is not None:
             return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id, True))
-        return await gw.call(name, arguments)
+        return await gw.call(name, arguments, user=user_id)
     if get_tool(native, app=True) is None:
         return {"is_error": True, "error": f"unknown tool: {name}"}
     return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id, True))
@@ -201,7 +210,7 @@ async def _call(name: str, arguments: dict[str, Any], user_id: str, request_key:
 @router.post("")
 async def jsonrpc(body: JsonRpcRequest, idempotency_key: str = Header("", alias="Idempotency-Key")):
     if body.method == "tools/list":
-        return {"jsonrpc": "2.0", "id": body.id, "result": {"tools": await run_in_threadpool(app_tools)}}
+        return {"jsonrpc": "2.0", "id": body.id, "result": {"tools": await _user_tools()}}
     if body.method == "tools/call":
         name = body.params.get("name", "")
         arguments = body.params.get("arguments") or {}

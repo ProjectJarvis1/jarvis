@@ -1,8 +1,14 @@
 """외부 MCP 서버를 서버가 대신 불러 주는 연결부.
 
 앱은 /mcp/tools 로 한 목록만 받고 /mcp 의 tools/call 로 실행한다. 이 모듈은
-mcp_servers.json 에 적힌 외부 서버마다 연결을 하나씩 계속 열어 두고(노션은 node 프로세스라
-매번 띄우면 1~2초가 더 든다), 골라 둔 도구만 이름을 바꿔 내보낸다.
+mcp_servers.json 에 적힌 외부 서버마다, 사용자마다 연결을 따로 연다. 사용자 A 의 노션 토큰으로 연
+연결은 A 의 요청만 받으므로 결과가 다른 사용자에게 섞이지 않는다. 골라 둔 도구만 이름을 바꿔 내보낸다.
+
+- 관리자 계정("default")의 연결은 서버가 뜰 때 열어 두고, 키가 .env 에 있어도 된다(예전 방식).
+- 다른 사용자의 연결은 그 사용자가 도구 목록을 받거나 도구를 부를 때 열고, 키는 그 사용자의 계정 연결(DB)에서만
+  읽는다. .env 키는 관리자 것이라 다른 사용자에게 쓰지 않는다.
+- 열어 둔 연결 수에는 상한(MAX_SESSIONS)이 있고, 오래 안 쓴 연결(IDLE_TIMEOUT_S)은 닫는다.
+  연결을 해제하거나 계정을 지우면 그 사용자의 연결을 바로 닫는다(close_user).
 
 연결 하나는 작업(task) 하나가 맡는다. anyio 의 취소 범위는 들어간 작업에서 나와야 하므로
 요청은 큐로 넘겨 그 작업 안에서 실행한다.
@@ -13,10 +19,12 @@ import asyncio
 import contextlib
 import contextvars
 import hashlib
+import inspect
 import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -28,6 +36,9 @@ CALL_TIMEOUT_S = 20.0
 CONNECT_TIMEOUT_S = 25.0
 RESULT_LIMIT = 6000
 WATCH_INTERVAL_S = 30.0
+MAX_SESSIONS = 40          # 모든 사용자를 합쳐 동시에 열어 두는 외부 연결 수
+IDLE_TIMEOUT_S = 600.0     # 관리자 밖 사용자의 연결은 이만큼 안 쓰면 닫는다
+USER_WAIT_S = 6.0          # 도구 목록을 줄 때 새로 연 연결을 기다리는 시간
 _NAME_RE = re.compile(r"[^A-Za-z0-9_]")
 
 # Gemini 함수 선언은 OpenAPI 의 일부만 받는다. 아래 키는 지우거나 바꾼다.
@@ -75,10 +86,12 @@ def export_name(name: str) -> str:
     return _NAME_RE.sub("_", name)[:64]
 
 
-def _expand_env(value: str, token_provider: Optional[Callable[[str], Optional[str]]] = None) -> str:
-    """"$NAME" 은 환경 변수, "$NAME|db:provider" 는 환경 변수가 없을 때 계정 연결(DB) 토큰."""
+def _expand_env(value: str, token_provider: Optional[Callable[[str], Optional[str]]] = None,
+                allow_env: bool = True) -> str:
+    """"$NAME" 은 환경 변수, "$NAME|db:provider" 는 환경 변수가 없을 때 계정 연결(DB) 토큰.
+    allow_env=False(관리자가 아닌 사용자)면 환경 변수는 보지 않고 그 사용자의 계정 연결만 쓴다."""
     name, _, fallback = value.partition("|db:")
-    expanded = re.sub(r"\$([A-Z0-9_]+)", lambda m: os.getenv(m.group(1), ""), name)
+    expanded = re.sub(r"\$([A-Z0-9_]+)", lambda m: os.getenv(m.group(1), ""), name) if allow_env else ""
     if not expanded and fallback and token_provider:
         expanded = token_provider(fallback) or ""
     return expanded
@@ -204,9 +217,13 @@ TokenProvider = Callable[[str], Optional[str]]  # auth 이름 -> 접근 토큰(�
 class _Connection:
     """외부 서버 하나와의 연결. 끊기면 다음 요청 때 다시 연결한다."""
 
-    def __init__(self, cfg: ServerConfig, token_provider: TokenProvider):
+    def __init__(self, cfg: ServerConfig, token_provider: TokenProvider, user: str = "default", allow_env: bool = True):
         self.cfg = cfg
         self.token_provider = token_provider
+        self.user = user
+        self.allow_env = allow_env
+        self.last_used = time.monotonic()
+        self.in_flight = 0  # 지금 이 연결에서 실행 중인 요청 수. 실행 중인 연결은 상한 정리 때 닫지 않는다
         self.upstream_tools: dict[str, Any] = {}
         self.ready = asyncio.Event()
         self.error: Optional[str] = None
@@ -219,13 +236,17 @@ class _Connection:
         """지금 쓸 키의 지문. 노션 계정을 다시 연결해 토큰이 바뀌면 달라진다."""
         if self.cfg.transport != "stdio":
             return ""
-        joined = "\n".join(_expand_env(v, self.token_provider) for v in self.cfg.env.values())
+        joined = "\n".join(_expand_env(v, self.token_provider, self.allow_env) for v in self.cfg.env.values())
         return hashlib.sha256(joined.encode()).hexdigest()
 
     def credentials_present(self) -> bool:
         if self.cfg.transport == "stdio":
-            return all(_expand_env(v, self.token_provider) for v in self.cfg.env.values())
+            return all(_expand_env(v, self.token_provider, self.allow_env) for v in self.cfg.env.values())
         return self.cfg.auth is None or bool(self.token_provider(self.cfg.auth))
+
+    @property
+    def running(self) -> bool:
+        return self._task is not None and not self._task.done()
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -233,7 +254,7 @@ class _Connection:
             self.error = None
             self._closing = False
             # 연결은 요청보다 오래 산다. 요청의 DB 트랜잭션 같은 문맥 변수를 물려받지 않게 빈 문맥으로 띄운다.
-            self._task = asyncio.create_task(self._run(), name=f"mcp:{self.cfg.name}", context=contextvars.Context())
+            self._task = asyncio.create_task(self._run(), name=f"mcp:{self.cfg.name}:{self.user}", context=contextvars.Context())
 
     async def stop(self) -> None:
         if self._task and not self._task.done():
@@ -251,7 +272,7 @@ class _Connection:
 
         if self.cfg.transport == "stdio":
             env = {"PATH": os.getenv("PATH", "/opt/homebrew/bin:/usr/bin:/bin"), "HOME": os.getenv("HOME", "")}
-            env.update({k: _expand_env(v, self.token_provider) for k, v in self.cfg.env.items()})
+            env.update({k: _expand_env(v, self.token_provider, self.allow_env) for k, v in self.cfg.env.items()})
             async with stdio_client(StdioServerParameters(command=self.cfg.command, args=self.cfg.args, env=env)) as streams:
                 yield streams
             return
@@ -317,6 +338,15 @@ class _Connection:
                     future.set_exception(RuntimeError(f"{self.cfg.name} 연결이 끊겼습니다."))
 
     async def call(self, name: str, arguments: dict[str, Any]):
+        self.in_flight += 1
+        self.last_used = time.monotonic()
+        try:
+            return await self._call(name, arguments)
+        finally:
+            self.in_flight -= 1
+            self.last_used = time.monotonic()
+
+    async def _call(self, name: str, arguments: dict[str, Any]):
         if self._closing and self._task and not self._task.done():
             try:  # 닫히는 중인 연결이 다 정리된 뒤 새로 연다
                 await asyncio.wait_for(asyncio.shield(self._task), 10)
@@ -382,39 +412,132 @@ def _content_text(result: Any) -> tuple[str, bool]:
     return "\n".join(parts), bool(getattr(result, "is_error", False))
 
 
+def _per_user(token_provider: Callable[..., Optional[str]], admin_user: str) -> Callable[[str, str], Optional[str]]:
+    """토큰 조회를 (auth, user) 로 맞춘다. 사용자를 받지 않는 조회(auth 만)는 관리자 것으로만 쓴다:
+    누구에게나 같은 토큰을 주면 남의 계정으로 실행되기 때문이다."""
+    try:
+        params = [p for p in inspect.signature(token_provider).parameters.values()
+                  if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL)]
+    except (TypeError, ValueError):
+        return token_provider
+    if len(params) >= 2 or any(p.kind == p.VAR_POSITIONAL for p in params):
+        return token_provider
+    return lambda auth, user: token_provider(auth) if user == admin_user else None
+
+
 class McpGateway:
-    def __init__(self, servers: dict[str, ServerConfig], token_provider: TokenProvider):
+    def __init__(self, servers: dict[str, ServerConfig], token_provider: Callable[..., Optional[str]],
+                 admin_user: str = "default"):
         self.servers = servers
-        self.connections = {n: _Connection(s, token_provider) for n, s in servers.items()}
+        self.admin_user = admin_user
+        self._token = _per_user(token_provider, admin_user)
+        self._sessions: dict[str, dict[str, _Connection]] = {}
+        # 관리자 연결(예전의 서버 하나짜리 연결). 시험과 상태 확인이 이 이름으로 본다.
+        self.connections = self._user_conns(admin_user)
         self.tools: dict[str, ExportedTool] = {t.name: t for s in servers.values() for t in s.tools.values()}
+
+    def _user_conns(self, user: str) -> dict[str, _Connection]:
+        conns = self._sessions.get(user)
+        if conns is None:
+            def provider(auth: str, user: str = user) -> Optional[str]:
+                return self._token(auth, user)
+            conns = {n: _Connection(s, provider, user, allow_env=(user == self.admin_user))
+                     for n, s in self.servers.items()}
+            self._sessions[user] = conns
+        return conns
+
+    def _all_conns(self) -> list[_Connection]:
+        return [c for conns in list(self._sessions.values()) for c in conns.values()]
+
+    async def _make_room(self) -> bool:
+        """연결 수가 상한이면, 실행 중인 요청이 없는 가장 오래 안 쓴(관리자 밖) 연결을 닫는다."""
+        running = [c for c in self._all_conns() if c.running]
+        if len(running) < MAX_SESSIONS:
+            return True
+        idle = sorted((c for c in running if c.user != self.admin_user and c.in_flight == 0), key=lambda c: c.last_used)
+        if not idle:
+            log.warning("MCP 연결이 상한(%d)이라 새 연결을 열지 않음", MAX_SESSIONS)
+            return False
+        await self._close(idle[0])
+        return True
+
+    @staticmethod
+    async def _close(conn: _Connection) -> None:
+        await conn.stop()
+        conn.ready.clear()
+        conn.fingerprint = ""
 
     async def start(self) -> None:
         await self._reconnect()
         self._watcher = asyncio.create_task(self._watch(), name="mcp:watch", context=contextvars.Context())
 
+    async def ensure_user(self, user: str, wait_s: float = USER_WAIT_S) -> None:
+        """이 사용자의 연결 가운데 키가 있는 것을 연다(이미 열려 있으면 그대로). 새로 연 연결은 wait_s 까지 기다린다.
+        키가 없어졌거나 바뀐 연결은 닫거나 다시 연다."""
+        conns = self._user_conns(user)
+        checks = await asyncio.to_thread(lambda: {n: (c.credentials_present(), c.credential_fingerprint())
+                                                  for n, c in conns.items()})
+        now = time.monotonic()
+        for name, (ok, fingerprint) in checks.items():
+            conn = conns[name]
+            conn.last_used = now
+            if conn.running and not ok:
+                await self._close(conn)
+                continue
+            if conn.running and fingerprint != conn.fingerprint:
+                await self._close(conn)
+            if not conn.running and ok and await self._make_room():
+                conn.fingerprint = fingerprint
+                conn.start()
+        pending = [asyncio.create_task(c.ready.wait()) for c in conns.values() if c.running and not c.ready.is_set()]
+        if pending:
+            _, late = await asyncio.wait(pending, timeout=wait_s)
+            for task in late:
+                task.cancel()
+
+    async def close_user(self, user: str, auths: Optional[set[str]] = None) -> None:
+        """사용자의 연결을 바로 닫는다(연결 해제, 계정 삭제). auths 를 주면 그 계정 연결을 쓰는 서버만 닫는다."""
+        conns = self._sessions.get(user) or {}
+        for conn in conns.values():
+            used = {conn.cfg.auth} | {v.partition("|db:")[2] for v in conn.cfg.env.values()}
+            if auths is None or used & auths:
+                await self._close(conn)
+        if auths is None and user != self.admin_user:
+            self._sessions.pop(user, None)
+
     async def _reconnect(self) -> None:
-        conns = list(self.connections.values())
+        conns = self._all_conns()
         # 키 확인은 DB 를 볼 수 있어 작업자 스레드에서, 연결 시작은 이 이벤트 루프에서 한다.
-        checks = await asyncio.to_thread(lambda: [(c.credentials_present(), c.credential_fingerprint()) for c in conns])
+        checks = await asyncio.to_thread(lambda: [(c.credentials_present(), c.credential_fingerprint()) if (c.running or c.user == self.admin_user)
+                                                  else (False, "") for c in conns])
+        now = time.monotonic()
         for conn, (ok, fingerprint) in zip(conns, checks):
-            running = conn._task is not None and not conn._task.done()
+            running = conn.running
+            admin = conn.user == self.admin_user
             if running and not ok:
                 # Account disconnected: stop now so its tools leave the list, not after a later call fails.
-                log.info("MCP %s 키가 없어져 연결을 닫음", conn.cfg.name)
-                await conn.stop()
-                conn.ready.clear()
-                conn.fingerprint = ""
+                log.info("MCP %s(%s) 키가 없어져 연결을 닫음", conn.cfg.name, conn.user)
+                await self._close(conn)
                 continue
             if running and fingerprint != conn.fingerprint:
-                log.info("MCP %s 키가 바뀌어 다시 연결", conn.cfg.name)
+                log.info("MCP %s(%s) 키가 바뀌어 다시 연결", conn.cfg.name, conn.user)
                 await conn.stop()
                 running = False
-            if not running and ok:
+                if not admin:
+                    # 사용자 연결은 다음에 쓸 때 새 키로 연다.
+                    conn.ready.clear()
+                    conn.fingerprint = ""
+                    continue
+            if running and not admin and conn.in_flight == 0 and now - conn.last_used > IDLE_TIMEOUT_S:
+                log.info("MCP %s(%s) 오래 쓰지 않아 닫음", conn.cfg.name, conn.user)
+                await self._close(conn)
+                continue
+            if not running and ok and admin:
                 conn.fingerprint = fingerprint
                 conn.start()
 
     async def _watch(self) -> None:
-        """키를 나중에 넣었거나 연결이 끊긴 서버를 30초마다 다시 연다."""
+        """키를 나중에 넣었거나 연결이 끊긴 관리자 서버를 30초마다 다시 열고, 쓰지 않는 사용자 연결을 닫는다."""
         while True:
             await asyncio.sleep(WATCH_INTERVAL_S)
             try:
@@ -426,14 +549,17 @@ class McpGateway:
         watcher = getattr(self, "_watcher", None)
         if watcher:
             watcher.cancel()
-        for conn in self.connections.values():
+        for conn in self._all_conns():
             await conn.stop()
 
-    def manifest(self) -> list[dict[str, Any]]:
-        """연결된 서버의 도구만 내보낸다. 키가 없거나 연결이 안 된 서버는 목록에서 빠진다."""
+    def manifest(self, user: Optional[str] = None) -> list[dict[str, Any]]:
+        """이 사용자의 연결된 서버 도구만 내보낸다. 키가 없거나 연결이 안 된 서버는 목록에서 빠진다."""
+        conns = self._sessions.get(user or self.admin_user) or {}
         out = []
         for tool in self.tools.values():
-            conn = self.connections[tool.server]
+            conn = conns.get(tool.server)
+            if conn is None:
+                continue
             if not conn.ready.is_set():
                 continue  # 끊긴 연결은 _watch 가 이벤트 루프에서 다시 연다
             upstream = conn.upstream_tools.get(tool.upstream)
@@ -454,9 +580,10 @@ class McpGateway:
     def is_external(self, name: str) -> bool:
         return name in self.tools
 
-    def is_ready(self, name: str) -> bool:
+    def is_ready(self, name: str, user: Optional[str] = None) -> bool:
         tool = self.tools.get(name)
-        return bool(tool) and self.connections[tool.server].ready.is_set()
+        conn = (self._sessions.get(user or self.admin_user) or {}).get(tool.server) if tool else None
+        return bool(conn) and conn.ready.is_set()
 
     def preview(self, name: str, arguments: dict[str, Any]) -> Optional[str]:
         tool = self.tools.get(name)
@@ -470,8 +597,9 @@ class McpGateway:
         shown = "\n".join(f"{k}: {v}" for k, v in arguments.items() if k != "page_id")
         return f"{tool.title}을(를) 실행할까요?\n{shown}".strip()
 
-    async def call(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def call(self, name: str, arguments: dict[str, Any], user: Optional[str] = None) -> dict[str, Any]:
         tool = self.tools[name]
+        user = user or self.admin_user
         args = {k: v for k, v in arguments.items() if v is not None}
         missing = [k for k in (tool.parameters or {}).get("required", []) if args.get(k) in (None, "")]
         if missing:
@@ -482,8 +610,17 @@ class McpGateway:
         except (KeyError, TypeError, ValueError) as exc:
             return {"is_error": True, "error": f"{tool.title} 입력이 올바르지 않습니다: {exc}"}
         args = {**tool.fixed, **args}
+        conn = self._user_conns(user)[tool.server]
+        if not conn.running:
+            # 키가 없으면 남의 키나 빈 키로 연결하지 않고, 연결이 필요하다고 돌려준다(아무것도 실행하지 않음).
+            if not await asyncio.to_thread(conn.credentials_present):
+                return {"is_error": True, "needs_auth": True,
+                        "error": f"{tool.title}: 계정 연결이 필요합니다. 앱 설정의 서비스 연결에서 연결해 달라고 안내하세요."}
+            if not await self._make_room():
+                return {"is_error": True, "error": f"{tool.title}: 지금은 연결이 많아 잠시 뒤에 다시 시도해 주세요."}
+            conn = self._user_conns(user)[tool.server]
         try:
-            result = await self.connections[tool.server].call(tool.upstream, args)
+            result = await conn.call(tool.upstream, args)
         except SentRequestError as exc:
             if tool.confirm:
                 # 보냈는지 모르는 쓰기는 다시 실행하면 두 번 갈 수 있다. 성공 응답(200)으로 기록해 자동 재시도를 막는다.
@@ -523,9 +660,10 @@ class McpGateway:
         truncated = len(text) > RESULT_LIMIT
         return {"is_error": False, "content": text[:RESULT_LIMIT] + ("\n…(뒷부분 생략)" if truncated else "")}
 
-    def status(self) -> dict[str, Any]:
+    def status(self, user: Optional[str] = None) -> dict[str, Any]:
+        conns = self._user_conns(user or self.admin_user)
         return {n: {"connected": c.ready.is_set(), "credentials": c.credentials_present(), "error": c.error}
-                for n, c in self.connections.items()}
+                for n, c in conns.items()}
 
 
 gateway: Optional[McpGateway] = None

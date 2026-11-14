@@ -54,7 +54,7 @@ object ServiceConnections {
     suspend fun linkUrl(service: Service): String = withContext(Dispatchers.IO) {
         client.newCall(request("/integrations/${service.key}/link").get().build()).execute().use { response ->
             val text = response.body?.string().orEmpty()
-            // A 400 explains itself (e.g. Notion is admin-only for now); show that sentence to the user.
+            // A 400 explains itself (e.g. the server cannot connect that service yet); show that sentence to the user.
             if (response.code == 400) throw ServiceRefused(runCatching { JSONObject(text).getString("detail") }.getOrDefault("연결할 수 없어요."))
             check(response.isSuccessful) { "서버 응답 ${response.code}" }
             JSONObject(text).getString("url")

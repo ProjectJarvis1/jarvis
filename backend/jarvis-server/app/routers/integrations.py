@@ -8,6 +8,7 @@ import urllib.request
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import HTMLResponse, RedirectResponse
 from psycopg.types.json import Jsonb
 
@@ -134,20 +135,29 @@ _SERVICE_ROWS = {"notion": ("notion_mcp", "notion"), "google": ("google",), "sla
 
 
 @router.delete("/{service}", dependencies=[Depends(require_api_key)])
-def disconnect(service: str):
-    """앱의 '연결 해제'. 저장한 토큰을 지운다(상대 서비스 쪽 권한은 그 서비스 설정에서 따로 거둔다)."""
+async def disconnect(service: str):
+    """앱의 '연결 해제'. 저장한 토큰을 지우고, 그 계정으로 열려 있던 외부 도구 연결을 바로 닫는다
+    (상대 서비스 쪽 권한은 그 서비스 설정에서 따로 거둔다)."""
     user_id = current_user_id()
     if service == "gmail":
-        return _drop_gmail_scope(user_id)
+        return await run_in_threadpool(_drop_gmail_scope, user_id)
     rows = _SERVICE_ROWS.get(service)
     if not rows:
         raise HTTPException(404, "unknown integration provider")
+    deleted = await run_in_threadpool(_delete_rows, user_id, rows)
+    from .. import mcp_gateway
+    if mcp_gateway.gateway:
+        await mcp_gateway.gateway.close_user(user_id, set(rows))
+    return {"disconnected": service, "rows": deleted}
+
+
+def _delete_rows(user_id: str, rows: tuple[str, ...]) -> int:
     with get_conn() as conn:
         with conn.cursor() as cur:
             cur.execute("DELETE FROM user_integrations WHERE user_id = %s AND provider = ANY(%s)", (user_id, list(rows)))
             deleted = cur.rowcount
         conn.commit()
-    return {"disconnected": service, "rows": deleted}
+    return deleted
 
 
 def _drop_gmail_scope(user_id: str) -> dict[str, Any]:
@@ -205,10 +215,6 @@ def link(provider: str):
         raise HTTPException(404, "unknown integration provider")
     if "." in user_id:
         raise HTTPException(400, "user_id 에 마침표를 쓸 수 없습니다.")
-    from ..auth import ADMIN_USER
-    if provider == "notion" and user_id != ADMIN_USER:
-        # Notion runs through the server's single MCP connection, which belongs to the admin account.
-        raise HTTPException(400, "노션 연동은 아직 관리자 계정에서만 쓸 수 있어요.")
     query = urllib.parse.urlencode({"state": _make_state(provider, user_id)})
     route = "google" if provider == "gmail" else provider
     return {"url": f"{settings.public_base_url}/integrations/{route}/connect?{query}", "expires_in": _STATE_TTL_S}

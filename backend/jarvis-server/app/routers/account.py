@@ -128,4 +128,19 @@ def delete_account():
     from .memory import _IMAGE_DIR
     remove_user_files(_IMAGE_DIR, user)
     remove_user_files(_RECORDING_DIR, user)
+    _close_tool_connections(user)
     return {"ok": True}
+
+
+def _close_tool_connections(user: str) -> None:
+    """지운 계정으로 열려 있던 외부 도구(노션, 슬랙) 연결을 바로 닫는다. 이 함수는 작업자 스레드에서 불린다."""
+    from .. import mcp_gateway
+    gw = mcp_gateway.gateway
+    if gw is None:
+        return
+    try:
+        import anyio.from_thread
+        anyio.from_thread.run(gw.close_user, user)
+    except Exception:  # 감시 작업이 키가 없어진 연결을 곧 닫는다
+        import logging
+        logging.getLogger("jarvis.mcp").warning("지운 계정의 외부 도구 연결을 바로 닫지 못함", exc_info=True)

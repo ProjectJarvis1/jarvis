@@ -1,5 +1,6 @@
 """지메일 읽기 도구 시험. 실제 구글 대신 같은 모양으로 답하는 가짜 Gmail API 서버(로컬 HTTP)를 띄운다.
 DB 는 쓰지 않는다. 토큰·권한 조회는 가짜 연결로 바꿔 끼운다."""
+import asyncio
 import base64
 import dataclasses
 import json
@@ -235,7 +236,7 @@ def test_status_and_gmail_only_disconnect(monkeypatch):
     services = integ.status()["services"]
     assert services["google"]["connected"] and not services["gmail"]["connected"]
     conn = use_rows(monkeypatch, integ, [])
-    integ.disconnect("gmail")
+    asyncio.run(integ.disconnect("gmail"))
     sql, params = conn.sql[-1]
     assert sql.startswith("UPDATE user_integrations SET metadata = metadata ||")
     assert params[0].obj == {"gmail_enabled": False}
@@ -385,3 +386,42 @@ def test_no_body_fetch_after_budget_is_used(gmail, monkeypatch):
     old, new = t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1", app=True)["structured_content"]["messages"]
     assert new["body"] == "최근 메일"[:5] and old["body"] == "" and old["body_cut"] and "body_missing" not in old
     assert not any("/attachments/" in c for c in FakeGmail.calls)
+
+
+class _UserGateway:
+    """사용자별 외부 도구 연결을 흉내 낸다. 누구의 연결로 실행했는지 남긴다."""
+
+    def __init__(self):
+        self.calls, self.ensured = [], []
+
+    def is_external(self, name):
+        return name == "notion_search"
+
+    def is_ready(self, name, user=None):
+        return user in self.ensured
+
+    async def ensure_user(self, user, wait_s=0):
+        self.ensured.append(user)
+
+    async def call(self, name, args, user=None):
+        self.calls.append(user)
+        return {"is_error": False, "content": f"{user} 결과"}
+
+    def manifest(self, user=None):
+        return [{"name": "notion_search", "user": user}]
+
+
+def test_outside_tools_run_on_the_callers_own_connection(monkeypatch):
+    gw = _UserGateway()
+    monkeypatch.setattr(mcp_router.mcp_gateway, "gateway", gw)
+    res = asyncio.run(mcp_router._run("notion_search", {"query": "견적"}, "alice"))
+    assert res["content"] == "alice 결과" and gw.calls == ["alice"]  # 관리자 연결이 아니라 alice 의 연결
+    monkeypatch.setattr(mcp_router, "current_user_id", lambda: "bob")
+    use_rows(monkeypatch, mcp_router, [])
+    tools = asyncio.run(mcp_router._user_tools())
+    assert gw.ensured[-1] == "bob" and [t["user"] for t in tools if t["name"] == "notion_search"] == ["bob"]
+
+
+def test_notion_link_is_open_to_every_user(monkeypatch):
+    monkeypatch.setattr(integ, "current_user_id", lambda: "u1")
+    assert "/integrations/notion/connect?" in integ.link("notion")["url"]

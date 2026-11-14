@@ -25,6 +25,7 @@ def _config(tmp_path, env_value="tok"):
             "slow_tool": {"upstream": "slow", "title": "느린 도구"},
             "boom_tool": {"upstream": "boom", "title": "실패 도구"},
             "ghost": {"upstream": "does-not-exist", "title": "없는 도구"},
+            "who": {"upstream": "whoami", "title": "누구"},
         }}}}
     path = tmp_path / "servers.json"
     path.write_text(json.dumps(cfg))
@@ -66,7 +67,7 @@ def test_list_call_shape_confirm_timeout(tmp_path, monkeypatch):
         await gw.start()
         await asyncio.wait_for(gw.connections["fake"].ready.wait(), 20)
         names = {t["name"]: t for t in gw.manifest()}
-        assert set(names) == {"notion_search", "notion_append_note", "slow_tool", "boom_tool"}  # 없는 도구는 빠짐
+        assert set(names) == {"notion_search", "notion_append_note", "slow_tool", "boom_tool", "who"}  # 없는 도구는 빠짐
         assert names["notion_append_note"]["annotations"]["requires_confirmation"] is True
         assert names["notion_search"]["gemini"]["parameters"]["required"] == ["query"]
         assert "properties" in names["slow_tool"]["gemini"]["parameters"]  # parameters 를 안 적으면 원본을 다듬어 씀
@@ -133,6 +134,7 @@ def test_notion_error_payload_is_not_success(tmp_path, monkeypatch):
 
     class _Conn:
         ready = asyncio.Event()
+        running = True
 
         async def call(self, name, args):
             class R:
@@ -178,6 +180,7 @@ def test_timed_out_write_is_marked_uncertain_not_retryable(tmp_path, monkeypatch
 
     class _Conn:
         ready = asyncio.Event()
+        running = True
 
         async def call(self, name, args):
             raise g.SentRequestError(TimeoutError("늦음"))
@@ -199,6 +202,7 @@ def test_notion_string_error_status(tmp_path, monkeypatch):
 
     class _Conn:
         ready = asyncio.Event()
+        running = True
 
         async def call(self, name, args):
             class R:
@@ -244,6 +248,120 @@ def test_disconnected_account_closes_connection_and_hides_tools(tmp_path, monkey
         await gw._reconnect()
         assert not conn.ready.is_set() and (conn._task is None or conn._task.done())
         assert gw.manifest() == []
+        await gw.stop()
+
+    asyncio.run(run())
+
+
+# ─── 사용자별 연결 ───────────────────────────────────────────────
+
+def _per_user_config(tmp_path):
+    cfg = _config(tmp_path)
+    cfg["fake"].env = {"FAKE_TOKEN": "$FAKE_TOKEN|db:fake"}
+    return cfg
+
+
+_TOKENS = {"alice": "tok-alice", "bob": "tok-bob"}
+
+
+def _provider(auth, user):
+    return _TOKENS.get(user) if auth == "fake" else None
+
+
+def test_each_user_has_own_connection_and_results(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        await gw.start()
+        await gw.ensure_user("alice", wait_s=20)
+        await gw.ensure_user("bob", wait_s=20)
+        assert {t["name"] for t in gw.manifest("alice")} >= {"notion_search", "who"}
+        assert gw.manifest("carol") == []  # 연결이 없는 사용자에게는 남의 도구가 보이지 않음
+        a, b = await asyncio.gather(gw.call("who", {}, user="alice"), gw.call("who", {}, user="bob"))
+        assert json.loads(a["content"])["token"] == "tok-alice"
+        assert json.loads(b["content"])["token"] == "tok-bob"
+        carol = await gw.call("who", {}, user="carol")
+        assert carol["is_error"] and carol["needs_auth"]
+        assert not gw._user_conns("carol")["fake"].running  # 키가 없으면 연결 자체를 열지 않음
+        await gw.stop()
+
+    asyncio.run(run())
+
+
+def test_admin_env_key_is_never_used_for_other_users(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_TOKEN", "env-admin")
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), lambda auth, user: None)
+        await gw.start()
+        await asyncio.wait_for(gw.connections["fake"].ready.wait(), 20)
+        assert gw.manifest()  # 관리자는 .env 키로 연결
+        await gw.ensure_user("alice", wait_s=1)
+        assert gw.manifest("alice") == []
+        res = await gw.call("who", {}, user="alice")
+        assert res["is_error"] and res["needs_auth"]
+        await gw.stop()
+
+    asyncio.run(run())
+
+
+def test_single_argument_token_lookup_is_admin_only():
+    lookup = g._per_user(lambda auth: "admin-token", "default")
+    assert lookup("fake", "default") == "admin-token"
+    assert lookup("fake", "alice") is None
+
+
+def test_disconnect_closes_that_users_connection_now(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        await gw.ensure_user("alice", wait_s=20)
+        await gw.ensure_user("bob", wait_s=20)
+        await gw.close_user("alice", {"slack_user"})  # 다른 서비스 해제는 이 연결과 무관
+        assert gw.manifest("alice")
+        await gw.close_user("alice", {"fake"})
+        assert gw.manifest("alice") == [] and not gw._user_conns("alice")["fake"].running
+        assert gw.manifest("bob")  # 다른 사용자는 그대로
+        await gw.close_user("bob")  # 계정 삭제: 모두 닫고 잊는다
+        assert "bob" not in gw._sessions
+        await gw.stop()
+
+    asyncio.run(run())
+
+
+def test_idle_user_connections_close_but_admin_stays(tmp_path, monkeypatch):
+    monkeypatch.setenv("FAKE_TOKEN", "env-admin")
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        await gw.start()
+        await asyncio.wait_for(gw.connections["fake"].ready.wait(), 20)
+        await gw.ensure_user("alice", wait_s=20)
+        assert gw._user_conns("alice")["fake"].running
+        monkeypatch.setattr(g, "IDLE_TIMEOUT_S", 0.0)
+        await gw._reconnect()
+        assert not gw._user_conns("alice")["fake"].running
+        assert gw.connections["fake"].running
+        again = await gw.call("who", {}, user="alice")  # 다음에 쓰면 다시 연다
+        assert json.loads(again["content"])["token"] == "tok-alice"
+        await gw.stop()
+
+    asyncio.run(run())
+
+
+def test_session_cap_closes_least_recently_used_idle_connection(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    monkeypatch.setattr(g, "MAX_SESSIONS", 1)
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        await gw.ensure_user("alice", wait_s=20)
+        assert gw._user_conns("alice")["fake"].running
+        await gw.ensure_user("bob", wait_s=20)
+        assert gw._user_conns("bob")["fake"].running
+        assert not gw._user_conns("alice")["fake"].running
         await gw.stop()
 
     asyncio.run(run())
