@@ -26,7 +26,8 @@ data class MailCandidate(val id: String, val subject: String, val sender: String
     val prep: List<String>)
 
 /** A follow-up from a recent meeting, for the morning briefing. */
-data class FollowupItem(val task: String, val dueText: String, val meetingTitle: String, val meetingDate: String)
+data class FollowupItem(val task: String, val dueText: String, val meetingTitle: String, val meetingDate: String,
+    val meetingId: String = "", val index: Int = -1)
 
 /** Something Jarvis offers on its own, before the user asks. [detail] is what opens when it is accepted. */
 data class ProactiveOffer(

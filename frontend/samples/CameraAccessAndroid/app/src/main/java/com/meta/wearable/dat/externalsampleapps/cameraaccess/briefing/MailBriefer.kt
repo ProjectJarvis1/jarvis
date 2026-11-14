@@ -19,7 +19,7 @@ import org.json.JSONObject
 object MailBriefer {
     private const val TAG = "MailBriefer"
     private val client = OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard)
-        .connectTimeout(10, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
+        .connectTimeout(10, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
 
     data class NewMail(val connected: Boolean, val checkedUntilMs: Long, val mails: List<MailCandidate>)
     data class MailLine(val sender: String, val subject: String, val date: String, val snippet: String)
@@ -30,10 +30,16 @@ object MailBriefer {
         NewMail(json.optBoolean("connected"), json.optLong("checked_until_ms", afterMs), parseMails(json.optJSONArray("mails")))
     }
 
-    /** Recent mail with the people or companies of a meeting; empty when Gmail is not linked. */
-    fun context(names: List<String>, orgs: List<String>): List<MailLine>? {
-        if (names.isEmpty() && orgs.isEmpty()) return emptyList()
-        val body = JSONObject().put("names", JSONArray(names.take(10))).put("orgs", JSONArray(orgs.take(10))).put("limit", 3)
+    /**
+     * Recent mail with the people of a meeting; empty when Gmail is not linked. [people] are saved people the
+     * briefing already told apart (name, company): the server looks them up by their saved mail address.
+     * [names] are attendees with no saved record, looked up by name.
+     */
+    fun context(people: List<Pair<String, String>>, names: List<String>): List<MailLine>? {
+        if (people.isEmpty() && names.isEmpty()) return emptyList()
+        val body = JSONObject()
+            .put("people", JSONArray(people.take(10).map { (name, org) -> JSONObject().put("name", name).put("org", org) }))
+            .put("names", JSONArray(names.take(10))).put("limit", 3)
         val json = post("/briefing/mail/context", body) ?: return null
         val arr = json.optJSONArray("mails") ?: return emptyList()
         return (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map {
@@ -41,10 +47,11 @@ object MailBriefer {
         }
     }
 
-    fun followups(): List<FollowupItem>? = get("/briefing/followups")?.optJSONArray("items")?.let { arr ->
-        (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map {
-            FollowupItem(it.optString("task"), it.optString("due_text"), it.optString("meeting_title"), it.optString("meeting_date"))
-        }
+    fun followups(): List<FollowupItem>? = get("/briefing/followups")?.optJSONArray("items")?.let { parseFollowups(it) }
+
+    internal fun parseFollowups(arr: JSONArray): List<FollowupItem> = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map {
+        FollowupItem(it.optString("task"), it.optString("due_text"), it.optString("meeting_title"), it.optString("meeting_date"),
+            it.optString("meeting_id"), it.optInt("index", -1))
     }
 
     internal fun parseMails(arr: JSONArray?): List<MailCandidate> = (0 until (arr?.length() ?: 0)).mapNotNull { i ->

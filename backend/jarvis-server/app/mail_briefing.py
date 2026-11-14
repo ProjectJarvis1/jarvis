@@ -22,6 +22,7 @@ class Person:
     org: str = ""
     email: str = ""
     aliases: list[str] = field(default_factory=list)
+    id: str = ""
 
     @property
     def names(self) -> list[str]:
@@ -44,6 +45,10 @@ class Match:
     person: str = ""
     company: str = ""
     word: str = ""
+    person_id: str = ""
+    # True when the match is the sender itself (address, sender name or domain); False when the person or
+    # company is only named in the subject or preview, so the mail is about them, not from them.
+    from_sender: bool = True
 
 
 def _squash(text: str) -> str:
@@ -65,17 +70,21 @@ def classify(mail: MailMeta, people: Iterable[Person]) -> Optional[Match]:
     squashed_text = _squash(text)
     domain = address.split("@", 1)[1] if "@" in address else ""
     people = list(people)
+    squashed_sender = _squash(name)
     for p in people:
         if p.email and address and p.email.strip().lower() == address:
-            return Match("person", person=p.name, company=p.org or "")
+            return Match("person", person=p.name, company=p.org or "", person_id=p.id)
     for p in people:
         # 이름은 보낸 사람 이름이나 제목에 있어야 한다. 본문 미리보기 속 이름만으로는 그 사람의 메일로 보지 않는다.
-        if any(_squash(n) and _squash(n) in squashed_head for n in p.names):
-            return Match("person", person=p.name, company=p.org or "")
+        hit = [_squash(n) for n in p.names if _squash(n) and _squash(n) in squashed_head]
+        if hit:
+            return Match("person", person=p.name, company=p.org or "", person_id=p.id,
+                         from_sender=any(h in squashed_sender for h in hit))
     for p in people:
         org = _squash(p.org)
         if len(org) >= 2 and (org in squashed_text or (domain and org in domain)):
-            return Match("company", person=p.name, company=p.org)
+            return Match("company", person=p.name, company=p.org, person_id=p.id,
+                         from_sender=bool((domain and org in domain) or org in squashed_sender))
     lowered = text.lower()
     if any(w.lower() in lowered for w in NOISE_WORDS):
         return None
@@ -99,7 +108,14 @@ def offer_message(mail: MailMeta, match: Match) -> str:
     subject = mail.subject.strip() or "(제목 없음)"
     if len(subject) > 40:
         subject = subject[:40].rstrip() + "…"
-    return f"방금 {who(mail, match)}에서 '{subject}' 메일이 왔어요. 준비 자료를 모아 드릴까요?"
+    if match.from_sender:
+        return f"방금 {who(mail, match)}에서 '{subject}' 메일이 왔어요. 준비 자료를 모아 드릴까요?"
+    # 이름이나 회사가 제목에만 나온 메일: 실제로 보낸 사람을 쓰고, 누구와 관련된 메일인지 따로 말한다.
+    name, address = sender_parts(mail.sender)
+    sender = f"{name} 님이" if name else (f"{address}에서" if address else "누군가")
+    about = match.company or (f"{match.person} 님" if match.person else "")
+    tail = f" {about} 관련 메일이에요." if about else ""
+    return f"방금 {sender} 보낸 '{subject}' 메일이 왔어요.{tail} 준비 자료를 모아 드릴까요?"
 
 
 def clean_snippet(snippet: str) -> str:
@@ -108,16 +124,25 @@ def clean_snippet(snippet: str) -> str:
     return re.sub(r"\s+", " ", html.unescape(snippet or "")).strip()[:200]
 
 
-def gmail_query_for(names: list[str], orgs: list[str], days: int = 60) -> Optional[str]:
-    """미팅 상대와 주고받은 최근 메일을 찾는 지메일 검색어. 찾을 말이 없으면 None."""
-    terms = []
-    for t in [*names, *orgs]:
+def gmail_query_for(names: list[str], orgs: list[str], days: int = 60, emails: Optional[list[str]] = None) -> Optional[str]:
+    """미팅 상대와 주고받은 최근 메일을 찾는 지메일 검색어. 찾을 말이 없으면 None.
+    저장된 메일 주소가 있으면 그 주소와 주고받은 메일만 찾는다(같은 이름의 다른 사람 메일이 섞이지 않게).
+    주소가 없는 사람은 이름으로, 사람이 하나도 없을 때만 회사 이름으로 찾는다."""
+    terms: list[str] = []
+    for e in emails or []:
+        e = (e or "").strip().lower()
+        if "@" in e and " " not in e and '"' not in e:
+            for t in (f"from:{e}", f"to:{e}", f"cc:{e}"):
+                if t not in terms:
+                    terms.append(t)
+    words = [*names] if names else [*orgs]
+    for t in words:
         t = (t or "").strip().replace('"', "")
-        if len(t) >= 2 and t not in terms:
-            terms.append(t)
+        if len(t) >= 2 and f'"{t}"' not in terms:
+            terms.append(f'"{t}"')
     if not terms:
         return None
-    joined = " OR ".join(f'"{t}"' for t in terms[:6])
+    joined = " OR ".join(terms[:12])
     return f"({joined}) newer_than:{days}d -category:promotions -category:social"
 
 

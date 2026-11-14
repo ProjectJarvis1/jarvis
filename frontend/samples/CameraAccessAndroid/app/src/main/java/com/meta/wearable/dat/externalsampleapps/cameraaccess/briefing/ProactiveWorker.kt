@@ -128,7 +128,12 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             if (!ProactivePlanner.morningDue(nowMs, SettingsManager.morningBriefingMinute)) return null
             val key = ProactivePlanner.morningKey(nowMs)
             if (key in ProactiveStore.claimed(app, nowMs)) return null
-            val followups = MailBriefer.followups() ?: return null
+            // What the user already ticked off on the meeting screen is not "챙길 할 일".
+            val followups = MailBriefer.followups()?.filterNot { f ->
+                f.meetingId.isNotBlank() && f.index >= 0 &&
+                    com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingFollowupStatus.Step.DONE in
+                    com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingFollowupStatus.read(app, f.meetingId, f.index)
+            } ?: return null
             val mail = MailBriefer.newMail(ProactivePlanner.overnightStart(nowMs))
             val mails = if (mail?.connected == true) mail.mails else null
             val today = ProactivePlanner.morningToday(items, nowMs)

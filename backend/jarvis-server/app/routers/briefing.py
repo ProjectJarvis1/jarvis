@@ -27,14 +27,14 @@ _LOOKBACK_MAX_MS = 3 * 24 * 3_600_000  # 커서가 오래돼도 사흘 전 메�
 
 def _people() -> list[mb.Person]:
     with get_conn() as conn:
-        rows = conn.execute("SELECT name, org, email, aliases FROM people ORDER BY updated_at DESC LIMIT 2000").fetchall()
-    return [mb.Person(r["name"] or "", r["org"] or "", r["email"] or "", list(r["aliases"] or [])) for r in rows]
+        rows = conn.execute("SELECT id, name, org, email, aliases FROM people ORDER BY updated_at DESC LIMIT 2000").fetchall()
+    return [mb.Person(r["name"] or "", r["org"] or "", r["email"] or "", list(r["aliases"] or []), str(r["id"])) for r in rows]
 
 
 def _meetings(days: int) -> list[dict[str, Any]]:
     with get_conn() as conn:
         return conn.execute(
-            "SELECT title, summary, started_at, metadata FROM meetings "
+            "SELECT id, title, summary, started_at, metadata, person_ids FROM meetings "
             "WHERE started_at > now() - make_interval(days => %s) AND started_at <= now() "
             "ORDER BY started_at DESC LIMIT 60", (days,)).fetchall()
 
@@ -57,6 +57,15 @@ def _handled(exc: Exception, user: str) -> Optional[dict[str, Any]]:
 def _meta(token: str, message_id: str) -> dict[str, Any]:
     return mcp_tools._gmail_get(f"messages/{urllib.parse.quote(message_id, safe='')}", token,
                                 [("format", "metadata"), ("metadataHeaders", "From"), ("metadataHeaders", "Subject")])
+
+
+def _metas(token: str, ids: list[str]) -> list[dict[str, Any]]:
+    """메일 머리글을 몇 통씩 함께 받아 온다. 100통을 하나씩 받으면 앱의 기다림 시간을 넘길 수 있다."""
+    from concurrent.futures import ThreadPoolExecutor
+    if not ids:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(ids))) as pool:
+        return list(pool.map(lambda message_id: _meta(token, message_id), ids))
 
 
 def _mail(meta: dict[str, Any]) -> mb.MailMeta:
@@ -83,12 +92,18 @@ def _prep(mail: mb.MailMeta, match: mb.Match, meetings: list[dict[str, Any]]) ->
     anchors = [a for a in (match.company, match.person) if a]
     if anchors:
         keys = [mb._squash(a) for a in anchors if len(mb._squash(a)) >= 2]
-        related = [m for m in meetings if any(k in mb._squash(f"{m.get('title') or ''} {m.get('summary') or ''}") for k in keys)][:2]
+
+        def related_to(m: dict[str, Any]) -> bool:
+            # 저장된 참석자 연결이 먼저다. 제목·요약에 이름이 없는 회의도 그 사람이 참석자로 저장돼 있으면 관련 회의다.
+            if match.person_id and match.person_id in {str(p) for p in m.get("person_ids") or []}:
+                return True
+            return any(k in mb._squash(f"{m.get('title') or ''} {m.get('summary') or ''}") for k in keys)
+        related = [m for m in meetings if related_to(m)][:2]
         for m in related:
             summary = (m.get("summary") or "").strip().replace("\n", " ")
             lines.append(f"지난 회의 {_day(m.get('started_at'))}: {m.get('title') or '제목 없음'}"
                          + (f" / {summary[:100]}" if summary else ""))
-        for task in mb.followup_lines(related, anchors, limit=3):
+        for task in mb.followup_lines(related, [], limit=3):
             lines.append(f"아직 남은 할 일: {task}")
         if not related:
             lines.append("이 상대와 저장된 지난 회의는 아직 없어요.")
@@ -126,7 +141,7 @@ def new_mail(after_ms: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100
     query = f"in:inbox after:{since // 1000} -category:promotions -category:social -category:forums"
     try:
         ids = _list_ids(token, query, limit, _MAX_NEW_MAILS)
-        metas = [_meta(token, message_id) for message_id in ids]
+        metas = _metas(token, ids)
     except Exception as exc:
         handled = _handled(exc, user)
         if handled is not None:
@@ -151,22 +166,51 @@ def new_mail(after_ms: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=100
     return {"connected": True, "notice": mcp_tools.MAIL_NOTICE, "checked_until_ms": checked_until, "mails": out}
 
 
+class Contact(BaseModel):
+    name: str = Field(max_length=100)
+    org: str = Field("", max_length=100)
+
+
 class MailContext(BaseModel):
     names: list[str] = Field(default_factory=list, max_length=10)
     orgs: list[str] = Field(default_factory=list, max_length=10)
+    # 앱이 이미 누구인지 가린 사람(이름과 회사). 저장된 메일 주소가 있으면 그 주소로만 찾는다.
+    people: list[Contact] = Field(default_factory=list, max_length=10)
     limit: int = Field(3, ge=1, le=5)
+
+
+def _emails_for(people: list[Contact]) -> tuple[list[str], list[str]]:
+    """(찾은 메일 주소, 주소가 없어 이름으로 찾을 사람). 회사가 주어지면 같은 회사의 그 사람만 본다."""
+    emails: list[str] = []
+    without: list[str] = []
+    if not people:
+        return emails, without
+    with get_conn() as conn:
+        for c in people:
+            rows = conn.execute(
+                "SELECT email FROM people WHERE (regexp_replace(lower(name), '\\s+', '', 'g') = regexp_replace(lower(%s), '\\s+', '', 'g') "
+                "OR %s = ANY(aliases)) AND (%s = '' OR regexp_replace(lower(coalesce(org, '')), '\\s+', '', 'g') "
+                "= regexp_replace(lower(%s), '\\s+', '', 'g'))", (c.name, c.name, c.org, c.org)).fetchall()
+            found = [r["email"].strip().lower() for r in rows if r["email"] and "@" in r["email"]]
+            if found:
+                emails += [e for e in found if e not in emails]
+            elif c.name not in without:
+                without.append(c.name)
+    return emails, without
 
 
 @router.post("/mail/context")
 def mail_context(body: MailContext):
     user = current_user_id()
-    query = mb.gmail_query_for(body.names, body.orgs)
+    emails, by_name = _emails_for(body.people)
+    names = by_name + [n for n in body.names if n not in by_name and not any(n == c.name for c in body.people)]
+    query = mb.gmail_query_for(names, body.orgs, emails=emails)
     token, connected = _token(user)
     if not connected or not query:
         return {"connected": connected, "mails": []}
     try:
         listing = mcp_tools._gmail_get("messages", token, [("q", query), ("maxResults", str(body.limit))])
-        metas = [_meta(token, str(item.get("id"))) for item in (listing.get("messages") or [])[:body.limit]]
+        metas = _metas(token, [str(item.get("id")) for item in (listing.get("messages") or [])[:body.limit]])
     except Exception as exc:
         handled = _handled(exc, user)
         if handled is not None:
@@ -187,16 +231,17 @@ def followups(days: int = Query(14, ge=1, le=60)):
     for m in _meetings(days):
         meta = m.get("metadata") or {}
         raw = meta.get("followups") or [{"task": t} for t in meta.get("action_items") or []]
-        for item in raw:
+        # 앱은 빈 항목을 뺀 목록의 순서(index)로 완료 여부를 기억한다. 같은 순서를 돌려준다.
+        raw = [item for item in raw if str((item or {}).get("task") or "").strip()]
+        for index, item in enumerate(raw):
             task = str((item or {}).get("task") or "").strip()
             due_at = str((item or {}).get("due_at") or "").strip()
-            if not task:
-                continue
             try:
                 if due_at and date.fromisoformat(due_at[:10]) < cutoff:
                     continue
             except ValueError:
                 pass
-            items.append({"task": task, "due_text": str((item or {}).get("due_text") or ""), "due_at": due_at,
+            items.append({"meeting_id": str(m.get("id") or ""), "index": index,
+                          "task": task, "due_text": str((item or {}).get("due_text") or ""), "due_at": due_at,
                           "meeting_title": m.get("title") or "", "meeting_date": _day(m.get("started_at"))})
     return {"items": items[:20]}

@@ -117,10 +117,12 @@ object MeetingBriefer {
         val brief = MeetingBriefing.compose(meeting, people, meetings, memories, System.currentTimeMillis())
         // Recent mail with the same people (Gmail linked only). A failed mail check leaves the brief as it was.
         // Only people and companies, never generic title words ("견적" alone would pull in every quote mail).
-        // A name two saved people share stays out: their mail would be read as this meeting's.
-        val names = (brief.people + meeting.attendees.map { it.trim().removeSuffix("님").trim() }
-            .filter { it.length >= 2 && '@' !in it }).distinct() - brief.ambiguous.toSet()
-        val mails = MailBriefer.context(names, brief.orgs)?.map { MailHit(it.sender, it.subject, it.date, it.snippet) }.orEmpty()
+        // Saved people go by name and company, which the server turns into their saved mail address. Attendees
+        // with no record go by name. A name two saved people share stays out: their mail would be read as this one's.
+        val unsaved = meeting.attendees.map { it.trim().removeSuffix("님").trim() }
+            .filter { it.length >= 2 && '@' !in it && it !in brief.people } - brief.ambiguous.toSet()
+        val mails = MailBriefer.context(brief.contacts, unsaved.distinct())
+            ?.map { MailHit(it.sender, it.subject, it.date, it.snippet) }.orEmpty()
         return MeetingBriefing.withMail(brief, mails)
     }
 

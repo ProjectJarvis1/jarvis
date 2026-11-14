@@ -48,9 +48,18 @@ def test_business_word_in_subject_only_and_noise_is_skipped():
     assert mb.classify(mail(subject="주말 잘 보내세요", snippet="다음 미팅 때 봬요"), []) is None
 
 
-def test_offer_message_names_company_and_short_subject():
-    m = mail("담당 <a@x.com>", "대성테크 기술협상 참여 요청드립니다 " * 3)
+def test_mail_only_about_someone_names_the_real_sender():
+    m = mail("내부 담당 <me@ours.example>", "김민수 님에게 보낼 자료")
     match = mb.classify(m, PEOPLE)
+    assert match.person == "김민수" and not match.from_sender
+    assert mb.offer_message(m, match) == "방금 내부 담당 님이 보낸 '김민수 님에게 보낼 자료' 메일이 왔어요. 한빛정밀 관련 메일이에요. 준비 자료를 모아 드릴까요?"
+    assert mb.classify(mail("김팀장 <x@y.example>", "회신"), PEOPLE).from_sender
+
+
+def test_offer_message_names_company_and_short_subject():
+    m = mail("대성테크 구매팀 <a@x.com>", "기술협상 참여 요청드립니다 " * 3)
+    match = mb.classify(m, PEOPLE)
+    assert match.from_sender
     text = mb.offer_message(m, match)
     assert text.startswith("방금 대성테크에서 '") and text.endswith("메일이 왔어요. 준비 자료를 모아 드릴까요?")
     assert "…" in text
@@ -59,7 +68,10 @@ def test_offer_message_names_company_and_short_subject():
 def test_gmail_query_and_followups():
     assert mb.gmail_query_for([], ["a"]) is None
     q = mb.gmail_query_for(["김민수", "김민수"], ['한빛"정밀'])
-    assert q.startswith('("김민수" OR "한빛정밀") newer_than:60d')
+    assert q.startswith('("김민수") newer_than:60d')  # 사람이 있으면 회사 이름으로 넓히지 않는다
+    assert mb.gmail_query_for([], ['한빛"정밀']).startswith('("한빛정밀")')
+    q = mb.gmail_query_for(["박지훈"], [], emails=["Kim@hanbit.example", "bad address"])
+    assert q.startswith('(from:kim@hanbit.example OR to:kim@hanbit.example OR cc:kim@hanbit.example OR "박지훈")')
     meetings = [{"title": "한빛정밀 견적", "summary": "", "metadata": {"followups": [{"task": "견적서 보내기", "due_text": "금요일"}]}},
                 {"title": "다른 회사", "summary": "", "metadata": {"action_items": ["무관한 일"]}}]
     assert mb.followup_lines(meetings, ["한빛정밀"]) == ["견적서 보내기 (금요일)"]
@@ -205,10 +217,13 @@ def test_new_mail_offers_only_business_mail_with_prep(api, monkeypatch):
     now = int(datetime.now(timezone.utc).timestamp() * 1000)
     with pool.connection() as conn:
         conn.execute("SELECT set_config('role','jarvis_app',false), set_config('app.user_id',%s,false)", (uid,))
-        conn.execute("INSERT INTO people(name, org, email) VALUES ('박지훈', '대성테크', 'park@daesung.example')")
+        pid = conn.execute("INSERT INTO people(name, org, email) VALUES ('박지훈', '대성테크', 'park@daesung.example') RETURNING id").fetchone()["id"]
         conn.execute("INSERT INTO meetings(title, started_at, summary, metadata) VALUES "
                      "('대성테크 견적 미팅', now() - interval '3 days', '단가 재검토 요청', "
-                     "'{\"followups\": [{\"task\": \"수정 견적서 보내기\", \"due_text\": \"다음 주\"}]}')")
+                     "'{\"followups\": [{\"task\": \"\"}, {\"task\": \"수정 견적서 보내기\", \"due_text\": \"다음 주\"}]}')")
+        # 제목·요약에 이름이 없어도 참석자로 저장된 회의는 관련 회의다.
+        conn.execute("INSERT INTO meetings(title, started_at, summary, person_ids) VALUES "
+                     "('주간 미팅', now() - interval '1 days', '납기 일정 확인', ARRAY[%s]::uuid[])", (pid,))
         conn.commit()
         conn.execute("RESET ROLE")
     messages = [
@@ -223,7 +238,8 @@ def test_new_mail_offers_only_business_mail_with_prep(api, monkeypatch):
     offer = r["mails"][0]
     assert offer["message"] == "방금 대성테크에서 '기술협상 참여 요청' 메일이 왔어요. 준비 자료를 모아 드릴까요?"
     assert offer["prep"][0] == "메일 요점: 다음 주 화요일 기술협상에 참석 부탁드립니다 & 자료"
-    assert any("대성테크 견적 미팅" in line for line in offer["prep"])
+    assert any("대성테크 견적 미팅" in line for line in offer["prep"]) or any("주간 미팅" in line for line in offer["prep"])
+    assert any("주간 미팅" in line for line in offer["prep"])
     assert any(line == "아직 남은 할 일: 수정 견적서 보내기 (다음 주)" for line in offer["prep"])
     assert r["checked_until_ms"] == now - 30_000
     # 다른 사용자에게는 이 사람과 회의가 보이지 않는다(회사 이름으로 맞추지 못하고 업무 단어로만 고른다).
@@ -260,10 +276,16 @@ def test_mail_context_and_followups(api, monkeypatch):
     monkeypatch.setattr(mcp_tools, "_gmail_token_or_reauth", lambda user: ("tok", None))
     monkeypatch.setattr(mcp_tools, "_gmail_get", get)
     r = client.post("/briefing/mail/context", json={"names": ["박지훈"], "orgs": ["대성테크"]}, headers=auth(users, "p1b")).json()
-    assert seen["q"].startswith('("박지훈" OR "대성테크")')
+    assert seen["q"].startswith('("박지훈")')
+    # 앱이 가린 사람(이름과 회사)은 저장된 메일 주소로만 찾는다.
+    client.post("/briefing/mail/context", json={"people": [{"name": "박지훈", "org": "대성테크"}]}, headers=auth(users, "p1b"))
+    assert seen["q"].startswith("(from:park@daesung.example OR to:park@daesung.example OR cc:park@daesung.example)")
+    client.post("/briefing/mail/context", json={"people": [{"name": "박지훈", "org": "다른회사"}]}, headers=auth(users, "p1b"))
+    assert seen["q"].startswith('("박지훈")')
     assert r["mails"][0]["sender"] == "박지훈" and r["mails"][0]["snippet"] == "확인했습니다"
     items = client.get("/briefing/followups", headers=auth(users, "p1b")).json()["items"]
-    assert items and items[0]["task"] == "수정 견적서 보내기" and items[0]["meeting_title"] == "대성테크 견적 미팅"
+    item = next(i for i in items if i["task"] == "수정 견적서 보내기")
+    assert item["meeting_title"] == "대성테크 견적 미팅" and item["index"] == 0 and item["meeting_id"]
     assert client.get("/briefing/followups", headers=auth(users, "p1a")).json()["items"] == []
 
 

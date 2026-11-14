@@ -126,4 +126,23 @@ class AssistantP1Test {
         assertEquals(listOf("김민수"), brief.ambiguous)
         assertTrue(brief.people.isEmpty())
     }
+
+    @Test
+    fun followupsCarryMeetingAndIndexForTheDoneTicks() {
+        val arr = JSONArray().put(JSONObject().put("task", "견적서").put("meeting_id", "m-1").put("index", 2))
+            .put(JSONObject().put("task", "옛 항목"))
+        val items = MailBriefer.parseFollowups(arr)
+        assertEquals("m-1", items[0].meetingId)
+        assertEquals(2, items[0].index)
+        assertEquals(-1, items[1].index)
+    }
+
+    @Test
+    fun briefKeepsNameAndCompanyOfToldApartPeople() {
+        val meeting = UpcomingMeeting("k", "한빛정밀 정기 미팅", kst(2026, 11, 13, 14), attendees = listOf("김민수"))
+        val people = listOf(PersonHit("김민수", "한빛정밀"), PersonHit("김민수", "대성테크"))
+        val brief = MeetingBriefing.compose(meeting, people, emptyList(), emptyList(), kst(2026, 11, 13, 13, 52))
+        assertEquals(listOf("김민수" to "한빛정밀"), brief.contacts)
+        assertTrue(brief.ambiguous.isEmpty())
+    }
 }

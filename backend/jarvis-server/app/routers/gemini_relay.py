@@ -48,10 +48,14 @@ async def gemini_live(ws: WebSocket):
         return
     over_limit = False
 
+    reserving: dict[str, asyncio.Task | None] = {"task": None}
+
     async def budget():
         while True:
             await asyncio.sleep(max(1, held["amount"]))
-            if not await hold_next():
+            # 떼어 두는 중에 대화가 끝나도 그 결과가 held 에 남도록 따로 돌리고, 끝날 때 기다린다.
+            reserving["task"] = asyncio.create_task(hold_next())
+            if not await asyncio.shield(reserving["task"]):
                 return  # 한도를 다 썼다
 
     import websockets
@@ -95,6 +99,11 @@ async def gemini_live(ws: WebSocket):
     finally:
         if watch is not None and not watch.done():
             watch.cancel()  # 대화가 끝났으면 더 떼어 두지 않는다
+    if reserving["task"] is not None and not reserving["task"].done():
+        try:
+            await reserving["task"]  # 떼어 두던 몫도 held 에 반영된 뒤에 정산한다
+        except Exception:
+            pass
     # 마지막으로 떼어 둔 양 가운데 쓰지 않은 만큼 그 날짜로 돌려준다.
     unused = int(held["amount"] - (loop.time() - held["since"]))
     if unused > 0 and held["day"] is not None:
