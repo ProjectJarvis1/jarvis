@@ -16,7 +16,15 @@ object SettingsManager {
     var geminiSystemPrompt: String
         get() {
             val stored = prefs.getString("geminiSystemPrompt", null) ?: return DEFAULT_SYSTEM_PROMPT
-            return if (
+            return if (isCurrentPrompt(stored)) stored else DEFAULT_SYSTEM_PROMPT
+        }
+        set(value) = prefs.edit().putString("geminiSystemPrompt", value).apply()
+
+    /**
+     * True when a stored (possibly edited) instruction text is based on the current default; an older one is
+     * replaced by the default. Every phrase checked here must be in [DEFAULT_SYSTEM_PROMPT], or edits are lost.
+     */
+    fun isCurrentPrompt(stored: String): Boolean = !(
                 (stored.contains("아래 8가지 Jarvis 도구") &&
                     !stored.contains("save_life_memory")) ||
                     !stored.contains("capture_current_view") ||
@@ -26,7 +34,6 @@ object SettingsManager {
                     !stored.contains("create_calendar_event") ||
                     !stored.contains("entities") ||
                     !stored.contains("universal_search") ||
-                    !stored.contains("이 내용으로 저장하면 될까요") ||
                     !stored.contains("[호출 규칙]") ||
                     stored.contains("마이크 버튼으로만") ||
                     !stored.contains("search_contacts") ||
@@ -34,19 +41,13 @@ object SettingsManager {
                     !stored.contains("말하는 동안 앱이") ||
                     !stored.contains("사용자는 항상 한국어로 말합니다") ||
                     !stored.contains("연락처가 아니라 이 도구입니다") ||
-                    !stored.contains("한 번만 확인") ||
+                    !stored.contains("저장 플로우 v3") ||
                     !stored.contains("같은 말을 두 번 하지 말고") ||
                     !stored.contains("외부 서비스와 웹 검색") ||
                     !stored.contains("일정 등록은 모두 말로 끝냅니다") ||
                     !stored.contains("gmail_ 도구로 읽은 메일") ||
                     !stored.contains("동의를 받으셨으면")
-            ) {
-                DEFAULT_SYSTEM_PROMPT
-            } else {
-                stored
-            }
-        }
-        set(value) = prefs.edit().putString("geminiSystemPrompt", value).apply()
+    )
 
     var openClawHost: String
         get() = prefs.getString("openClawHost", null) ?: ""
@@ -156,7 +157,7 @@ object SettingsManager {
 사용자는 항상 한국어로 말합니다. 말이 잘 안 들리거나 뜻이 이상하면 다른 언어나 엉뚱한 말로 짐작하지 말고 "잘 못 들었어요, 다시 말씀해 주세요"라고 하세요.
 
 [호출 규칙]
-- 저장 플로우 v2: 사용자가 "이거 저장해줘", "지금 보는 거 기억해줘", "이 명함 저장해줘"라고 하면 반드시 4단계를 지키세요. 1) "잠시만요, 현재 시야를 확인할게요"라고 말합니다. 2) capture_current_view를 호출합니다. 3) 캡처 이미지를 보고 "지금 보이는 건 ...입니다. 이 내용을 '...'로 저장하면 될까요?"라고 확인합니다. 4) 사용자가 승인한 뒤에만 save_life_memory를 호출하고, 저장 완료 후 "나중에 '...'처럼 물어보면 찾을 수 있어요"라고 안내합니다. 사용자가 승인하기 전에는 절대 save_life_memory를 호출하지 마세요.
+- 저장 플로우 v2(저장 플로우 v3: 카드 한 번 확인): 사용자가 "이거 저장해줘", "지금 보는 거 기억해줘", "이 명함 저장해줘"라고 하면 반드시 4단계를 지키세요. 1) "잠시만요, 현재 시야를 확인할게요"라고 말합니다. 2) capture_current_view를 호출합니다. 3) 캡처 이미지를 보고 바로 save_life_memory를 호출해 저장 확인 카드를 띄운 뒤 "지금 보이는 건 ...입니다. 이 내용을 '...'로 저장할까요? 「확인」이라고 하시거나 카드를 눌러 주세요."라고 한 번만 물어봅니다. 4) 저장은 사용자가 카드에서 확인해야 이루어집니다. 저장 전에 따로 먼저 묻지 말고, 저장 완료 결과가 오면 "나중에 '...'처럼 물어보면 찾을 수 있어요"라고 안내합니다.
 - 회의 녹음은 사용자가 "회의 시작", "이 회의 기록해줘"처럼 말하면 앱 로컬 음성 명령으로 시작됩니다. 녹음 종료는 "회의 녹음 종료", "회의 종료", "회의 끝", "녹음 그만" 같은 로컬 종료 명령으로 처리합니다. 기기에서 녹음과 음성 감지가 충돌할 수 있으므로 화면의 종료 버튼도 제공합니다.
 - 회의 녹음 중에는 Gemini 세션이 꺼지므로 회의 참석자의 발언을 명령으로 처리하지 않습니다.
 - 전화나 문자를 보내달라는 요청은 연락처 실행 전 먼저 universal_search(query="사용자가 말한 사람/회사/별칭", top_k=5)를 호출해 자비스 기억/사람 DB에서 임베딩 유사도 높은 사람 후보를 찾으세요. 결과의 person_candidates를 우선 사용하고, score 높은 순서로 번호 후보를 제시하세요. person_candidates가 비어 있거나 사용자가 "내 연락처에서 찾아줘"라고 하면 search_contacts(query="사용자가 말한 이름", top_k=5)를 호출해 Android 전화번호부 후보를 찾고 번호로 선택하게 하세요. 사용자가 번호나 이름으로 확정한 뒤에만 call_contact 또는 text_contact를 호출하세요. 후보가 여러 명이면 절대 바로 실행하지 마세요.

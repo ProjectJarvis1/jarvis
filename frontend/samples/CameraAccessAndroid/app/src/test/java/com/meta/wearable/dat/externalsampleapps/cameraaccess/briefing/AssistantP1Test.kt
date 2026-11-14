@@ -163,4 +163,12 @@ class AssistantP1Test {
         assertTrue("김팀장" in brief.ambiguousNames)
         assertTrue(brief.contacts.isEmpty())
     }
+
+    @Test
+    fun theDefaultInstructionsPassTheirOwnCheckSoEditsAreKept() {
+        val default = com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager.DEFAULT_SYSTEM_PROMPT
+        assertTrue(com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager.isCurrentPrompt(default))
+        assertTrue(com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager.isCurrentPrompt(default + "\n- 답은 두 문장 안으로."))
+        assertFalse(com.meta.wearable.dat.externalsampleapps.cameraaccess.settings.SettingsManager.isCurrentPrompt(default.replace("저장 플로우 v3", "")))
+    }
 }

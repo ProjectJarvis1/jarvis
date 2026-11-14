@@ -94,7 +94,8 @@ def classify(mail: MailMeta, people: Iterable[Person]) -> Optional[Match]:
     for p in people:
         org = _squash(p.org)
         if len(org) >= 2 and (org in squashed_text or (domain and org in domain)):
-            return Match("company", person=p.name, company=p.org, person_id=p.id,
+            # 회사만 맞았다: 그 회사의 누구인지는 모른다. 특정 직원으로 정하지 않고 회사 단위로 기록을 찾는다.
+            return Match("company", company=p.org,
                          from_sender=bool((domain and org in domain) or org in squashed_sender))
     lowered = text.lower()
     if any(w.lower() in lowered for w in NOISE_WORDS):

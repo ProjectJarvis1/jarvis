@@ -38,7 +38,7 @@ def test_name_in_subject_counts_but_name_only_in_snippet_does_not():
 
 def test_company_in_text_or_sender_domain():
     m = mb.classify(mail("담당자 <a@x.com>", "기술협상 참여 요청", "대성 테크 구매팀입니다"), PEOPLE)
-    assert m.reason == "company" and m.company == "대성테크"
+    assert m.reason == "company" and m.company == "대성테크" and m.person == "" and m.person_id == ""
     assert mb.classify(mail("a <a@대성테크.kr>", "회신"), PEOPLE).company == "대성테크"
 
 
