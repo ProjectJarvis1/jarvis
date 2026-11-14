@@ -5,5 +5,9 @@
         <receiver
             android:name=".briefing.ProactiveDebugReceiver"
             android:exported="true" />
+        <!-- Debug builds only: crash on purpose to check crash reporting. -->
+        <receiver
+            android:name=".crash.CrashDebugReceiver"
+            android:exported="true" />
     </application>
 </manifest>

@@ -211,7 +211,7 @@ fun SettingsScreen(
                     backgroundWakeWordEnabled) { backgroundWakeWordEnabled = it }
                 WakeWordTrialRows()
                 SettingSwitch("미팅 전 브리핑",
-                    "캘린더 일정 5~10분 전에 상대 정보와 지난 회의 내용을 글라스로 알려 줘요. 대화 화면이 열려 있어야 하고 캘린더 권한이 필요해요.",
+                    "캘린더 일정 5~10분 전에 상대 정보와 지난 회의 내용을 말로 먼저 알려 줘요. 대화 화면이 열려 있어야 하고 캘린더 권한이 필요해요.",
                     meetingBriefingEnabled) { meetingBriefingEnabled = it }
                 SettingSwitch("먼저 알려 주기",
                     "앱을 닫아 둬도 캘린더를 보고, 오늘 미팅 두 시간 전과 제출이나 마감 사흘 전에 준비를 도와드릴지 먼저 물어요. 지메일을 연결해 두면 업무 메일이 왔을 때도 알려요. 오전 8시부터 밤 9시 사이에만, 하루 4번까지 알려요.",
@@ -363,7 +363,7 @@ private fun ServiceConnectionsSection(onServer: (Boolean) -> Unit) {
     JarvisGroup {
         Column(Modifier.padding(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text("서비스 연결", style = MaterialTheme.typography.titleSmall)
-            Text("연결한 서비스는 글라스에서 말로 찾을 수 있어요. 메시지를 보내거나 글을 쓰기 전에는 꼭 확인을 받아요.",
+            Text("연결한 서비스는 대화에서 말로 찾을 수 있어요. 메시지를 보내거나 글을 쓰기 전에는 꼭 확인을 받아요.",
                 style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             error?.let {
                 Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error)

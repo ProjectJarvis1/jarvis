@@ -236,7 +236,7 @@ fun MemoryScreen(
                         RecordsTab.Memories -> RecordsState(
                             isLoading = memoryUiState.isLoading,
                             errorMessage = memoryUiState.errorMessage,
-                            emptyText = "아직 저장된 기억이 없어요. 글라스에서 \"이거 기억해 줘\"라고 말해 보세요.",
+                            emptyText = "아직 저장된 기억이 없어요. 대화에서 \"이거 기억해 줘\"라고 말해 보세요.",
                             isEmpty = memoryUiState.memories.isEmpty(),
                         ) {
                             DayGroupedList(memoryUiState.memories, { it.capturedAt }, { it.id },
