@@ -29,6 +29,19 @@ object VoiceApproval {
         return t.isNotEmpty() && !no.containsMatchIn(t)
     }
 
+    /**
+     * A late "네" only approves the waiting write when it can only be an answer to that write's question:
+     * the user said nothing else since the write appeared (allowing [LATE_TRANSCRIPT_MS] for the request's own
+     * transcript to land after the tool call), and no other task started after it, since that task's question
+     * ("이 분 김 팀장님 맞나요?") may be what the "네" answers. Otherwise the card waits for a tap.
+     */
+    fun answersWaitingWrite(waitingCreatedAt: Long, previousUtteranceAt: Long, newerTaskCreatedAts: List<Long>): Boolean {
+        if (previousUtteranceAt > waitingCreatedAt + LATE_TRANSCRIPT_MS) return false
+        return newerTaskCreatedAts.none { it > waitingCreatedAt }
+    }
+
+    const val LATE_TRANSCRIPT_MS = 3_000L
+
     /** True when the words, spaces removed, are only yes-words in a row ("그래저장해줘", "응승인"). */
     private fun splitsIntoYes(t: String): Boolean {
         if (t.isEmpty() || t.length > 12) return false

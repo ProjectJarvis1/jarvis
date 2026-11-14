@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS assistant_changes (
 class TransactionView:
     def __init__(self, connection):
         self.connection = connection
+        self.after_commit = []
 
     def __getattr__(self, name):
         return getattr(self.connection, name)
@@ -36,6 +37,16 @@ class TransactionView:
     def commit(self):
         # Existing handlers commit locally. The middleware owns the actual commit.
         pass
+
+
+def run_after_commit(fn) -> None:
+    """Run fn once the request's writes are really committed: file removal must not happen for a
+    transaction that is later rolled back. Outside the shared transaction the caller already committed."""
+    view = transaction_connection.get()
+    if view is None:
+        fn()
+    else:
+        view.after_commit.append(fn)
 
 
 def eligible(method, path):
@@ -100,7 +111,8 @@ class IdempotencyMiddleware:
                 await send({"type": "http.response.start", "status": prior["status"],
                             "headers": [(k.encode(), v.encode()) for k, v in prior["headers"]]})
                 return await send({"type": "http.response.body", "body": bytes(prior["body"])})
-            token = transaction_connection.set(TransactionView(conn))
+            view = TransactionView(conn)
+            token = transaction_connection.set(view)
             messages = []
             delivered = False
             async def replay_receive():
@@ -121,6 +133,11 @@ class IdempotencyMiddleware:
                                  (owner, key, fingerprint, start["status"], Jsonb([(k.decode(), v.decode()) for k, v in start["headers"]]), result))
                     conn.commit()
                 await run_in_threadpool(commit)
+                for fn in view.after_commit:
+                    try:
+                        await run_in_threadpool(fn)
+                    except Exception:
+                        pass  # cleanup only; the committed response stands
             else:
                 await run_in_threadpool(conn.rollback)
             for message in messages:

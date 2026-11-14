@@ -171,6 +171,7 @@ class GeminiSessionViewModel : ViewModel() {
 
     /** Every finished piece of user speech (live, queued during an answer, or local recognition) goes through here. */
     private fun onUserSpeech(text: String, at: Long) {
+        val previousAt = lastUtteranceAt
         lastUtterance = text
         lastUtteranceAt = at
         // Said while a call or text is waiting: that answer belongs to the call/text, never to another task.
@@ -178,7 +179,11 @@ class GeminiSessionViewModel : ViewModel() {
         voiceApprovalJob?.cancel()
         voiceApprovalJob = viewModelScope.launch {
             delay(700L) // wait for the rest of the sentence before judging it a plain yes
-            val waiting = pendingSave(taskManager.tasks.value)?.takeIf(::voiceApprovable) ?: return@launch
+            val tasks = taskManager.tasks.value
+            val waiting = pendingSave(tasks)?.takeIf(::voiceApprovable) ?: return@launch
+            // The "네" must answer this write's own question, not a later one about something else.
+            val newer = tasks.filter { it.id != waiting.id }.map { it.createdAt }
+            if (!VoiceApproval.answersWaitingWrite(waiting.createdAt, previousAt, newer)) return@launch
             if (takeSpokenApproval(calendar = false)) controlTask(waiting.id, waiting.revision, "approve")
         }
     }

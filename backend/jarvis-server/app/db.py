@@ -56,8 +56,18 @@ def _bind_user(conn) -> None:
     previous request's value otherwise. No user means '' and therefore no rows."""
     from .auth import current_user
     # The owner role may bypass row level security, so requests run as jarvis_app (migration 005).
-    conn.execute("SELECT set_config('role', 'jarvis_app', false), set_config('app.user_id', %s, false)",
-                 (current_user.get() or "",))
+    user = current_user.get() or ""
+    # Every transaction of a user holds a shared per-user lock until it ends; account deletion takes it
+    # exclusively ([lock_user_exclusively]), so a save that started before the deletion finishes first
+    # (and is deleted with the rest) and one that starts after it sees the user gone and is refused.
+    conn.execute("SELECT set_config('role', 'jarvis_app', false), set_config('app.user_id', %s, false), "
+                 "pg_advisory_xact_lock_shared(hashtextextended('jarvis-user:' || %s, 0))",
+                 (user, user))
+
+
+def lock_user_exclusively(conn, user: str) -> None:
+    """Waits for the user's running transactions and blocks new ones until this transaction ends."""
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('jarvis-user:' || %s, 0))", (user,))
 
 
 @contextmanager

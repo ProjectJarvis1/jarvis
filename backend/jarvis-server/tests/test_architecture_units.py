@@ -175,3 +175,27 @@ def test_calendar_times_are_korean_wall_clock():
         t._calendar_create_event({"title": "병원", "start": "2026-11-07T09:00:00Z"}, "default")
     assert sent["start"] == {"dateTime": "2026-11-07T09:00:00", "timeZone": "Asia/Seoul"}
     assert sent["end"]["dateTime"] == "2026-11-07T10:00:00"
+
+
+def test_unconnected_account_is_a_failed_dispatch_not_a_success():
+    import asyncio
+    tree = ast.parse((ROOT / "app/routers/mcp.py").read_text())
+    selected = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and n.name in {"_auth_as_failure", "_call"}]
+    finished = []
+
+    async def run_in_threadpool(fn, *args):
+        return fn(*args)
+
+    async def _run(name, arguments, user_id):
+        return {"is_error": False, "needs_auth": True, "provider": "slack", "content": "Slack 연결이 필요합니다."}
+
+    scope = {"Any": object, "run_in_threadpool": run_in_threadpool, "_run": _run, "_requires_confirmation": lambda n: True,
+             "_claim_dispatch": lambda key, name: True, "_UNCERTAIN_RETRY": "",
+             "_finish_dispatch": lambda key, definite: finished.append(definite)}
+    exec(compile(ast.Module(body=selected, type_ignores=[]), "mcp.py", "exec"), scope)
+    result = asyncio.run(scope["_call"]("slack_post_message", {}, "u1", "key-1"))
+    assert result["is_error"] and not result.get("uncertain") and "연결" in result["error"]
+    assert finished == [True]  # the dispatch is released as failed, so a retry after connecting can run
+    read = asyncio.run(scope["_call"]("calendar_list_events", {}, "u1", ""))
+    assert read["is_error"]

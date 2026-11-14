@@ -22,4 +22,15 @@ class VoiceApprovalTest {
         listOf("아니 취소해", "잠깐만", "하지 마", "").forEach { assertFalse(it, VoiceApproval.isConsent(it, 1_000)) }
         assertFalse(VoiceApproval.isConsent("없어", 60_000))
     }
+
+    @Test
+    fun lateYesOnlyAnswersTheWaitingWritesOwnQuestion() {
+        val created = 100_000L
+        // Asked, then answered: approves. The request's own transcript may land just after the tool call.
+        assertTrue(VoiceApproval.answersWaitingWrite(created, previousUtteranceAt = 98_000, newerTaskCreatedAts = emptyList()))
+        assertTrue(VoiceApproval.answersWaitingWrite(created, previousUtteranceAt = created + 2_000, newerTaskCreatedAts = listOf(50_000)))
+        // The user moved on ("이 사람 누구야?") and a new task asked its own question: "네" is not for the write.
+        assertFalse(VoiceApproval.answersWaitingWrite(created, previousUtteranceAt = created + 20_000, newerTaskCreatedAts = emptyList()))
+        assertFalse(VoiceApproval.answersWaitingWrite(created, previousUtteranceAt = 98_000, newerTaskCreatedAts = listOf(created + 5_000)))
+    }
 }

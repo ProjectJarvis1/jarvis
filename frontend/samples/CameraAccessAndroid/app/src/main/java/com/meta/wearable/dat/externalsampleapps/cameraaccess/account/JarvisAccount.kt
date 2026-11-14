@@ -41,6 +41,9 @@ object JarvisAccount {
     fun init(context: Context) {
         appContext = context.applicationContext
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // A deleted account's folder is erased right away; erase it again here in case work that was still
+        // running then (the conversation screen's task store, the outbox) wrote into it afterwards.
+        eraseDeletedFolders(context.applicationContext)
         _user.value = prefs.getString("token", null)?.let {
             User(prefs.getString("email", "").orEmpty(), prefs.getString("name", "").orEmpty())
         }
@@ -117,6 +120,7 @@ object JarvisAccount {
             val user = json.getJSONObject("user")
             prefs.edit().putString("token", json.getString("token")).putString("uid", user.getString("id"))
                 .putString("email", user.optString("email")).putString("name", user.optString("name")).apply()
+            appContext?.let { keepFolder(dataDir(it)) }
             User(user.optString("email"), user.optString("name")).also { _user.value = it }
         }
     }
@@ -141,7 +145,40 @@ object JarvisAccount {
                     check(response.isSuccessful) { serverMessage(response.body?.string().orEmpty()) ?: "계정을 지우지 못했습니다(${response.code})." }
                 }
         }
+        // Unlike signing out, deleting the account also removes this phone's copies of its records: task
+        // history and results (photos, search answers) and requests waiting to be resent.
+        val folder = appContext?.let { dataDir(it) }
         clearLocal()
+        folder?.let { markForErase(it); eraseDeletedFolders(appContext!!) }
+    }
+
+    private const val ERASE_PREFS = "jarvis_erase"
+
+    private fun markForErase(folder: java.io.File) {
+        val prefs = appContext?.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE) ?: return
+        val pending = prefs.getStringSet("folders", emptySet()).orEmpty() + folder.absolutePath
+        prefs.edit().putStringSet("folders", pending).commit()
+    }
+
+    /** A signed-in account's own folder is never erased later, even if an earlier deletion listed it. */
+    private fun keepFolder(folder: java.io.File) {
+        val prefs = appContext?.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE) ?: return
+        val pending = prefs.getStringSet("folders", emptySet()).orEmpty()
+        if (folder.absolutePath in pending) prefs.edit().putStringSet("folders", pending - folder.absolutePath).commit()
+    }
+
+    /** Deletes folders of deleted accounts; ones that cannot be removed yet are tried again at the next start. */
+    private fun eraseDeletedFolders(context: Context) {
+        val prefs = context.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE)
+        val pending = prefs.getStringSet("folders", emptySet()).orEmpty()
+        if (pending.isEmpty()) return
+        val usersRoot = java.io.File(context.filesDir, "users").canonicalFile
+        val left = pending.filterNot { path ->
+            val dir = java.io.File(path).canonicalFile
+            // Only a folder directly under files/users is ever removed.
+            dir.parentFile != usersRoot || dir.deleteRecursively()
+        }.toSet()
+        prefs.edit().putStringSet("folders", left).apply()
     }
 
     /** The server no longer accepts the session (expired, deleted elsewhere). */
