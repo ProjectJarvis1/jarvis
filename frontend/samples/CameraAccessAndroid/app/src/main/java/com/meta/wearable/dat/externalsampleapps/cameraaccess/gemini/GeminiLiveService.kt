@@ -478,6 +478,9 @@ class GeminiLiveService {
     private fun friendlyError(raw: String): String {
         val normalized = raw.lowercase()
         return when {
+            // The relay closes with 4429 when today's live talk time is used up (server usage limit).
+            "code 4429" in normalized || "daily limit" in normalized ->
+                "오늘 쓸 수 있는 실시간 대화 시간을 모두 썼어요. 내일 다시 쓸 수 있어요."
             "prepayment credits are depleted" in normalized ->
                 "Gemini API 크레딧이 소진되었습니다. Google AI Studio 프로젝트의 Billing/Credits를 충전해주세요."
             "api key not valid" in normalized || "invalid api key" in normalized ->

@@ -181,9 +181,23 @@ async def create_meeting_from_recording(
         with conn.cursor() as cur:
             _validate_person_ids(cur, parsed_person_ids)
 
+    # 비용이 드는 정리 전에 오늘 한도를 확인하고 센다. 한도에 걸리면 올린 녹음 파일은 남기지 않는다.
+    from .. import usage
+    from ..auth import user_id as _uid
+    owner = _uid()
+    try:
+        await run_in_threadpool(usage.take, owner, usage.MEETING_JOBS)
+    except HTTPException:
+        path.unlink(missing_ok=True)
+        raise
+
     try:
         started = datetime.fromisoformat(started_at) if started_at else datetime.now(timezone.utc)
         ended = datetime.fromisoformat(ended_at) if ended_at else datetime.now(timezone.utc)
+    except ValueError:
+        await run_in_threadpool(usage.refund, owner, usage.MEETING_JOBS)
+        raise HTTPException(400, "started_at/ended_at must be ISO datetimes")
+    try:
         transcript = await run_in_threadpool(transcribe_audio, path)
         if not transcript:
             raise HTTPException(422, "no speech was transcribed")

@@ -46,6 +46,8 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             val app = context.applicationContext
             SettingsManager.init(app)
             JarvisAccount.init(app)
+            // The worker can start the app's process on its own; its crashes are kept the same way.
+            com.meta.wearable.dat.externalsampleapps.cameraaccess.crash.CrashReporter.install(app)
             if (!JarvisAccount.isSignedIn || !SettingsManager.proactiveOffersEnabled) return emptyList()
             if (!MeetingBriefer.hasCalendarPermission(app)) return emptyList()
             if (!ProactivePlanner.withinHours(nowMs)) return emptyList()

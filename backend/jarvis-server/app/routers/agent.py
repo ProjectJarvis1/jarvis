@@ -29,6 +29,8 @@ class AgentConfirmRequest(BaseModel):
 
 @router.post("/query")
 def query(body: AgentQueryRequest):
+    from .. import usage
+    usage.take(current_user_id(), usage.AGENT_CALLS)
     return run_agent_query(
         user_id=current_user_id(),
         text=body.text,

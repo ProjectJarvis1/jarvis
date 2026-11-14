@@ -63,12 +63,17 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     AppContextProvider.init(this)
+    com.meta.wearable.dat.externalsampleapps.cameraaccess.crash.CrashReporter.install(this)
 
     // Initialize settings with app context
     SettingsManager.init(this)
     com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.init(this)
     lifecycleScope.launch {
       com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.validate()
+      // A crash kept from an earlier run goes to Jarvis's own server once the session is known to be good.
+      kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.crash.CrashReporter.uploadPending(applicationContext)
+      }
     }
     // Jarvis checks the calendar every 15 minutes, app open or not, to offer help first.
     com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveWorker.schedule(this)

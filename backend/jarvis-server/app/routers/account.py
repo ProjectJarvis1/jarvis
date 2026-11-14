@@ -17,7 +17,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 # Every table under row level security, children first.
 _USER_TABLES = ["memory_entities", "agent_tool_calls", "assistant_changes", "pending_actions", "agent_runs",
-                "person_faces", "proposal_points", "needs", "memories", "entities", "meetings", "people"]
+                "person_faces", "proposal_points", "needs", "memories", "entities", "meetings", "people",
+                "client_errors", "ai_usage"]
 
 
 class GoogleLogin(BaseModel):

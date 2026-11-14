@@ -51,6 +51,9 @@ def generate(body: dict) -> dict:
     and returns Gemini's raw JSON response unmodified."""
     if not settings.gemini_api_key:
         raise HTTPException(500, "GEMINI_API_KEY not configured on the server")
+    from .. import usage
+    from ..auth import user_id as current_user_id
+    usage.take(current_user_id(), usage.AGENT_CALLS)
 
     tool_names = [
         fc.get("name")
