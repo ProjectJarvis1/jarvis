@@ -1,11 +1,15 @@
 """Offline fallback: compile current Android Kotlin + Compose and run JVM tests.
 
 Requires an existing Gradle dependency cache, SDK 35 and generated R/BuildConfig
-from a previous Android build. This is not Gradle dependency resolution, resource
+from a previous Android build of the chosen flavor (`assemblePhoneDebug` or `assembleGlassesDebug`).
+Usage: python3 scripts/check_android_offline.py [phone|glasses]  (default: phone) This is not Gradle dependency resolution, resource
 compilation, APK packaging, lint or a device/UI test. No cache writes or network.
 """
 from pathlib import Path
-import os, subprocess
+import os, subprocess, sys
+flavor=(sys.argv[1] if len(sys.argv) > 1 else os.environ.get('JARVIS_FLAVOR', 'phone')).lower()
+if flavor not in ('phone', 'glasses'): raise SystemExit('flavor must be phone or glasses')
+variant=flavor+'Debug'; Variant=flavor.capitalize()+'Debug'
 base=Path(__file__).resolve().parents[1] / 'frontend/samples/CameraAccessAndroid/app'
 cache=Path(os.environ.get('JARVIS_GRADLE_CACHE', str(Path.home() / '.gradle/caches')));mods=cache/'modules-2/files-2.1'
 # Cached AAR class jars and library jars; no Gradle services, sockets or downloads.
@@ -13,7 +17,9 @@ libs=list((cache/'8.14.1/transforms').glob('*/transformed/*/jars/classes.jar'))
 libs+=list((cache/'8.14.1/transforms').glob('*/transformed/*/jars/libs/*.jar'))
 for group in ['org.jetbrains.kotlin','org.jetbrains.kotlinx','com.squareup.okhttp3','com.squareup.okio','com.google.code.gson','org.json','org.jetbrains','junit','org.hamcrest','com.meta.wearable','org.webrtc']:
     libs+=list((mods/group).glob('*/*/*/*.jar'))
-libs+=[Path(os.environ.get('ANDROID_HOME', str(Path.home() / 'Library/Android/sdk'))) / 'platforms/android-35/android.jar',base/'build/intermediates/compile_and_runtime_not_namespaced_r_class_jar/debug/processDebugResources/R.jar',base/'build/intermediates/javac/debug/compileDebugJavaWithJavac/classes']
+libs+=[Path(os.environ.get('ANDROID_HOME', str(Path.home() / 'Library/Android/sdk'))) / 'platforms/android-35/android.jar',base/f'build/intermediates/compile_and_runtime_not_namespaced_r_class_jar/{variant}/process{Variant}Resources/R.jar',base/f'build/intermediates/javac/{variant}/compile{Variant}JavaWithJavac/classes']
+for need in libs[-2:]:
+    if not need.exists(): raise SystemExit(f'missing {need}: build the {flavor} flavor once (./gradlew :app:assemble{Variant})')
 # Some local artifacts use other group names.
 libs+=list(mods.glob('com.meta*/*/*/*/*.jar'))
 libs+=list(mods.glob('androidx.*/*/*/*/*.jar'))
@@ -32,7 +38,8 @@ working = tempfile.TemporaryDirectory(prefix='jarvis-kotlin-check-')
 work = Path(working.name)
 out=work / 'main';out.mkdir()
 args=['-no-stdlib','-no-reflect','-jvm-target','1.8','-classpath',cp,'-Xplugin='+str(plugin),'-d',str(out)]
-args+=list(map(str,(base/'src/main/java').rglob('*.kt')))
+# The flavor's own sources (src/phone or src/glasses) complete src/main, like the Gradle variant does.
+args+=list(map(str,(base/'src/main/java').rglob('*.kt')))+list(map(str,(base/f'src/{flavor}/java').rglob('*.kt')))
 # Kotlin compiler argfile preserves spaces safely.
 argfile=work / 'main.args';argfile.write_text('\n'.join('"'+a.replace('\\','\\\\').replace('"','\\"')+'"' for a in args))
 java=str(Path(os.environ.get('JAVA_HOME', '/Applications/Android Studio.app/Contents/jbr/Contents/Home')) / 'bin/java')
