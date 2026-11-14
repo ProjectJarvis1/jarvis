@@ -17,4 +17,10 @@ class OnboardingPermissionsTest {
     @Test fun contactsAskForCallingTooSinceCallsUseThem() {
         assertTrue("android.permission.CALL_PHONE" in OnboardingPermissions.list(36).first { it.key == "contacts" }.permissions)
     }
+
+    @Test fun everythingAllowedSkipsThePermissionPage() {
+        assertEquals(listOf(OnboardingStep.WHAT, OnboardingStep.FIRST_WORDS), OnboardingPlan.steps(allGranted = true))
+        assertEquals(listOf(OnboardingStep.WHAT, OnboardingStep.PERMISSIONS, OnboardingStep.FIRST_WORDS),
+            OnboardingPlan.steps(allGranted = false))
+    }
 }

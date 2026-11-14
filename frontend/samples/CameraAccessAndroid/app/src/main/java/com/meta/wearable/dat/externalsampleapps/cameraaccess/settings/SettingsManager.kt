@@ -8,9 +8,12 @@ object SettingsManager {
     private const val PREFS_NAME = "visionclaw_settings"
 
     private lateinit var prefs: SharedPreferences
+    /** Kept apart from the settings above so 「설정 초기화」 does not bring the first-run guide back (D81). */
+    private lateinit var onboardingPrefs: SharedPreferences
 
     fun init(context: Context) {
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        onboardingPrefs = context.getSharedPreferences("onboarding", Context.MODE_PRIVATE)
     }
 
     var geminiSystemPrompt: String
@@ -99,9 +102,14 @@ object SettingsManager {
     /** When a business card comes into view, Jarvis asks whether to save it (nothing is saved without a yes). */
     /** Brief the user on the glasses a few minutes before a calendar meeting. */
     /** The first-run guide (what Jarvis does, permissions one by one, first words) was shown on this phone. */
+    /**
+     * The first-run guide was seen on this phone (D81). One flag, not tied to the app version, so an update never
+     * shows it again; people who used the app before the guide existed see it once. An earlier build kept the
+     * flag with the settings, and that value still counts.
+     */
     var onboardingDone: Boolean
-        get() = prefs.getBoolean("onboardingDone", false)
-        set(value) = prefs.edit().putBoolean("onboardingDone", value).apply()
+        get() = onboardingPrefs.getBoolean("done", false) || prefs.getBoolean("onboardingDone", false)
+        set(value) = onboardingPrefs.edit().putBoolean("done", value).apply()
 
     var meetingBriefingEnabled: Boolean
         get() = prefs.getBoolean("meetingBriefingEnabled", true)

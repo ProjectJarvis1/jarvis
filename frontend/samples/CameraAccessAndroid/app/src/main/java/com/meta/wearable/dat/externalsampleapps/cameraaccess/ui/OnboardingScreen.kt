@@ -72,6 +72,14 @@ object OnboardingPermissions {
     }
 }
 
+/** The guide's pages. The permission page is left out when everything on it is already allowed (D81). */
+enum class OnboardingStep { WHAT, PERMISSIONS, FIRST_WORDS }
+
+object OnboardingPlan {
+    fun steps(allGranted: Boolean): List<OnboardingStep> =
+        if (allGranted) listOf(OnboardingStep.WHAT, OnboardingStep.FIRST_WORDS) else OnboardingStep.entries.toList()
+}
+
 private enum class Ask { NOT_YET, GRANTED, DENIED }
 
 private fun granted(context: Context, p: OnboardingPermission) =
@@ -84,7 +92,12 @@ private fun granted(context: Context, p: OnboardingPermission) =
 @Composable
 fun OnboardingScreen(onDone: () -> Unit, modifier: Modifier = Modifier) {
     var step by rememberSaveable { mutableIntStateOf(0) }
-    val last = 2
+    val context = LocalContext.current
+    // Someone who already allowed every permission (often an existing user after an update) skips that page.
+    val steps = rememberSaveable {
+        ArrayList(OnboardingPlan.steps(OnboardingPermissions.list(android.os.Build.VERSION.SDK_INT).all { granted(context, it) }))
+    }
+    val last = steps.lastIndex
     val byWord = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase)
     Column(modifier.fillMaxSize().background(Jarvis.extras.ground).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 20.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -96,10 +109,10 @@ fun OnboardingScreen(onDone: () -> Unit, modifier: Modifier = Modifier) {
         StepBar(step, last + 1, Modifier.padding(horizontal = 20.dp))
         Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
             Spacer(Modifier.height(24.dp))
-            when (step) {
-                0 -> WhatJarvisDoes(byWord)
-                1 -> Permissions(byWord)
-                else -> FirstWords(byWord)
+            when (steps[step.coerceIn(0, last)]) {
+                OnboardingStep.WHAT -> WhatJarvisDoes(byWord)
+                OnboardingStep.PERMISSIONS -> Permissions(byWord)
+                OnboardingStep.FIRST_WORDS -> FirstWords(byWord)
             }
             Spacer(Modifier.height(24.dp))
         }
