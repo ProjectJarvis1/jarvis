@@ -37,6 +37,22 @@ class StreamingService : Service() {
     const val REASON_LISTEN = "listen"
 
     private val reasons = mutableSetOf<String>()
+
+    /**
+     * Foreground types to try, most capable first. Listening and the glasses stream run for hours, so no
+     * time-limited type (dataSync stops after six background hours on Android 15 and would crash the app):
+     * the microphone for "자비스" and live talk, the connected-device type for the glasses link. The phone
+     * build has no glasses, so without the microphone it has nothing to keep running.
+     */
+    fun candidateTypes(glasses: Boolean, microphone: Boolean): List<Int> = buildList {
+      val mic = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+      val device = ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+      if (microphone) {
+        if (glasses) add(device or mic)
+        add(mic) // the connected-device type is refused without Bluetooth permission (phone camera mode)
+      }
+      if (glasses) add(device)
+    }
     @Volatile private var withMicrophone = false
     /** The service is up in the foreground; set by the service itself. */
     @Volatile private var running = false
@@ -56,6 +72,14 @@ class StreamingService : Service() {
         reasons += reason
         if (microphone != null) withMicrophone = microphone
         running && !micChanged && !micRetry
+      }
+      if (!alreadyRunning) {
+        val micOk = withMicrophone && context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) ==
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (candidateTypes(com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig.GLASSES, micOk).isEmpty()) {
+          synchronized(reasons) { reasons -= reason }
+          return false
+        }
       }
       // Joining a running service needs no new start: a start from a pocket would have to call
       // startForeground again, and Android 14 refuses the microphone type from the background.
@@ -103,9 +127,7 @@ class StreamingService : Service() {
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     Log.d(TAG, "Service started")
 
-    // The phone build declares no connected-device type, so it never asks for one.
-    val base = (if (com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig.GLASSES) ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE else 0) or
-        ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+    val glasses = com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig.GLASSES
     val microphone = withMicrophone && hasMicPermission()
     // Already in the foreground with the right microphone state: a second start (the glasses stream
     // reconnecting in a pocket) must not re-request types, because Android 14 would refuse the
@@ -114,16 +136,7 @@ class StreamingService : Service() {
       acquireWakeLock()
       return START_NOT_STICKY
     }
-    // Most capable first. The microphone type is refused from the background, and the connected
-    // device type without Bluetooth permission (phone camera mode), so fall back step by step.
-    val candidates = buildList {
-      if (microphone) {
-        add(base or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-        add(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE)
-      }
-      add(base)
-      add(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC)
-    }
+    val candidates = candidateTypes(glasses, microphone)
     val granted = candidates.firstOrNull { type ->
       val notification = createNotification(type and ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE != 0)
       runCatching { startForeground(NOTIFICATION_ID, notification, type) }

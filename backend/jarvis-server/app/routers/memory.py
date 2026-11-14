@@ -369,54 +369,65 @@ def save_life_memory(body: LifeMemoryCreate) -> MemoryOut:
             "captured_at_kst": metadata.get("captured_at_kst") or _captured_at_kst(body.captured_at),
         }
     )
-    if body.image_base64:
-        metadata.update(_save_memory_image(body.image_base64, body.image_mime_type))
-
     with get_conn() as conn:
-        with conn.cursor() as cur:
-            entity_ids = []
-            for entity in entities:
-                entity_id = _upsert_entity(cur, entity)
-                entity_ids.append((entity_id, entity))
-                person_id = _upsert_person_from_entity(cur, entity, body.captured_at)
-                if person_id and person_id not in related_person_ids:
-                    related_person_ids.append(person_id)
+        # The photo is written only once this request holds the user's lock (db._bind_user): an account
+        # deletion then waits for this save and removes the file with the rest, and a save refused because the
+        # account is already gone takes its file back with it.
+        if body.image_base64:
+            metadata.update(_save_memory_image(body.image_base64, body.image_mime_type))
+        try:
+            row = _insert_life_memory(conn, body, text, embedding, related_person_ids, entities, metadata)
+            conn.commit()
+        except BaseException:
+            _delete_memory_image(metadata)
+            raise
+    return _row_to_memory(row)
 
+
+def _insert_life_memory(conn, body, text, embedding, related_person_ids, entities, metadata):
+    with conn.cursor() as cur:
+        entity_ids = []
+        for entity in entities:
+            entity_id = _upsert_entity(cur, entity)
+            entity_ids.append((entity_id, entity))
+            person_id = _upsert_person_from_entity(cur, entity, body.captured_at)
+            if person_id and person_id not in related_person_ids:
+                related_person_ids.append(person_id)
+
+        cur.execute(
+            """
+            INSERT INTO memories
+                (captured_at, text, embedding, related_person_ids,
+                 related_meeting_id, source, metadata)
+            VALUES (%s, %s, %s, %s, NULL, %s, %s)
+            RETURNING *
+            """,
+            (
+                body.captured_at,
+                text,
+                embedding,
+                related_person_ids,
+                body.source,
+                Jsonb(metadata),
+            ),
+        )
+        row = cur.fetchone()
+        for entity_id, entity in entity_ids:
             cur.execute(
                 """
-                INSERT INTO memories
-                    (captured_at, text, embedding, related_person_ids,
-                     related_meeting_id, source, metadata)
-                VALUES (%s, %s, %s, %s, NULL, %s, %s)
-                RETURNING *
+                INSERT INTO memory_entities
+                    (memory_id, entity_id, relation, confidence)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT DO NOTHING
                 """,
                 (
-                    body.captured_at,
-                    text,
-                    embedding,
-                    related_person_ids,
-                    body.source,
-                    Jsonb(metadata),
+                    row["id"],
+                    entity_id,
+                    "contains" if entity["type"] in {"business_card", "document", "object"} else "mentions",
+                    1.0,
                 ),
             )
-            row = cur.fetchone()
-            for entity_id, entity in entity_ids:
-                cur.execute(
-                    """
-                    INSERT INTO memory_entities
-                        (memory_id, entity_id, relation, confidence)
-                    VALUES (%s, %s, %s, %s)
-                    ON CONFLICT DO NOTHING
-                    """,
-                    (
-                        row["id"],
-                        entity_id,
-                        "contains" if entity["type"] in {"business_card", "document", "object"} else "mentions",
-                        1.0,
-                    ),
-                )
-        conn.commit()
-    return _row_to_memory(row)
+    return row
 
 
 @router.get("/{memory_id}", response_model=MemoryOut)

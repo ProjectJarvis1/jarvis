@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Iterator
 
 from psycopg.rows import dict_row
@@ -56,8 +57,35 @@ def _bind_user(conn) -> None:
     previous request's value otherwise. No user means '' and therefore no rows."""
     from .auth import current_user
     # The owner role may bypass row level security, so requests run as jarvis_app (migration 005).
-    conn.execute("SELECT set_config('role', 'jarvis_app', false), set_config('app.user_id', %s, false)",
-                 (current_user.get() or "",))
+    user = current_user.get() or ""
+    # Every transaction of a user holds a shared per-user lock until it ends; account deletion takes it
+    # exclusively ([lock_user_exclusively]), so a save that started before the deletion finishes first
+    # (and is deleted with the rest) and one that starts after it sees the user gone and is refused.
+    conn.execute("SELECT set_config('role', 'jarvis_app', false), set_config('app.user_id', %s, false), "
+                 "pg_advisory_xact_lock_shared(hashtextextended('jarvis-user:' || %s, 0))",
+                 (user, user))
+
+
+class UserGone(Exception):
+    """The account no longer exists (deleted while a sign-in to another service was in progress)."""
+
+
+def hold_live_user(conn, user: str) -> None:
+    """For writes made outside the user's own request (an OAuth callback): hold the user's lock like their
+    requests do, so an account deletion cannot interleave, and refuse when the account is already gone."""
+    conn.execute("SELECT pg_advisory_xact_lock_shared(hashtextextended('jarvis-user:' || %s, 0))", (user,))
+    if conn.execute("SELECT 1 FROM app_users WHERE id = %s", (user,)).fetchone() is None:
+        raise UserGone(user)
+
+
+def lock_user_exclusively(conn, user: str) -> None:
+    """Waits for the user's running transactions and blocks new ones until this transaction ends."""
+    conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('jarvis-user:' || %s, 0))", (user,))
+
+
+# Set while the remote tool connection (mcp_gateway) looks up an account token. Keyed /mcp requests can hold
+# every pooled connection while they wait on that remote call, so the lookup must not wait for the pool.
+outside_pool: ContextVar[bool] = ContextVar("outside_pool", default=False)
 
 
 @contextmanager
@@ -67,6 +95,13 @@ def get_conn() -> Iterator:
     if current is not None:
         _bind_user(current)
         yield current
+        return
+    if outside_pool.get():
+        import psycopg
+        with psycopg.connect(settings.database_url, row_factory=dict_row, connect_timeout=10) as conn:
+            _configure(conn)
+            _bind_user(conn)
+            yield conn
         return
     with pool.connection() as conn:
         _bind_user(conn)

@@ -41,6 +41,9 @@ object JarvisAccount {
     fun init(context: Context) {
         appContext = context.applicationContext
         prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        // A deleted account's folder is erased right away; erase it again here in case work that was still
+        // running then (the conversation screen's task store, the outbox) wrote into it afterwards.
+        eraseDeletedFolders(context.applicationContext)
         _user.value = prefs.getString("token", null)?.let {
             User(prefs.getString("email", "").orEmpty(), prefs.getString("name", "").orEmpty())
         }
@@ -117,6 +120,7 @@ object JarvisAccount {
             val user = json.getJSONObject("user")
             prefs.edit().putString("token", json.getString("token")).putString("uid", user.getString("id"))
                 .putString("email", user.optString("email")).putString("name", user.optString("name")).apply()
+            appContext?.let { keepFolder(dataDir(it)) }
             User(user.optString("email"), user.optString("name")).also { _user.value = it }
         }
     }
@@ -141,7 +145,48 @@ object JarvisAccount {
                     check(response.isSuccessful) { serverMessage(response.body?.string().orEmpty()) ?: "계정을 지우지 못했습니다(${response.code})." }
                 }
         }
+        // Unlike signing out, deleting the account also removes this phone's copies of its records: task
+        // history and results (photos, search answers) and requests waiting to be resent.
+        val folder = appContext?.let { dataDir(it) }
         clearLocal()
+        folder?.let { markForErase(it); eraseDeletedFolders(appContext!!) }
+    }
+
+    private const val ERASE_PREFS = "jarvis_erase"
+
+    /**
+     * Entries are "pid|folder". Work of the deleted account that was still running in this process (the
+     * conversation screen's task store, the outbox) may write into the folder after it is erased, so an entry
+     * is dropped only by a later process, after erasing the folder once more; this process only erases.
+     */
+    private fun markForErase(folder: java.io.File) {
+        val prefs = appContext?.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE) ?: return
+        val pending = prefs.getStringSet("folders", emptySet()).orEmpty() + "${android.os.Process.myPid()}|${folder.absolutePath}"
+        prefs.edit().putStringSet("folders", pending).commit()
+    }
+
+    /** A signed-in account's own folder is never erased later, even if an earlier deletion listed it. */
+    private fun keepFolder(folder: java.io.File) {
+        val prefs = appContext?.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE) ?: return
+        val pending = prefs.getStringSet("folders", emptySet()).orEmpty()
+        val left = pending.filterNot { it.substringAfter('|') == folder.absolutePath }.toSet()
+        if (left.size != pending.size) prefs.edit().putStringSet("folders", left).commit()
+    }
+
+    /** Erases folders of deleted accounts; see [markForErase] for when an entry is let go. */
+    private fun eraseDeletedFolders(context: Context) {
+        val prefs = context.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE)
+        val pending = prefs.getStringSet("folders", emptySet()).orEmpty()
+        if (pending.isEmpty()) return
+        val usersRoot = java.io.File(context.filesDir, "users").canonicalFile
+        val me = android.os.Process.myPid().toString()
+        val left = pending.filterNot { entry ->
+            val dir = java.io.File(entry.substringAfter('|')).canonicalFile
+            // Only a folder directly under files/users is ever removed.
+            if (dir.parentFile != usersRoot) return@filterNot true
+            dir.deleteRecursively() && entry.substringBefore('|') != me
+        }.toSet()
+        prefs.edit().putStringSet("folders", left).commit()
     }
 
     /** The server no longer accepts the session (expired, deleted elsewhere). */
@@ -157,6 +202,8 @@ object JarvisAccount {
             prefs.edit().clear().apply()
         }
         _user.value = null
+        // After the session is gone, so a briefing finishing now is no longer posted for this account.
+        appContext?.let { com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications.clearAccount(it) }
     }
 
     private fun base() = SettingsManager.jarvisApiBase.trimEnd('/')

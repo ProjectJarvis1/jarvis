@@ -179,12 +179,20 @@ async def _run(name: str, arguments: dict[str, Any], user_id: str) -> dict[str, 
     return _with_details(await run_in_threadpool(call_tool, native, arguments, user_id, True))
 
 
+def _auth_as_failure(result: dict[str, Any]) -> dict[str, Any]:
+    """A tool whose account is not connected did nothing. Report it as a failed call (not a success the app
+    would record as done, nor a dispatch marked finished) so it can be retried after connecting."""
+    if result.get("needs_auth") and not result.get("is_error"):
+        return {**result, "is_error": True, "error": result.get("content") or "계정 연결이 필요합니다."}
+    return result
+
+
 async def _call(name: str, arguments: dict[str, Any], user_id: str, request_key: str = "") -> dict[str, Any]:
     if not (request_key and _requires_confirmation(name)):
-        return await _run(name, arguments, user_id)
+        return _auth_as_failure(await _run(name, arguments, user_id))
     if not await run_in_threadpool(_claim_dispatch, request_key, name):
         return {"is_error": True, "uncertain": True, "error": _UNCERTAIN_RETRY}
-    result = await _run(name, arguments, user_id)
+    result = _auth_as_failure(await _run(name, arguments, user_id))
     definite_failure = bool(result.get("is_error")) and not result.get("uncertain")
     await run_in_threadpool(_finish_dispatch, request_key, definite_failure)
     return result

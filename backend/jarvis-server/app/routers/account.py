@@ -9,7 +9,7 @@ from starlette.concurrency import run_in_threadpool
 
 from ..auth import ADMIN_USER, create_session, hash_token, require_user, user_id
 from ..config import settings
-from ..db import get_conn, pool
+from ..db import get_conn, lock_user_exclusively, pool
 from ..media import remove_user_files
 
 log = logging.getLogger("jarvis.account")
@@ -106,7 +106,15 @@ def delete_account():
     user = user_id()
     if user == ADMIN_USER:
         raise HTTPException(400, "기존 기록을 가진 관리자 계정은 앱에서 지울 수 없습니다.")
+    import psycopg
     with get_conn() as conn:  # row level security scopes these to the user
+        # Saves still running for this user finish first; later ones find the user gone (migration 005).
+        conn.execute("SET LOCAL lock_timeout = '30s'")
+        try:
+            lock_user_exclusively(conn, user)
+        except psycopg.errors.LockNotAvailable:
+            conn.rollback()
+            raise HTTPException(409, "아직 끝나지 않은 저장이 있어요. 잠시 뒤에 다시 시도해 주세요.")
         for table in _USER_TABLES:
             conn.execute(f"DELETE FROM {table}")
         conn.execute("DELETE FROM user_integrations WHERE user_id = %s", (user,))

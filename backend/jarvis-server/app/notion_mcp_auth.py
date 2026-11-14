@@ -21,7 +21,7 @@ from psycopg.types.json import Jsonb
 
 from . import token_crypto
 from .config import settings
-from .db import get_conn
+from .db import get_conn, hold_live_user
 
 ISSUER = "https://mcp.notion.com"
 RESOURCE = "https://mcp.notion.com/mcp"
@@ -119,6 +119,7 @@ def authorize_url(state: str) -> str:
 def _save_tokens(user_id: str, data: dict[str, Any]) -> None:
     expires_at = time.time() + float(data.get("expires_in") or 3600)
     with get_conn() as conn:
+        hold_live_user(conn, user_id)
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -170,5 +171,28 @@ def fresh_token(user_id: str, row: dict[str, Any]) -> Optional[str]:
     })
     if not data.get("access_token"):
         return None
-    _save_tokens(user_id, data)
+    if not _save_refreshed(user_id, row["refresh_token_encrypted"], data):
+        return None  # disconnected (or reconnected) while refreshing: the old connection is not brought back
     return data["access_token"]
+
+
+def _save_refreshed(user_id: str, used_refresh: str, data: dict[str, Any]) -> bool:
+    """A refresh only updates the connection it refreshed. Unlike a sign-in it never inserts: a connection the
+    user removed meanwhile stays removed."""
+    expires_at = time.time() + float(data.get("expires_in") or 3600)
+    with get_conn() as conn:
+        hold_live_user(conn, user_id)
+        row = conn.execute("SELECT refresh_token_encrypted FROM user_integrations WHERE user_id = %s "
+                           "AND provider = 'notion_mcp' FOR UPDATE", (user_id,)).fetchone()
+        if row is None or token_crypto.decrypt(row["refresh_token_encrypted"]) != used_refresh:
+            conn.rollback()
+            return False
+        conn.execute(
+            """UPDATE user_integrations SET access_token_encrypted = %s,
+                   refresh_token_encrypted = COALESCE(%s, refresh_token_encrypted),
+                   metadata = metadata || %s, updated_at = now()
+               WHERE user_id = %s AND provider = 'notion_mcp'""",
+            (token_crypto.encrypt(data["access_token"]), token_crypto.encrypt(data.get("refresh_token")),
+             Jsonb({"expires_at": expires_at}), user_id))
+        conn.commit()
+    return True

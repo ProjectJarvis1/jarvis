@@ -77,6 +77,7 @@ def test_wrong_key_fails_loudly_and_tool_sees_no_token(key, monkeypatch):
 def test_saving_a_connection_encrypts_tokens(key, monkeypatch):
     conn = FakeConn()
     monkeypatch.setattr(integ, "get_conn", lambda: conn)
+    monkeypatch.setattr(integ, "hold_live_user", lambda conn, user: None)  # account checks have their own DB test
     integ._upsert_integration(user_id="u1", provider="slack", access_token="xoxb-1", refresh_token="r-1")
     params = conn.sql[-1][1]
     assert c.is_encrypted(params[2]) and c.is_encrypted(params[3])

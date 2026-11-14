@@ -30,12 +30,12 @@ android {
       dimension = "device"
       isDefault = true
       buildConfigField("boolean", "GLASSES", "true")
-      manifestPlaceholders["fgsTypes"] = "connectedDevice|dataSync|microphone"
+      manifestPlaceholders["fgsTypes"] = "connectedDevice|microphone"
     }
     create("phone") {
       dimension = "device"
       buildConfigField("boolean", "GLASSES", "false")
-      manifestPlaceholders["fgsTypes"] = "dataSync|microphone"
+      manifestPlaceholders["fgsTypes"] = "microphone"
     }
   }
 

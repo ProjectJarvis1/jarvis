@@ -293,6 +293,9 @@ class TaskManager(
         }
     }
 
+    private suspend fun archiveOrNull(id: String, revision: Int, raw: String?): String? =
+        try { archive(id, revision, raw) } catch (e: CancellationException) { throw e } catch (_: Exception) { null }
+
     private suspend fun archive(id: String, revision: Int, raw: String?): String? =
         if (raw != null && raw.length > TaskResults.INLINE_LIMIT) store.archiveResult("$id-$revision", raw) else null
 
@@ -364,7 +367,8 @@ class TaskManager(
     }
 
     private suspend fun finish(start: TaskRecord, outcome: TaskOutcome) {
-        val archived = archive(start.id, start.revision, outcome.result)
+        // As in completeWaiting: a full result that cannot be archived keeps its outcome and inline preview.
+        val archived = archiveOrNull(start.id, start.revision, outcome.result)
         synchronized(lock) {
         val current = records[start.id] ?: return@synchronized
         if (current.revision != start.revision || current.state != TaskState.RUNNING) return@synchronized
@@ -388,7 +392,7 @@ class TaskManager(
     }
     suspend fun recover(key: String, code: Int, body: String) {
         if (!canRecover(key)) return
-        val archived = if (code in 200..299) archive(key.substringBefore(':'), key.substringAfter(':').toInt(), body) else null
+        val archived = if (code in 200..299) archiveOrNull(key.substringBefore(':'), key.substringAfter(':').toInt(), body) else null
         synchronized(lock) {
             if (!canRecover(key)) return
             val id = key.substringBefore(':')

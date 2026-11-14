@@ -17,9 +17,17 @@ class VoiceApprovalTest {
     }
 
     @Test
-    fun calendarAnswerIsConsentUnlessRefused() {
-        listOf("강남세브란스", "없어", "그냥 해", "응").forEach { assertTrue(it, VoiceApproval.isConsent(it, 1_000)) }
-        listOf("아니 취소해", "잠깐만", "하지 마", "").forEach { assertFalse(it, VoiceApproval.isConsent(it, 1_000)) }
-        assertFalse(VoiceApproval.isConsent("없어", 60_000))
+    fun cardYesOnlyAnswersThatCardsOwnQuestion() {
+        val shown = 100_000L // when this revision went on screen
+        // Asked, then answered within the window: approves.
+        assertTrue(VoiceApproval.answersWaitingWrite(shown, utteranceAt = shown + 4_000, previousUtteranceAt = 98_000, newerTaskCreatedAts = emptyList()))
+        // Late "네" (after the 20 s window).
+        assertFalse(VoiceApproval.answersWaitingWrite(shown, shown + 25_000, 98_000, emptyList()))
+        // "네" to another question: another task started after this one went on screen.
+        assertFalse(VoiceApproval.answersWaitingWrite(shown, shown + 4_000, 98_000, listOf(shown + 2_000)))
+        // Repeated "네": something was already said after the question.
+        assertFalse(VoiceApproval.answersWaitingWrite(shown, shown + 9_000, previousUtteranceAt = shown + 4_000, newerTaskCreatedAts = emptyList()))
+        // Arguments edited after the "네": the new revision went on screen after it was said.
+        assertFalse(VoiceApproval.answersWaitingWrite(presentedAt = shown + 6_000, utteranceAt = shown + 4_000, previousUtteranceAt = 98_000, newerTaskCreatedAts = emptyList()))
     }
 }

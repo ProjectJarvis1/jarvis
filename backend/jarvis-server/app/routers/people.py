@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 
 from ..auth import require_api_key
 from ..db import get_conn
+from ..person_projection import sync_person_profile
 from ..embeddings import embed_text
 from ..face_embeddings import FaceQuality, embed_face_from_base64
 from ..schemas import (
@@ -294,6 +295,7 @@ def create_person(body: PersonCreate) -> PersonOut:
                     ),
                 )
                 row = cur.fetchone()
+                sync_person_profile(cur, row)
                 # Adds to this person's reference set rather than replacing it -- re-saving a
                 # known person is the main way their recognition improves over time, so an
                 # extra angle/lighting sample is exactly what we want to keep.
@@ -490,6 +492,7 @@ def update_person(person_id: UUID, body: PersonUpdate) -> PersonOut:
                 [updates[col] for col in columns] + [person_id],
             )
             row = cur.fetchone()
+            sync_person_profile(cur, row)
         conn.commit()
     logger.info("update_person: id=%s fields=%s", person_id, columns)
     return _row_to_person(row)

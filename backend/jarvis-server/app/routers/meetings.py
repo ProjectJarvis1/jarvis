@@ -169,119 +169,120 @@ async def create_meeting_from_recording(
     filename = f"{uuid4()}{suffix}"
     path = recording_dir / filename
     path.write_bytes(audio_bytes)
-
+    # A recording whose meeting is not saved (bad input, failed processing, or an account deleted meanwhile,
+    # whose rows are then refused) takes its file back with it.
     try:
-        parsed_person_ids = [UUID(value) for value in json.loads(person_ids)]
-    except (ValueError, TypeError, json.JSONDecodeError):
-        raise HTTPException(400, "person_ids must be a JSON UUID array")
+        try:
+            parsed_person_ids = [UUID(value) for value in json.loads(person_ids)]
+        except (ValueError, TypeError, json.JSONDecodeError):
+            raise HTTPException(400, "person_ids must be a JSON UUID array")
 
-    # Validate before the paid transcription/summarization calls below, not after -- no point
-    # burning that cost on a request that's going to fail anyway.
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            _validate_person_ids(cur, parsed_person_ids)
+        # Validate before the paid transcription/summarization calls below, not after -- no point
+        # burning that cost on a request that's going to fail anyway.
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                _validate_person_ids(cur, parsed_person_ids)
 
-    # 비용이 드는 정리 전에 오늘 한도를 확인하고 센다. 한도에 걸리면 올린 녹음 파일은 남기지 않는다.
-    from .. import usage
-    from ..auth import user_id as _uid
-    owner = _uid()
-    try:
+        # 비용이 드는 정리 전에 오늘 한도를 확인하고 센다(한도에 걸리면 아래에서 올린 녹음 파일도 지운다).
+        from .. import usage
+        from ..auth import user_id as _uid
+        owner = _uid()
         await run_in_threadpool(usage.take, owner, usage.MEETING_JOBS)
-    except HTTPException:
-        path.unlink(missing_ok=True)
-        raise
 
-    try:
-        started = datetime.fromisoformat(started_at) if started_at else datetime.now(timezone.utc)
-        ended = datetime.fromisoformat(ended_at) if ended_at else datetime.now(timezone.utc)
-    except ValueError:
-        await run_in_threadpool(usage.refund, owner, usage.MEETING_JOBS)
-        raise HTTPException(400, "started_at/ended_at must be ISO datetimes")
-    try:
-        transcript = await run_in_threadpool(transcribe_audio, path)
-        if not transcript:
-            raise HTTPException(422, "no speech was transcribed")
-        summary_data = await run_in_threadpool(summarize_transcript, transcript, title)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(502, f"meeting AI processing failed: {exc}") from exc
+        try:
+            started = datetime.fromisoformat(started_at) if started_at else datetime.now(timezone.utc)
+            ended = datetime.fromisoformat(ended_at) if ended_at else datetime.now(timezone.utc)
+        except ValueError:
+            await run_in_threadpool(usage.refund, owner, usage.MEETING_JOBS)
+            raise HTTPException(400, "started_at/ended_at must be ISO datetimes")
+        try:
+            transcript = await run_in_threadpool(transcribe_audio, path)
+            if not transcript:
+                raise HTTPException(422, "no speech was transcribed")
+            summary_data = await run_in_threadpool(summarize_transcript, transcript, title)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(502, f"meeting AI processing failed: {exc}") from exc
 
-    meeting_title = summary_data.get("title") or title or "회의 녹음"
-    summary = summary_data.get("summary") or transcript[:500]
-    metadata = {
-        "recording_filename": filename,
-        "recording_path": str(path),
-        "recording_mime_type": audio.content_type or "audio/wav",
-        "recording_size_bytes": len(audio_bytes),
-        "transcription_model": settings.openai_transcription_model,
-        "summary_model": settings.openai_summary_model,
-        "markdown_summary": summary_data.get("markdown_summary", ""),
-        "decisions": summary_data.get("decisions", []),
-        "action_items": summary_data.get("action_items", []),
-        "followups": summary_data.get("followups", []),
-        "people": summary_data.get("people", []),
-        "companies": summary_data.get("companies", []),
-        "keywords": summary_data.get("keywords", []),
-    }
+        meeting_title = summary_data.get("title") or title or "회의 녹음"
+        summary = summary_data.get("summary") or transcript[:500]
+        metadata = {
+            "recording_filename": filename,
+            "recording_path": str(path),
+            "recording_mime_type": audio.content_type or "audio/wav",
+            "recording_size_bytes": len(audio_bytes),
+            "transcription_model": settings.openai_transcription_model,
+            "summary_model": settings.openai_summary_model,
+            "markdown_summary": summary_data.get("markdown_summary", ""),
+            "decisions": summary_data.get("decisions", []),
+            "action_items": summary_data.get("action_items", []),
+            "followups": summary_data.get("followups", []),
+            "people": summary_data.get("people", []),
+            "companies": summary_data.get("companies", []),
+            "keywords": summary_data.get("keywords", []),
+        }
 
-    meeting_embedding = embed_text(summary)
-    memory_text = "\n".join(
-        [
-            f"미팅: {meeting_title}",
-            f"요약: {summary}",
-            f"결정사항: {', '.join(metadata['decisions'])}",
-            f"할일: {', '.join(metadata['action_items'])}",
-            f"원문: {transcript}",
-        ]
-    )
-    with get_conn() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                """
-                INSERT INTO meetings
-                    (title, person_ids, started_at, ended_at, summary,
-                     summary_embedding, raw_transcript, metadata)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING *
-                """,
-                (
-                    meeting_title,
-                    parsed_person_ids,
-                    started,
-                    ended,
-                    summary,
-                    meeting_embedding,
-                    transcript,
-                    Jsonb(metadata),
-                ),
-            )
-            meeting = cur.fetchone()
-            cur.execute(
-                """
-                INSERT INTO memories
-                    (captured_at, text, embedding, related_person_ids,
-                     related_meeting_id, source, metadata)
-                VALUES (%s, %s, %s, %s, %s, 'voice', %s)
-                RETURNING *
-                """,
-                (
-                    started,
-                    memory_text,
-                    embed_text(memory_text),
-                    parsed_person_ids,
-                    meeting["id"],
-                    Jsonb(
-                        {
-                            "memory_type": "meeting_recording",
-                            "origin_meeting_id": str(meeting["id"]),
-                            **metadata,
-                        }
+        meeting_embedding = embed_text(summary)
+        memory_text = "\n".join(
+            [
+                f"미팅: {meeting_title}",
+                f"요약: {summary}",
+                f"결정사항: {', '.join(metadata['decisions'])}",
+                f"할일: {', '.join(metadata['action_items'])}",
+                f"원문: {transcript}",
+            ]
+        )
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO meetings
+                        (title, person_ids, started_at, ended_at, summary,
+                         summary_embedding, raw_transcript, metadata)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING *
+                    """,
+                    (
+                        meeting_title,
+                        parsed_person_ids,
+                        started,
+                        ended,
+                        summary,
+                        meeting_embedding,
+                        transcript,
+                        Jsonb(metadata),
                     ),
-                ),
-            )
-            memory = cur.fetchone()
-        conn.commit()
+                )
+                meeting = cur.fetchone()
+                cur.execute(
+                    """
+                    INSERT INTO memories
+                        (captured_at, text, embedding, related_person_ids,
+                         related_meeting_id, source, metadata)
+                    VALUES (%s, %s, %s, %s, %s, 'voice', %s)
+                    RETURNING *
+                    """,
+                    (
+                        started,
+                        memory_text,
+                        embed_text(memory_text),
+                        parsed_person_ids,
+                        meeting["id"],
+                        Jsonb(
+                            {
+                                "memory_type": "meeting_recording",
+                                "origin_meeting_id": str(meeting["id"]),
+                                **metadata,
+                            }
+                        ),
+                    ),
+                )
+                memory = cur.fetchone()
+            conn.commit()
+    except BaseException:
+        safe_unlink(str(path), _RECORDING_DIR)
+        raise
 
     return {
         "meeting": _row_to_meeting(meeting).model_dump(mode="json"),

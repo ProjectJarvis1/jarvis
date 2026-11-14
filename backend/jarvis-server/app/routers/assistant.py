@@ -9,8 +9,10 @@ from psycopg.types.json import Jsonb
 
 from ..auth import require_api_key
 from ..db import get_conn
+from ..idempotency import run_after_commit
 from ..embeddings import embed_text
 from ..meeting_projection import sync_meeting_memory
+from ..person_projection import sync_person_profile
 
 router = APIRouter(prefix="/assistant", tags=["assistant"], dependencies=[Depends(require_api_key)])
 FIELDS = {
@@ -118,6 +120,8 @@ def apply_values(cur, kind, record_id, values, metadata=None):
     updated = cur.fetchone()
     if kind == "meeting":
         sync_meeting_memory(cur, updated)
+    if kind == "person":
+        sync_person_profile(cur, updated)
 
 
 def change_state(change_id, undo=False):
@@ -137,8 +141,10 @@ def change_state(change_id, undo=False):
             expected = change["after_data"] if undo else change["before_data"]
             if current["version"] != expected["version"]:
                 raise HTTPException(409, "Record changed. Create a new preview before continuing")
+            deleted_metadata = None
             if change["after_data"].get("action") == "delete":
-                cur.execute("DELETE FROM memories WHERE id=%s", (change["record_id"],))
+                row = cur.execute("DELETE FROM memories WHERE id=%s RETURNING metadata", (change["record_id"],)).fetchone()
+                deleted_metadata = dict((row or {}).get("metadata") or {})
             else:
                 values = change["before_data"]["values"] if undo else change["after_data"]["values"]
                 metadata = None
@@ -158,6 +164,10 @@ def change_state(change_id, undo=False):
                 cur.execute("UPDATE assistant_changes SET after_data=%s WHERE id=%s", (Jsonb(after), change_id))
             cur.execute("UPDATE assistant_changes SET state=%s WHERE id=%s", (target, change_id))
         conn.commit()
+    if deleted_metadata:
+        # Same cleanup as DELETE /memory/{id}, once the deletion is committed.
+        from .memory import _delete_memory_image
+        run_after_commit(lambda: _delete_memory_image(deleted_metadata))
     return {"change_id": str(change_id), "record_id": str(change["record_id"]), "state": target,
             "deleted": change["after_data"].get("action") == "delete"}
 

@@ -398,6 +398,13 @@ class McpGateway:
         checks = await asyncio.to_thread(lambda: [(c.credentials_present(), c.credential_fingerprint()) for c in conns])
         for conn, (ok, fingerprint) in zip(conns, checks):
             running = conn._task is not None and not conn._task.done()
+            if running and not ok:
+                # Account disconnected: stop now so its tools leave the list, not after a later call fails.
+                log.info("MCP %s 키가 없어져 연결을 닫음", conn.cfg.name)
+                await conn.stop()
+                conn.ready.clear()
+                conn.fingerprint = ""
+                continue
             if running and fingerprint != conn.fingerprint:
                 log.info("MCP %s 키가 바뀌어 다시 연결", conn.cfg.name)
                 await conn.stop()

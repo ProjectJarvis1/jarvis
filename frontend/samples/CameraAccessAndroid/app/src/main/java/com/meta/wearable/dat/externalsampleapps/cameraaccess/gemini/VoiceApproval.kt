@@ -1,10 +1,9 @@
 package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
 /**
- * Jarvis asks "이 분을 이윤아로 저장할까요?" out loud before calling a save tool. When the user's
- * last words were a plain yes, that spoken answer is the review: asking again on screen made
- * Jarvis repeat "화면에서 승인해 주세요" after the user had already said "승인".
- * Anything with a no, a correction or extra content is not a yes and still goes to the screen.
+ * Saves and outside writes wait on a confirmation card. A plain spoken yes to that card's own question
+ * approves it like a tap ([answersWaitingWrite]); a "네" said before the write existed never does, since it
+ * may have answered another question. Anything with a no, a correction or extra content is not a yes.
  */
 object VoiceApproval {
     private const val MAX_AGE_MS = 30_000L
@@ -20,14 +19,22 @@ object VoiceApproval {
     }
 
     /**
-     * Calendar entries are confirmed in the conversation itself: Jarvis says "장소 있으면 같이, 없으면 그냥 등록할게요",
-     * so any recent answer that is not a refusal ("강남세브란스", "없어", "그냥 해") is the go-ahead.
+     * A spoken "네" approves a waiting write only when it can only be the answer to that write's own
+     * confirmation, put to the user when this revision went on screen ([presentedAt]):
+     * - said after that moment and within [ANSWER_WINDOW_MS] (a "네" from before an edit, or a late one, is not it);
+     * - nothing else said in between ([previousUtteranceAt]), allowing [LATE_TRANSCRIPT_MS] for the request's
+     *   own transcript to land after the tool call; a second "네" therefore never counts;
+     * - no other task started since, as its question ("이 분 김 팀장님 맞나요?") may be what the "네" answers.
+     * Otherwise the card waits for a tap. The caller approves exactly that task id and revision.
      */
-    fun isConsent(utterance: String, ageMs: Long): Boolean {
-        if (ageMs !in 0..MAX_AGE_MS) return false
-        val t = utterance.trim().lowercase()
-        return t.isNotEmpty() && !no.containsMatchIn(t)
+    fun answersWaitingWrite(presentedAt: Long, utteranceAt: Long, previousUtteranceAt: Long, newerTaskCreatedAts: List<Long>): Boolean {
+        if (utteranceAt < presentedAt || utteranceAt - presentedAt > ANSWER_WINDOW_MS) return false
+        if (previousUtteranceAt > presentedAt + LATE_TRANSCRIPT_MS) return false
+        return newerTaskCreatedAts.none { it > presentedAt }
     }
+
+    const val LATE_TRANSCRIPT_MS = 3_000L
+    const val ANSWER_WINDOW_MS = 20_000L
 
     /** True when the words, spaces removed, are only yes-words in a row ("그래저장해줘", "응승인"). */
     private fun splitsIntoYes(t: String): Boolean {

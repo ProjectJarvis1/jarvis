@@ -9,6 +9,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from psycopg.types.json import Jsonb
 
 pytestmark = pytest.mark.skipif(not os.getenv("TEST_DATABASE_URL"), reason="disposable TEST_DATABASE_URL required")
 
@@ -26,6 +27,9 @@ def api():
     with psycopg.connect(os.environ["DATABASE_URL"]) as bootstrap:
         bootstrap.execute((Path(__file__).resolve().parents[1] / "schema.sql").read_text())
     from app.db import open_pool, close_pool, ensure_schema, get_conn
+    from app.auth import ADMIN_USER, current_user
+    # Row level security: the checks below read outside a request, as the API key's (admin) user.
+    current_user.set(ADMIN_USER)
     from app.idempotency import IdempotencyMiddleware
     from app.routers.assistant import router
     from fastapi import FastAPI
@@ -47,7 +51,9 @@ def api():
 
     app.add_middleware(IdempotencyMiddleware)
     with TestClient(app) as client:
-        client.headers["X-API-Key"] = os.environ["API_KEY"]
+        # Settings are read once per process; another test file may have loaded them first.
+        from app.config import settings
+        client.headers["X-API-Key"] = settings.api_key
         yield client, get_conn
     close_pool()
     sys.modules.pop("app.embeddings", None)
@@ -127,6 +133,23 @@ def test_delete_requires_preview_then_apply(api):
     assert post(client, f"/assistant/changes/{preview['id']}/undo").status_code == 409
 
 
+def test_delete_through_change_removes_the_photo_after_commit(api, tmp_path, monkeypatch):
+    client, get_conn = api
+    import app.routers.memory as memory_router
+    monkeypatch.setattr(memory_router, "_IMAGE_DIR", tmp_path)
+    photo = tmp_path / "kept.jpg"
+    photo.write_bytes(b"jpg")
+    record_id = post(client, "/memory/save", {"text": "with a photo"}).json()["id"]
+    with get_conn() as conn:
+        conn.execute("UPDATE memories SET metadata = metadata || %s WHERE id=%s",
+                     (Jsonb({"image_path": str(photo), "image_filename": photo.name}), record_id))
+        conn.commit()
+    preview = post(client, "/assistant/changes", {"kind": "memory", "record_id": record_id, "action": "delete"}).json()
+    assert photo.exists()  # the preview alone deletes nothing
+    assert post(client, f"/assistant/changes/{preview['id']}/apply").json()["deleted"] is True
+    assert not photo.exists()
+
+
 def test_invalid_fields_and_missing_followups(api):
     client, _ = api
     response = post(client, "/assistant/changes", {"kind": "person", "record_id": str(uuid4()), "changes": {"id": "bad"}})
@@ -192,4 +215,118 @@ def test_schema_upgrade_is_repeatable_and_revision_tracks_legacy_updates(api):
         person = conn.execute("INSERT INTO people(name) VALUES('revision test') RETURNING id,revision").fetchone()
         revised = conn.execute("UPDATE people SET name='changed' WHERE id=%s RETURNING revision", (person["id"],)).fetchone()
         assert revised["revision"] == person["revision"] + 1
+        conn.commit()
+
+
+def test_account_deletion_waits_for_a_save_in_progress_and_leaves_no_orphan(api):
+    import threading
+    import time
+    from app.auth import current_user
+    from app.routers.account import delete_account
+    _, get_conn = api
+    user = "deleted-" + str(uuid4())[:8]
+    with get_conn() as conn:  # admin context; app_users has no row security
+        conn.execute("INSERT INTO app_users(id) VALUES(%s)", (user,))
+        conn.commit()
+    inserted = threading.Event()
+    done = {}
+
+    def slow_save():
+        current_user.set(user)
+        with get_conn() as conn:
+            conn.execute("INSERT INTO memories(captured_at,text) VALUES(now(),'racing save')")
+            inserted.set()
+            time.sleep(0.6)  # deletion starts while this save is still open
+            conn.commit()
+        done["save"] = time.monotonic()
+
+    def delete():
+        current_user.set(user)
+        delete_account()
+        done["delete"] = time.monotonic()
+
+    saver = threading.Thread(target=slow_save)
+    saver.start()
+    inserted.wait(5)
+    deleter = threading.Thread(target=delete)
+    deleter.start()
+    saver.join(10)
+    deleter.join(10)
+    assert done["delete"] >= done["save"]  # the deletion waited for the open save
+    import psycopg
+    with psycopg.connect(os.environ["DATABASE_URL"]) as owner:  # table owner sees every user's rows
+        owner.execute("SET row_security = off")
+        left = owner.execute("SELECT count(*) FROM memories WHERE user_id=%s", (user,)).fetchone()[0]
+    assert left == 0
+
+
+
+def test_remote_tool_token_lookup_does_not_wait_for_the_pool(api, monkeypatch):
+    _, get_conn = api
+    with get_conn() as conn:
+        conn.execute("""INSERT INTO user_integrations(user_id, provider, access_token_encrypted) VALUES('default','slack_user','tok-1')
+                        ON CONFLICT (user_id, provider) DO UPDATE SET access_token_encrypted='tok-1'""")
+        conn.commit()
+    import app.db as db
+    from app.mcp_tools import integration_token
+
+    def exhausted():
+        raise AssertionError("pool used while every pooled connection is taken")
+    monkeypatch.setattr(db.pool, "connection", exhausted)
+    assert integration_token("slack_user", "default") == "tok-1"
+
+
+def test_service_sign_in_finishing_after_account_deletion_keeps_no_tokens(api):
+    _, get_conn = api
+    from app.db import UserGone
+    from app.routers.integrations import _upsert_integration
+    with pytest.raises(UserGone):
+        _upsert_integration(user_id="u_deleted_" + str(uuid4())[:6], provider="google", access_token="tok")
+    _upsert_integration(user_id="default", provider="google", access_token="tok-live")
+    with get_conn() as conn:
+        from app import token_crypto  # stored encrypted when TOKEN_ENCRYPTION_KEY is set
+        stored = conn.execute("SELECT access_token_encrypted FROM user_integrations WHERE user_id='default' AND provider='google'").fetchone()["access_token_encrypted"]
+        assert token_crypto.decrypt(stored) == "tok-live"
+        conn.execute("DELETE FROM user_integrations WHERE user_id='default' AND provider='google'")
+        conn.commit()
+
+
+def test_person_correction_updates_the_searchable_profile(api):
+    client, get_conn = api
+    with get_conn() as conn:
+        person = conn.execute("INSERT INTO people(name, org) VALUES('이영희', '옛회사') RETURNING id").fetchone()["id"]
+        conn.execute("""INSERT INTO memories(captured_at, text, related_person_ids, source, metadata)
+                        VALUES(now(), '사람: 이영희\n소속: 옛회사', %s, 'derived', %s)""",
+                     ([person], Jsonb({"memory_type": "person_profile", "origin_person_id": str(person)})))
+        conn.commit()
+    preview = post(client, "/assistant/changes", {"kind": "person", "record_id": str(person), "changes": {"org": "새회사"}}).json()
+    assert post(client, f"/assistant/changes/{preview['id']}/apply").status_code == 200
+    with get_conn() as conn:
+        text = conn.execute("SELECT text FROM memories WHERE metadata->>'origin_person_id'=%s", (str(person),)).fetchone()["text"]
+    assert "새회사" in text and "옛회사" not in text
+    assert post(client, f"/assistant/changes/{preview['id']}/undo").status_code == 200
+    with get_conn() as conn:
+        text = conn.execute("SELECT text FROM memories WHERE metadata->>'origin_person_id'=%s", (str(person),)).fetchone()["text"]
+    assert "옛회사" in text
+
+
+
+def test_notion_refresh_never_brings_back_a_removed_connection(api):
+    _, get_conn = api
+    from app import notion_mcp_auth, token_crypto
+    with get_conn() as conn:
+        conn.execute("DELETE FROM user_integrations WHERE user_id='default' AND provider='notion_mcp'")
+        conn.commit()
+    # Removed while the refresh was in flight: nothing is written back.
+    assert notion_mcp_auth._save_refreshed("default", "r-old", {"access_token": "a-new", "refresh_token": "r-new"}) is False
+    with get_conn() as conn:
+        assert conn.execute("SELECT 1 FROM user_integrations WHERE user_id='default' AND provider='notion_mcp'").fetchone() is None
+        conn.execute("INSERT INTO user_integrations(user_id, provider, access_token_encrypted, refresh_token_encrypted) "
+                     "VALUES('default','notion_mcp',%s,%s)", (token_crypto.encrypt("a-old"), token_crypto.encrypt("r-old")))
+        conn.commit()
+    assert notion_mcp_auth._save_refreshed("default", "r-old", {"access_token": "a-new", "refresh_token": "r-new"}) is True
+    with get_conn() as conn:
+        row = conn.execute("SELECT * FROM user_integrations WHERE user_id='default' AND provider='notion_mcp'").fetchone()
+        assert token_crypto.decrypt(row["access_token_encrypted"]) == "a-new"
+        conn.execute("DELETE FROM user_integrations WHERE user_id='default' AND provider='notion_mcp'")
         conn.commit()
