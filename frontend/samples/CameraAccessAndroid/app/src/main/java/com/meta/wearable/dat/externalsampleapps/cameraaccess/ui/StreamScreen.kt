@@ -744,6 +744,20 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
         return
     }
     fun arg(key: String) = args?.optString(key)?.takeIf { it.isNotBlank() && it != "null" }
+    if (task.tool == "draft_mail_reply") {
+        // Nothing is sent from here: the mail app opens with the draft, and the user sends it there.
+        val draft = com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.MailDraft.from(arg("to"), arg("subject"), arg("body")).getOrNull()
+        ConfirmSheet(
+            headline = "이 답장을 메일 앱에 띄울까요?",
+            actionLabel = "지메일에서 열기", onAction = onSave, onCancel = onCancel,
+            facts = listOfNotNull(draft?.to?.let { "받는 사람" to it }, draft?.subject?.let { "제목" to it }),
+            body = draft?.body,
+            error = if (draft == null) "받는 사람 주소나 내용이 비어 있어요. 다시 말씀해 주세요." else null,
+            hint = "보내기는 메일 앱에서 직접 누르세요. \"확인\"이라고 말하거나 지메일에서 열기를 누르세요.",
+            actionEnabled = draft != null,
+        )
+        return
+    }
     val name = arg("name").orEmpty()
     val face = args?.optBoolean("include_face") == true
     val external = com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools.isExternal(task.tool)

@@ -29,6 +29,8 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingVoic
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.meeting.MeetingVoiceCommandParser
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.CalendarActionManager
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.ContactActionManager
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.MailComposer
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.MailDraft
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.stream.StreamingMode
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.whisper.WhisperSpeechRecognizer
 import kotlinx.coroutines.Job
@@ -232,7 +234,7 @@ class GeminiSessionViewModel : ViewModel() {
         else shownPreviews.remove(id, shownPreviews[id]?.takeIf { it.first == revision } ?: return)
     }
     private val reviewTools = setOf("save_memory", "save_life_memory", "save_person", "save_meeting", "save_need",
-        "apply_record_change", "undo_record_change", "create_calendar_event")
+        "apply_record_change", "undo_record_change", "create_calendar_event", "draft_mail_reply")
     /** Saves, record changes and outside-service writes (Slack post, Notion append) wait for "확인". */
     private fun needsReview(tool: String) = tool in reviewTools || ExternalTools.requiresConfirmation(tool)
 
@@ -956,6 +958,13 @@ class GeminiSessionViewModel : ViewModel() {
             "text_contact" -> textContact(call)
             "create_contact" -> { execution.beforeExternalEffect(); createContact(call) }
             "create_calendar_event" -> { execution.beforeExternalEffect(); createCalendarEvent(call) }
+            "draft_mail_reply" -> {
+                // Opens the mail app's compose screen only; the user sends it there. Nothing is kept or sent here.
+                val draft = MailDraft.from(call.args["to"]?.toString(), call.args["subject"]?.toString(), call.args["body"]?.toString())
+                    .getOrElse { return ToolResult.Failure(it.message ?: "답장 초안을 만들 수 없습니다.") }
+                execution.beforeExternalEffect()
+                withContext(Dispatchers.Main) { MailComposer.open(draft) }
+            }
             else -> ToolResult.Failure("Unknown local tool: ${call.name}")
         }
     }
@@ -1134,7 +1143,7 @@ class GeminiSessionViewModel : ViewModel() {
             execution.checkCurrent()
             return TaskOutcome(result = "사진을 보관했습니다. get_task_result로 이 작업의 사진을 확인한 뒤 답변하세요. captured_at_ms=${frame.capturedAtMs}, source=${frame.source}")
         }
-        val local = setOf("resolve_contact_action", "control_meeting_recording", "search_contacts", "call_contact", "text_contact", "create_contact", "create_calendar_event")
+        val local = setOf("resolve_contact_action", "control_meeting_recording", "search_contacts", "call_contact", "text_contact", "create_contact", "create_calendar_event", "draft_mail_reply")
         // With Google Calendar linked, an approved event goes straight into it through the server
         // instead of opening the phone's calendar picker.
         if (task.tool == "create_calendar_event" && ExternalTools.isExternal("gcal_create_event")) {

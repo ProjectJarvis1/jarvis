@@ -40,6 +40,7 @@ object TaskPolicies {
         "search_people" to TaskPolicy(true), "search_meetings" to TaskPolicy(true),
         "get_proposal_context" to TaskPolicy(true), "search_contacts" to TaskPolicy(true, timeoutMs = 10_000),
         "call_contact" to TaskPolicy(false), "text_contact" to TaskPolicy(false),
+        "draft_mail_reply" to TaskPolicy(false, "device-action", true),
         "prepare_record_change" to TaskPolicy(false, "database-write", true),
         "apply_record_change" to TaskPolicy(false, "database-write", true),
         "undo_record_change" to TaskPolicy(false, "database-write", true),

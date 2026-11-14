@@ -186,6 +186,7 @@ private fun actionLabel(action: TaskListAction, task: TaskRecord) = when (action
     TaskListAction.APPROVE -> when (task.tool) {
         "call_contact" -> "전화 걸기"
         "text_contact" -> "문자 앱 열기"
+        "draft_mail_reply" -> "지메일에서 열기"
         else -> "확인"
     }
     TaskListAction.EDIT -> "고치기"
@@ -197,6 +198,7 @@ private fun actionLabel(action: TaskListAction, task: TaskRecord) = when (action
 
 private fun fieldLabel(field: String?) = when (field) {
     "message" -> "보낼 문자"
+    "body" -> "답장 내용"
     "title" -> "일정 제목"
     "notes_summary" -> "메모"
     else -> "저장할 내용"
@@ -209,6 +211,7 @@ private fun detail(task: TaskRecord, args: JSONObject?): String? {
         TaskState.WAITING_USER, TaskState.HELD -> when {
             task.tool == "text_contact" -> listOfNotNull(arg("query")?.let { "받는 사람 $it" }, arg("message")).joinToString("\n")
             task.tool == "call_contact" -> arg("query")?.let { "받는 사람 $it" }
+            task.tool == "draft_mail_reply" -> listOfNotNull(arg("to")?.let { "받는 사람 $it" }, arg("subject"), arg("body")).joinToString("\n")
             // What goes to an outside service is shown exactly as the card shows it, before any approval.
             ExternalTools.isExternal(task.tool) -> ExternalTools.preview(task.tool, task.argsJson)
             task.tool == "save_person" -> listOfNotNull(arg("name"), arg("org"), arg("role"), arg("notes_summary"),

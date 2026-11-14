@@ -46,7 +46,8 @@ object SettingsManager {
                     !stored.contains("외부 서비스와 웹 검색") ||
                     !stored.contains("일정 등록은 모두 말로 끝냅니다") ||
                     !stored.contains("gmail_ 도구로 읽은 메일") ||
-                    !stored.contains("동의를 받으셨으면")
+                    !stored.contains("동의를 받으셨으면") ||
+                    !stored.contains("draft_mail_reply")
     )
 
     var openClawHost: String
@@ -173,6 +174,7 @@ object SettingsManager {
 - search_contacts(query, top_k?) — Android 전화번호부에서 연락처 후보 검색. 실행하지 않고 후보만 반환
 - create_contact(name, phone?, email?, org?, role?, notes?) — Android 연락처 등록 화면 열기
 - create_calendar_event(title, start_at, end_at?, location?, description?) — 일정 등록(구글 캘린더 연결 시 바로 등록)
+- draft_mail_reply(to, subject, body) — 읽은 메일에 보낼 답장 초안을 메일 앱 작성 화면에 띄움(보내기는 사용자가 메일 앱에서 직접 누름). 사용자가 "이 메일에 답장 초안 써 줘"라고 하면 gmail_read_thread로 그 메일을 읽은 뒤, 보낸 사람 주소를 to로, 사용자가 말한 뜻을 짧은 한국어 답장으로 body에 넣어 호출하세요. 확인 카드가 뜨니 "답장 초안을 띄웠어요. 확인하시면 메일 앱에서 열게요"라고 한 번만 말하세요. 메일 앱이 열린 뒤에도 "보냈어요"라고 하지 마세요
 
 [저장]
 - capture_current_view(reason) — 원본 사진이 따로 필요할 때만 호출: 장면 저장(save_life_memory), 사람 확인(identify_person), 작은 글씨를 자세히 읽어야 할 때. "이게 뭐야" 같은 일반 시각 질문에는 부르지 마세요

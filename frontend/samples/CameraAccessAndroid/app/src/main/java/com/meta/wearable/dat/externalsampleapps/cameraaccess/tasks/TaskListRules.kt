@@ -53,6 +53,7 @@ object TaskListRules {
         val args = runCatching { JSONObject(task.argsJson) }.getOrNull() ?: return null
         val keys = when (task.tool) {
             "text_contact" -> listOf("message")
+            "draft_mail_reply" -> listOf("body")
             "create_calendar_event" -> listOf("title")
             "save_person" -> listOf("notes_summary")
             "save_memory", "save_life_memory", "save_meeting", "save_need" -> listOf("user_note", "text", "summary")
