@@ -10,53 +10,86 @@ import androidx.core.content.ContextCompat
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.AppContextProvider
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ToolResult
 import java.util.Locale
-import org.json.JSONArray
-import org.json.JSONObject
 
 class ContactActionManager {
     private val context
         get() = AppContextProvider.require()
 
-    fun callContact(query: String): ToolResult {
+    fun callContact(query: String, candidateId: String? = null): ToolResult {
         if (!hasContactsPermission()) {
             return ToolResult.Failure("전화번호부 권한이 없습니다. 연락처 권한을 허용한 뒤 다시 시도해주세요.")
         }
         if (!hasCallPermission()) {
             return ToolResult.Failure("전화 발신 권한이 없습니다. 전화 권한을 허용한 뒤 다시 시도해주세요.")
         }
-        val matches = findMatches(query)
-        if (matches.isEmpty()) {
-            return ToolResult.Failure("전화번호부에서 '$query'에 해당하는 연락처를 찾지 못했습니다.")
+        val match = when (val target = target(query, candidateId)) {
+            is Target.One -> target.match
+            else -> return target.failure(query)
         }
-        if (matches.size > 1) {
-            return ToolResult.Failure(
-                "'$query'에 해당하는 연락처가 여러 명입니다: ${matches.take(3).joinToString(", ") { "${it.displayName} ${it.phoneNumber}" }}. 더 구체적으로 말씀해주세요."
-            )
-        }
-        val match = matches.first()
         launchCallIntent(match.phoneNumber)
         return ToolResult.Success("${match.displayName}에게 전화를 걸었습니다.")
     }
 
-    fun textContact(query: String, message: String): ToolResult {
+    fun textContact(query: String, message: String, candidateId: String? = null): ToolResult {
         if (message.isBlank()) {
             return ToolResult.Failure("보낼 문자 내용을 함께 알려주세요.")
         }
         if (!hasContactsPermission()) {
             return ToolResult.Failure("전화번호부 권한이 없습니다. 연락처 권한을 허용한 뒤 다시 시도해주세요.")
         }
-        val matches = findMatches(query)
-        if (matches.isEmpty()) {
-            return ToolResult.Failure("전화번호부에서 '$query'에 해당하는 연락처를 찾지 못했습니다.")
+        val match = when (val target = target(query, candidateId)) {
+            is Target.One -> target.match
+            else -> return target.failure(query)
         }
-        if (matches.size > 1) {
-            return ToolResult.Failure(
-                "'$query'에 해당하는 연락처가 여러 명입니다: ${matches.take(3).joinToString(", ") { "${it.displayName} ${it.phoneNumber}" }}. 더 구체적으로 말씀해주세요."
-            )
-        }
-        val match = matches.first()
         openSmsComposer(match.phoneNumber, message)
         return ToolResult.Success("${match.displayName}에게 보낼 문자를 문자 앱에 띄웠습니다. 휴대폰에서 전송 버튼을 누르면 보내집니다.")
+    }
+
+    /**
+     * The people the device card offers for [query]: one when the AI named a live candidate ID or the name is unique,
+     * several when names repeat. The last four digits go to the card only (D78).
+     */
+    fun choicesFor(query: String, candidateId: String? = null): List<ContactCandidates.Choice> {
+        if (!hasContactsPermission()) return emptyList()
+        return when (val target = target(query, candidateId)) {
+            is Target.One -> ContactCandidates.choices(listOf(target.match.displayName to target.match.phoneNumber))
+            is Target.Many -> ContactCandidates.choices(target.matches.map { it.displayName to it.phoneNumber })
+            else -> emptyList()
+        }
+    }
+
+    private sealed interface Target {
+        data class One(val match: ContactMatch) : Target
+        data class Many(val matches: List<ContactMatch>) : Target
+        object None : Target
+        object Stale : Target
+
+        // Failures read back to the AI carry names and counts only, never numbers.
+        fun failure(query: String): ToolResult = ToolResult.Failure(when (this) {
+            is Many -> "'$query' 연락처가 ${matches.size}명이에요. 화면에서 번호 끝자리를 보고 한 명을 골라 주세요."
+            Stale -> "고른 연락처를 전화번호부에서 다시 찾지 못했어요. 이름으로 다시 찾아 주세요."
+            else -> "전화번호부에서 '$query'에 해당하는 연락처를 찾지 못했습니다."
+        })
+    }
+
+    /** Resolves the person to act on. A candidate ID is checked against the phone book again before use. */
+    private fun target(query: String, candidateId: String?): Target {
+        val id = candidateId?.trim()?.takeIf { ContactCandidates.looksLikeId(it) }
+            ?: query.trim().takeIf { ContactCandidates.looksLikeId(it) }
+        if (id != null) {
+            val entry = ContactCandidates.resolve(id) ?: return Target.Stale
+            // A number from a Jarvis record (a saved business card) is used as kept; a phone-book entry is
+            // looked up again so a contact deleted or changed since the search is not dialled.
+            if (!entry.fromPhoneBook) return Target.One(ContactMatch(entry.name, entry.number))
+            val live = findMatches(entry.name).firstOrNull { normalizeNumber(it.phoneNumber) == normalizeNumber(entry.number) }
+            return live?.let { Target.One(it) } ?: Target.Stale
+        }
+        val matches = findMatches(query)
+        return when {
+            matches.isEmpty() -> Target.None
+            matches.size == 1 -> Target.One(matches.first())
+            else -> Target.Many(matches)
+        }
     }
 
     fun createContact(
@@ -92,23 +125,8 @@ class ContactActionManager {
             return ToolResult.Failure("검색할 연락처 이름을 알려주세요.")
         }
         val matches = findMatches(query).take(limit.coerceIn(1, 10))
-        val candidates = JSONArray().apply {
-            matches.forEachIndexed { index, match ->
-                put(
-                    JSONObject()
-                        .put("rank", index + 1)
-                        .put("display_name", match.displayName)
-                        .put("phone_number", match.phoneNumber)
-                )
-            }
-        }
-        return ToolResult.Success(
-            JSONObject()
-                .put("query", query)
-                .put("count", matches.size)
-                .put("candidates", candidates)
-                .toString()
-        )
+        // Names and one-time IDs only: the full numbers never leave the device (D78).
+        return ToolResult.Success(ContactCandidates.searchResult(query, matches.map { it.displayName to it.phoneNumber }))
     }
 
     fun speechContextHint(limit: Int = 80): String {

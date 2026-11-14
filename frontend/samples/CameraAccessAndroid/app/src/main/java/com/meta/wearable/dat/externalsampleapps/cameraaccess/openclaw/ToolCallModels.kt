@@ -301,13 +301,14 @@ object ToolDeclarations {
         name = "call_contact",
         description = "사용자의 Android 전화번호부에서 연락처를 찾아 즉시 전화를 겁니다. 반드시 universal_search의 person_candidates에서 임베딩 유사도 높은 자비스 사람 후보를 찾고 사용자가 대상자를 확정한 뒤 호출하세요. 여러 명이면 이 도구를 호출하지 말고 다시 확인하세요.",
         properties = JSONObject()
-            .put("query", strProp("연락처 이름 또는 전화번호 일부")),
+            .put("query", strProp("연락처 이름. 사용자가 직접 말한 번호가 아니면 번호를 넣지 마세요"))
+            .put("candidate_id", strProp("search_contacts 결과에서 사용자가 이름으로 확정한 candidate_id (선택)")),
         required = listOf("query"),
     )
 
     private fun searchContacts() = decl(
         name = "search_contacts",
-        description = "사용자의 Android 전화번호부에서 이름/별칭/전화번호 일부로 연락처 후보를 찾습니다. 자비스 DB 후보가 없거나 사용자가 '내 연락처에서 찾아줘'라고 하면 이 도구를 호출해 후보를 번호로 제시하세요. 이 도구는 전화/문자를 실행하지 않고 후보만 반환합니다.",
+        description = "사용자의 Android 전화번호부에서 이름이나 별칭으로 연락처 후보를 찾습니다. 결과에는 이름과 candidate_id만 있고 전화번호는 없습니다. 후보를 이름으로 제시하고 번호는 말하지 마세요. 같은 이름(same_name=true)이 여러 명이면 이름으로만 call_contact/text_contact를 호출하세요. 화면에서 사용자가 번호 끝자리를 보고 고릅니다. 이 도구는 전화/문자를 실행하지 않습니다.",
         properties = JSONObject()
             .put("query", strProp("연락처 이름, 별칭, 또는 전화번호 일부"))
             .put("top_k", intProp("반환할 최대 후보 수. 기본 5")),
@@ -318,8 +319,9 @@ object ToolDeclarations {
         name = "text_contact",
         description = "사용자의 Android 전화번호부에서 연락처를 찾아 문자 앱에 받는 사람과 내용을 채워 띄웁니다. 실제 전송은 사용자가 휴대폰에서 전송 버튼을 눌러야 하니, 호출 뒤에는 '보냈다'가 아니라 '문자 앱에 띄웠다'고 말하세요. 반드시 universal_search의 person_candidates에서 임베딩 유사도 높은 자비스 사람 후보를 찾고 사용자가 수신자를 확정한 뒤 호출하세요. 여러 명이면 이 도구를 호출하지 말고 다시 확인하세요.",
         properties = JSONObject()
-            .put("query", strProp("연락처 이름 또는 전화번호 일부"))
-            .put("message", strProp("보낼 문자 초안")),
+            .put("query", strProp("연락처 이름. 사용자가 직접 말한 번호가 아니면 번호를 넣지 마세요"))
+            .put("message", strProp("보낼 문자 초안"))
+            .put("candidate_id", strProp("search_contacts 결과에서 사용자가 이름으로 확정한 candidate_id (선택)")),
         required = listOf("query", "message"),
     )
 

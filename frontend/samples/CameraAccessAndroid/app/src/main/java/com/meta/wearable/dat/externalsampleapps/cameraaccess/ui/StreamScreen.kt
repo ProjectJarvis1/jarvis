@@ -579,7 +579,8 @@ fun StreamScreen(
             }
             // Approval cards sit right under the camera so they are on screen the moment Jarvis asks.
             geminiUiState.pendingContactAction?.let { action -> item {
-                ContactActionConfirmCard(action, geminiViewModel::confirmPendingContactAction, geminiViewModel::cancelPendingContactAction)
+                ContactActionConfirmCard(action, geminiViewModel::confirmPendingContactAction, geminiViewModel::cancelPendingContactAction,
+                    geminiViewModel::selectContactChoice)
             } }
             geminiViewModel.pendingSave(taskRecords)?.let { save -> item(key = "save-${save.id}-${save.revision}") {
                 SaveConfirmCard(save, onSave = { geminiViewModel.controlTask(save.id, save.revision, "approve") },
@@ -681,7 +682,8 @@ private data class StatusChipInfo(
 private fun ConfirmSheet(headline: String, actionLabel: String, onAction: () -> Unit, onCancel: () -> Unit,
     initial: String? = null, facts: List<Pair<String, String>> = emptyList(), body: String? = null,
     lines: List<String> = emptyList(),
-    hint: String? = null, error: String? = null, actionEnabled: Boolean = true) {
+    hint: String? = null, error: String? = null, actionEnabled: Boolean = true,
+    extra: (@Composable () -> Unit)? = null) {
     Surface(Modifier.fillMaxWidth(), color = Jarvis.extras.card, shape = RoundedCornerShape(20.dp),
         border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
         shadowElevation = 2.dp) {
@@ -711,6 +713,7 @@ private fun ConfirmSheet(headline: String, actionLabel: String, onAction: () -> 
                     lines.forEach { Text(it, style = MaterialTheme.typography.bodyMedium) }
                 }
             }
+            extra?.invoke()
             error?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error) }
             hint?.let {
                 Text(it, Modifier.fillMaxWidth(), style = MaterialTheme.typography.bodySmall,
@@ -729,16 +732,48 @@ private fun ContactActionConfirmCard(
     action: PendingContactAction,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
+    onPick: (String) -> Unit,
 ) {
     val isCall = action.type == PendingContactActionType.CALL
     val label = if (isCall) "전화 걸기" else "문자 앱 열기"
+    val picked = action.choices.firstOrNull { it.id == action.selectedId }
+    val name = picked?.name ?: action.query
+    val several = action.choices.size > 1
     ConfirmSheet(
-        headline = if (isCall) "${action.query}에게 전화할까요?" else "${action.query}에게 보낼 문자를 문자 앱에 띄울까요?",
+        headline = if (isCall) "${name}에게 전화할까요?" else "${name}에게 보낼 문자를 문자 앱에 띄울까요?",
         actionLabel = label, onAction = onConfirm, onCancel = onCancel,
-        initial = action.query.trim().take(1).ifBlank { null },
+        initial = name.trim().take(1).ifBlank { null },
         // The whole message is shown: it is exactly what will be sent.
         lines = if (isCall) emptyList() else listOfNotNull(action.message?.takeIf { it.isNotBlank() }),
-        hint = "\"확인\"이라고 말하거나 $label 버튼을 누르세요.",
+        hint = when {
+            action.needsPick -> "같은 이름이 여러 명이에요. 번호 끝자리를 보고 한 명을 눌러 주세요."
+            else -> "\"확인\"이라고 말하거나 $label 버튼을 누르세요."
+        },
+        actionEnabled = !action.needsPick,
+        // Same-name people are told apart here by the last four digits; the digits stay on this screen.
+        extra = if (!several) null else {
+            {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    action.choices.forEach { choice ->
+                        val selected = choice.id == action.selectedId
+                        Surface(
+                            onClick = { onPick(choice.id) },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            color = if (selected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant,
+                            border = if (selected) androidx.compose.foundation.BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary) else null,
+                        ) {
+                            Row(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(choice.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.SemiBold)
+                                Text(if (choice.lastFour.isBlank()) "번호 없음" else "끝자리 ${choice.lastFour}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            }
+        },
     )
 }
 

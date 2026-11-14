@@ -194,6 +194,8 @@ object JarvisAccount {
 
     private fun clearLocal() {
         com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.ExternalTools.clear()
+        // Phone-book IDs handed out in this account's conversations stop working with the account.
+        com.meta.wearable.dat.externalsampleapps.cameraaccess.phone.ContactCandidates.clear()
         // Offers Jarvis made for this account, and which events it already offered, go with the account. The
         // store's lock is held until the session is gone, so a background pass cannot record or post in between.
         val store = com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore
