@@ -27,7 +27,7 @@ data class MailCandidate(val id: String, val subject: String, val sender: String
 
 /** A follow-up from a recent meeting, for the morning briefing. */
 data class FollowupItem(val task: String, val dueText: String, val meetingTitle: String, val meetingDate: String,
-    val meetingId: String = "", val index: Int = -1)
+    val meetingId: String = "", val index: Int = -1, val dueAt: String = "")
 
 /** Something Jarvis offers on its own, before the user asks. [detail] is what opens when it is accepted. */
 data class ProactiveOffer(
@@ -143,7 +143,16 @@ object ProactivePlanner {
         }
         morningDeadlines(items, nowMs).forEach { item -> lines += "다가오는 마감: ${dateLabel(localDate(item))} ${item.title}" }
         followups.take(5).forEach { f ->
-            lines += "챙길 할 일: ${f.task}" + (if (f.dueText.isNotBlank()) " (${f.dueText})" else "") +
+            // A due date settled in the meeting is shown as a date; a relative one ("내일") is tied to the meeting
+            // day it was said on, so it is never read as relative to today.
+            val due = runCatching { LocalDate.parse(f.dueAt.take(10)) }.getOrNull()
+            val dueNote = when {
+                due != null -> " (기한 ${dateLabel(due)})"
+                f.dueText.isNotBlank() && f.meetingDate.isNotBlank() -> " (${f.meetingDate} 회의에서 말한 기한: ${f.dueText})"
+                f.dueText.isNotBlank() -> " (회의에서 말한 기한: ${f.dueText})"
+                else -> ""
+            }
+            lines += "챙길 할 일: ${f.task}" + dueNote +
                 (if (f.meetingTitle.isNotBlank()) " / ${f.meetingDate} ${f.meetingTitle}" else "")
         }
         when {

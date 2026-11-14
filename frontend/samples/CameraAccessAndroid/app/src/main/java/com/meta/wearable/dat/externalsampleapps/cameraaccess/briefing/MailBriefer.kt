@@ -51,7 +51,7 @@ object MailBriefer {
 
     internal fun parseFollowups(arr: JSONArray): List<FollowupItem> = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.map {
         FollowupItem(it.optString("task"), it.optString("due_text"), it.optString("meeting_title"), it.optString("meeting_date"),
-            it.optString("meeting_id"), it.optInt("index", -1))
+            it.optString("meeting_id"), it.optInt("index", -1), it.optString("due_at"))
     }
 
     internal fun parseMails(arr: JSONArray?): List<MailCandidate> = (0 until (arr?.length() ?: 0)).mapNotNull { i ->

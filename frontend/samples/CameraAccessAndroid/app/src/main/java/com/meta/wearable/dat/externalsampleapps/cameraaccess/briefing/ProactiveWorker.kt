@@ -113,6 +113,8 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
                 if (key in claimed) continue
                 if (ProactivePlanner.sentToday(claimed, nowMs) >= ProactivePlanner.MAX_PER_DAY) break
                 val o = ProactivePlanner.mailOffer(mail, nowMs)
+                // Mail older than an offer lasts (a cursor left from days ago) is not offered and does not count.
+                if (!ProactivePlanner.isLive(o, current())) continue
                 if (!ProactiveStore.recordAndPost(app, uid, key, o) { JarvisNotifications.postOffer(app, o) }) return sent
                 sent += o
             }

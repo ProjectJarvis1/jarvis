@@ -46,6 +46,8 @@ class Match:
     company: str = ""
     word: str = ""
     person_id: str = ""
+    # 같은 이름이 여러 명 저장돼 있고 보낸 사람 정보로 가리지 못했으면 True. 특정 사람의 기록을 붙이지 않는다.
+    ambiguous: bool = False
     # True when the match is the sender itself (address, sender name or domain); False when the person or
     # company is only named in the subject or preview, so the mail is about them, not from them.
     from_sender: bool = True
@@ -74,12 +76,21 @@ def classify(mail: MailMeta, people: Iterable[Person]) -> Optional[Match]:
     for p in people:
         if p.email and address and p.email.strip().lower() == address:
             return Match("person", person=p.name, company=p.org or "", person_id=p.id)
-    for p in people:
-        # 이름은 보낸 사람 이름이나 제목에 있어야 한다. 본문 미리보기 속 이름만으로는 그 사람의 메일로 보지 않는다.
-        hit = [_squash(n) for n in p.names if _squash(n) and _squash(n) in squashed_head]
-        if hit:
-            return Match("person", person=p.name, company=p.org or "", person_id=p.id,
-                         from_sender=any(h in squashed_sender for h in hit))
+    # 이름은 보낸 사람 이름이나 제목에 있어야 한다. 본문 미리보기 속 이름만으로는 그 사람의 메일로 보지 않는다.
+    named = [(p, [_squash(n) for n in p.names if _squash(n) and _squash(n) in squashed_head]) for p in people]
+    named = [(p, hit) for p, hit in named if hit]
+    if named:
+        if len({(_squash(p.name), _squash(p.org)) for p, _ in named}) > 1:
+            # 같은 이름이 여러 명: 보낸 사람 이름이나 주소의 회사로 가린다. 못 가리면 누구의 기록도 붙이지 않는다.
+            told = [(p, hit) for p, hit in named
+                    if len(_squash(p.org)) >= 2 and (_squash(p.org) in squashed_text or (domain and _squash(p.org) in domain))]
+            if len({(_squash(p.name), _squash(p.org)) for p, _ in told}) != 1:
+                p, hit = named[0]
+                return Match("person", person=p.name, ambiguous=True, from_sender=any(h in squashed_sender for h in hit))
+            named = told[:1]
+        p, hit = named[0]
+        return Match("person", person=p.name, company=p.org or "", person_id=p.id,
+                     from_sender=any(h in squashed_sender for h in hit))
     for p in people:
         org = _squash(p.org)
         if len(org) >= 2 and (org in squashed_text or (domain and org in domain)):
@@ -108,11 +119,13 @@ def offer_message(mail: MailMeta, match: Match) -> str:
     subject = mail.subject.strip() or "(제목 없음)"
     if len(subject) > 40:
         subject = subject[:40].rstrip() + "…"
-    if match.from_sender:
-        return f"방금 {who(mail, match)}에서 '{subject}' 메일이 왔어요. 준비 자료를 모아 드릴까요?"
-    # 이름이나 회사가 제목에만 나온 메일: 실제로 보낸 사람을 쓰고, 누구와 관련된 메일인지 따로 말한다.
     name, address = sender_parts(mail.sender)
     sender = f"{name} 님이" if name else (f"{address}에서" if address else "누군가")
+    if match.from_sender and match.company:
+        return f"방금 {match.company}에서 '{subject}' 메일이 왔어요. 준비 자료를 모아 드릴까요?"
+    if match.from_sender:
+        return f"방금 {sender} 보낸 '{subject}' 메일이 왔어요. 준비 자료를 모아 드릴까요?"
+    # 이름이나 회사가 제목에만 나온 메일: 실제로 보낸 사람을 쓰고, 누구와 관련된 메일인지 따로 말한다.
     about = match.company or (f"{match.person} 님" if match.person else "")
     tail = f" {about} 관련 메일이에요." if about else ""
     return f"방금 {sender} 보낸 '{subject}' 메일이 왔어요.{tail} 준비 자료를 모아 드릴까요?"

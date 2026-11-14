@@ -48,6 +48,15 @@ def test_business_word_in_subject_only_and_noise_is_skipped():
     assert mb.classify(mail(subject="주말 잘 보내세요", snippet="다음 미팅 때 봬요"), []) is None
 
 
+def test_same_name_is_told_apart_by_company_or_left_unattached():
+    twins = [mb.Person("김민수", "한빛정밀", "", [], "a"), mb.Person("김민수", "대성테크", "", [], "b")]
+    m = mb.classify(mail("김민수 <new@daesung.example>", "회신", "대성테크 김민수입니다"), twins)
+    assert m.person_id == "b" and m.company == "대성테크" and not m.ambiguous
+    m = mb.classify(mail("김민수 <x@gmail.example>", "회신"), twins)
+    assert m.ambiguous and m.person_id == "" and m.company == ""
+    assert mb.offer_message(mail("김민수 <x@gmail.example>", "회신"), m) == "방금 김민수 님이 보낸 '회신' 메일이 왔어요. 준비 자료를 모아 드릴까요?"
+
+
 def test_mail_only_about_someone_names_the_real_sender():
     m = mail("내부 담당 <me@ours.example>", "김민수 님에게 보낼 자료")
     match = mb.classify(m, PEOPLE)

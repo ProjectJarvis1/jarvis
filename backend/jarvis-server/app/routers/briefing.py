@@ -90,6 +90,9 @@ def _prep(mail: mb.MailMeta, match: mb.Match, meetings: list[dict[str, Any]]) ->
     """알림을 눌렀을 때 보여 줄 준비 자료: 메일 요점, 관련된 지난 회의, 그때 정한 할 일."""
     lines = [f"메일 요점: {mail.snippet}" if mail.snippet else "메일 요점: 미리보기가 없는 메일이에요."]
     anchors = [a for a in (match.company, match.person) if a]
+    if match.ambiguous:
+        lines.append(f"{match.person} 님은 같은 이름이 여러 명 저장돼 있어 누구인지 확인하지 못했어요. 지난 기록은 붙이지 않았어요.")
+        anchors = []
     if anchors:
         keys = [mb._squash(a) for a in anchors if len(mb._squash(a)) >= 2]
 
