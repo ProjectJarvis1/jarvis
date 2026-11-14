@@ -9,12 +9,12 @@ import org.json.JSONObject
 /**
  * What a calendar entry will hold, in the words the approval card shows: title, the real day and time in
  * Korea time, and the place. The time is what the user must catch before approving, so it is spelled out
- * ("11월 20일 (목) 오후 4:00") instead of the raw ISO text the model produced, read the same way as
+ * ("2026년 11월 20일 (금) 오후 4:00", the year always shown so a wrong one is caught) instead of the raw ISO text the model produced, read the same way as
  * the calendar write itself ([koreaWallTime]).
  */
 object CalendarEventPreview {
     private val KST: ZoneId = ZoneId.of("Asia/Seoul")
-    private val DAY = DateTimeFormatter.ofPattern("M월 d일 (E)", Locale.KOREAN)
+    private val DAY = DateTimeFormatter.ofPattern("yyyy년 M월 d일 (E)", Locale.KOREAN)
     private val TIME = DateTimeFormatter.ofPattern("a h:mm", Locale.KOREAN)
 
     data class Preview(val title: String, val time: String, val place: String?)
@@ -25,7 +25,7 @@ object CalendarEventPreview {
         return Preview(arg("title") ?: "제목 없는 일정", timeLabel(arg("start_at"), arg("end_at")), arg("location"))
     }
 
-    /** "11월 20일 (목) 오후 4:00 ~ 오후 5:00"; a start the app cannot read is shown as given, never guessed. */
+    /** "2026년 11월 20일 (금) 오후 4:00 ~ 오후 5:00"; a start the app cannot read is shown as given, never guessed. */
     fun timeLabel(startAt: String?, endAt: String?): String {
         val start = parse(startAt) ?: return startAt?.let { "시각 확인 필요: $it" } ?: "시각 정보 없음"
         val end = parse(endAt)
