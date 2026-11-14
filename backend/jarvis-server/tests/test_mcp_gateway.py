@@ -482,3 +482,16 @@ def test_status_from_a_worker_thread_does_not_register_connections(tmp_path, mon
     gw = g.McpGateway(_per_user_config(tmp_path), _provider)
     assert gw.status("alice")["fake"]["credentials"] is True
     assert "alice" not in gw._sessions  # 이벤트 루프의 ensure_user 가 만든 묶음과 겹쳐 덮어쓰지 않는다
+
+
+def test_session_limits_come_from_env(monkeypatch):
+    """D80: 상한과 유휴 시간은 환경변수로 바꾸고, 잘못된 값은 기본값으로 돌아간다."""
+    from app import mcp_gateway as gw
+    monkeypatch.setenv("MCP_MAX_SESSIONS", "12")
+    assert gw._env_number("MCP_MAX_SESSIONS", 40, 1) == 12
+    monkeypatch.setenv("MCP_MAX_SESSIONS", "열두개")
+    assert gw._env_number("MCP_MAX_SESSIONS", 40, 1) == 40
+    monkeypatch.setenv("MCP_IDLE_TIMEOUT_S", "5")
+    assert gw._env_number("MCP_IDLE_TIMEOUT_S", 600.0, 30.0) == 600.0
+    monkeypatch.delenv("MCP_IDLE_TIMEOUT_S")
+    assert gw._env_number("MCP_IDLE_TIMEOUT_S", 600.0, 30.0) == 600.0

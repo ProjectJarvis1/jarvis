@@ -36,8 +36,29 @@ CALL_TIMEOUT_S = 20.0
 CONNECT_TIMEOUT_S = 25.0
 RESULT_LIMIT = 6000
 WATCH_INTERVAL_S = 30.0
-MAX_SESSIONS = 40          # 모든 사용자를 합쳐 동시에 열어 두는 외부 연결 수
-IDLE_TIMEOUT_S = 600.0     # 관리자 밖 사용자의 연결은 이만큼 안 쓰면 닫는다
+
+
+def _env_number(name: str, default: float, minimum: float) -> float:
+    """운영에서 바꿀 수 있는 값(D80). 비었거나 숫자가 아니거나 너무 작으면 기본값을 쓰고 로그를 남긴다."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        log.warning("%s=%r 는 숫자가 아니라 기본값 %s 를 씀", name, raw, default)
+        return default
+    if value < minimum:
+        log.warning("%s=%s 는 %s 보다 작아 기본값 %s 를 씀", name, raw, minimum, default)
+        return default
+    return value
+
+
+# 노션과 슬랙을 합쳐, 모든 사용자가 동시에 열어 두는 외부 연결 수(관리자 연결 포함). 실행 중인 요청이 있는 연결은
+# 상한 정리와 유휴 종료에서 닫지 않고, 자리가 없으면 "잠시 뒤에 다시 시도해 주세요"로 안내한다.
+MAX_SESSIONS = int(_env_number("MCP_MAX_SESSIONS", 40, 1))
+# 관리자 밖 사용자의 연결은 이만큼(초) 안 쓰면 닫는다.
+IDLE_TIMEOUT_S = _env_number("MCP_IDLE_TIMEOUT_S", 600.0, 30.0)
 USER_WAIT_S = 6.0          # 도구 목록을 줄 때 새로 연 연결을 기다리는 시간
 _NAME_RE = re.compile(r"[^A-Za-z0-9_]")
 
