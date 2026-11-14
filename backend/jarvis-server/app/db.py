@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import Iterator
 
 from psycopg.rows import dict_row
@@ -70,6 +71,11 @@ def lock_user_exclusively(conn, user: str) -> None:
     conn.execute("SELECT pg_advisory_xact_lock(hashtextextended('jarvis-user:' || %s, 0))", (user,))
 
 
+# Set while the remote tool connection (mcp_gateway) looks up an account token. Keyed /mcp requests can hold
+# every pooled connection while they wait on that remote call, so the lookup must not wait for the pool.
+outside_pool: ContextVar[bool] = ContextVar("outside_pool", default=False)
+
+
 @contextmanager
 def get_conn() -> Iterator:
     from .idempotency import transaction_connection
@@ -77,6 +83,13 @@ def get_conn() -> Iterator:
     if current is not None:
         _bind_user(current)
         yield current
+        return
+    if outside_pool.get():
+        import psycopg
+        with psycopg.connect(settings.database_url, row_factory=dict_row, connect_timeout=10) as conn:
+            _configure(conn)
+            _bind_user(conn)
+            yield conn
         return
     with pool.connection() as conn:
         _bind_user(conn)

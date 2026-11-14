@@ -131,11 +131,16 @@ def _fresh_google_token(user_id: str, row: dict[str, Any]) -> Optional[str]:
 
 
 def integration_token(provider: str, user_id: str = "default") -> Optional[str]:
-    """외부 MCP 연결(mcp_gateway)이 쓰는 토큰 조회. 실패하면 None."""
+    """외부 MCP 연결(mcp_gateway)이 쓰는 토큰 조회. 실패하면 None.
+    공용 풀을 쓰지 않는다: 키가 붙은 /mcp 요청들이 원격 호출을 기다리며 풀을 다 쥐고 있을 수 있다."""
+    from .db import outside_pool
+    token = outside_pool.set(True)
     try:
         return _integration_token(user_id, provider)
     except Exception:
         return None
+    finally:
+        outside_pool.reset(token)
 
 
 def _needs_auth(provider: str, message: str) -> dict[str, Any]:

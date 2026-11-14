@@ -199,3 +199,13 @@ def test_unconnected_account_is_a_failed_dispatch_not_a_success():
     assert finished == [True]  # the dispatch is released as failed, so a retry after connecting can run
     read = asyncio.run(scope["_call"]("calendar_list_events", {}, "u1", ""))
     assert read["is_error"]
+
+
+def test_fallback_due_text_keeps_approximate_and_before_words():
+    scope = functions("app/followups.py", {"normalize_followups"}, {"re": __import__("re")})
+    def due(evidence):
+        return scope["normalize_followups"]([{"task": "견적", "evidence": evidence}], evidence)[0]["due_text"]
+    assert due("내일쯤 견적서를 보내겠습니다") == "내일쯤"
+    assert due("11월 15일 전에 드릴게요") == "11월 15일 전에"
+    assert due("다음 주까지 정리할게요") == "다음 주까지"
+    assert due("모레 보내드릴게요") == "모레"

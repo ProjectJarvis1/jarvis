@@ -154,9 +154,14 @@ object JarvisAccount {
 
     private const val ERASE_PREFS = "jarvis_erase"
 
+    /**
+     * Entries are "pid|folder". Work of the deleted account that was still running in this process (the
+     * conversation screen's task store, the outbox) may write into the folder after it is erased, so an entry
+     * is dropped only by a later process, after erasing the folder once more; this process only erases.
+     */
     private fun markForErase(folder: java.io.File) {
         val prefs = appContext?.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE) ?: return
-        val pending = prefs.getStringSet("folders", emptySet()).orEmpty() + folder.absolutePath
+        val pending = prefs.getStringSet("folders", emptySet()).orEmpty() + "${android.os.Process.myPid()}|${folder.absolutePath}"
         prefs.edit().putStringSet("folders", pending).commit()
     }
 
@@ -164,21 +169,24 @@ object JarvisAccount {
     private fun keepFolder(folder: java.io.File) {
         val prefs = appContext?.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE) ?: return
         val pending = prefs.getStringSet("folders", emptySet()).orEmpty()
-        if (folder.absolutePath in pending) prefs.edit().putStringSet("folders", pending - folder.absolutePath).commit()
+        val left = pending.filterNot { it.substringAfter('|') == folder.absolutePath }.toSet()
+        if (left.size != pending.size) prefs.edit().putStringSet("folders", left).commit()
     }
 
-    /** Deletes folders of deleted accounts; ones that cannot be removed yet are tried again at the next start. */
+    /** Erases folders of deleted accounts; see [markForErase] for when an entry is let go. */
     private fun eraseDeletedFolders(context: Context) {
         val prefs = context.getSharedPreferences(ERASE_PREFS, Context.MODE_PRIVATE)
         val pending = prefs.getStringSet("folders", emptySet()).orEmpty()
         if (pending.isEmpty()) return
         val usersRoot = java.io.File(context.filesDir, "users").canonicalFile
-        val left = pending.filterNot { path ->
-            val dir = java.io.File(path).canonicalFile
+        val me = android.os.Process.myPid().toString()
+        val left = pending.filterNot { entry ->
+            val dir = java.io.File(entry.substringAfter('|')).canonicalFile
             // Only a folder directly under files/users is ever removed.
-            dir.parentFile != usersRoot || dir.deleteRecursively()
+            if (dir.parentFile != usersRoot) return@filterNot true
+            dir.deleteRecursively() && entry.substringBefore('|') != me
         }.toSet()
-        prefs.edit().putStringSet("folders", left).apply()
+        prefs.edit().putStringSet("folders", left).commit()
     }
 
     /** The server no longer accepts the session (expired, deleted elsewhere). */
@@ -194,6 +202,8 @@ object JarvisAccount {
             prefs.edit().clear().apply()
         }
         _user.value = null
+        // After the session is gone, so a briefing finishing now is no longer posted for this account.
+        appContext?.let { com.meta.wearable.dat.externalsampleapps.cameraaccess.notify.JarvisNotifications.clearAccount(it) }
     }
 
     private fun base() = SettingsManager.jarvisApiBase.trimEnd('/')

@@ -257,3 +257,18 @@ def test_account_deletion_waits_for_a_save_in_progress_and_leaves_no_orphan(api)
         left = owner.execute("SELECT count(*) FROM memories WHERE user_id=%s", (user,)).fetchone()[0]
     assert left == 0
 
+
+
+def test_remote_tool_token_lookup_does_not_wait_for_the_pool(api, monkeypatch):
+    _, get_conn = api
+    with get_conn() as conn:
+        conn.execute("""INSERT INTO user_integrations(user_id, provider, access_token_encrypted) VALUES('default','slack_user','tok-1')
+                        ON CONFLICT (user_id, provider) DO UPDATE SET access_token_encrypted='tok-1'""")
+        conn.commit()
+    import app.db as db
+    from app.mcp_tools import integration_token
+
+    def exhausted():
+        raise AssertionError("pool used while every pooled connection is taken")
+    monkeypatch.setattr(db.pool, "connection", exhausted)
+    assert integration_token("slack_user", "default") == "tok-1"

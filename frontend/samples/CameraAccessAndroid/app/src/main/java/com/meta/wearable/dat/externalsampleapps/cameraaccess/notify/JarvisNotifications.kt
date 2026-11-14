@@ -61,8 +61,25 @@ object JarvisNotifications {
         }
     }
 
-    /** False when nothing could be shown (notifications off for the app or this channel). */
-    fun post(context: Context, id: Int, title: String, text: String): Boolean {
+    /**
+     * Takes down every notification that shows an account's records (briefings, follow-ups, offers); called
+     * when the account signs out, is rejected or is deleted, so the next person on the phone never sees them.
+     */
+    fun clearAccount(context: Context) {
+        val manager = context.applicationContext.getSystemService(NotificationManager::class.java) ?: return
+        runCatching {
+            manager.activeNotifications
+                .filter { it.notification.channelId == CHANNEL_ID || it.notification.channelId == OFFER_CHANNEL_ID }
+                .forEach { manager.cancel(it.tag, it.id) }
+        }
+    }
+
+    /**
+     * False when nothing could be shown (notifications off for the app or this channel). [owner] is the account
+     * the text was prepared for; a late result after that account signed out is dropped, never shown to the next.
+     */
+    fun post(context: Context, id: Int, title: String, text: String, owner: String): Boolean {
+        if (owner.isBlank() || owner != com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.userId) return false
         val app = context.applicationContext
         val manager = app.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(

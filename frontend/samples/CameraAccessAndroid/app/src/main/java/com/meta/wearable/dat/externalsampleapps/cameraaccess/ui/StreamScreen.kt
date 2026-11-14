@@ -313,6 +313,7 @@ fun StreamScreen(
     }
     LaunchedEffect(Unit) {
         val app = context.applicationContext
+        val owner = com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.userId
         // Briefings whose spoken delivery is still waiting for a quiet moment; not started twice.
         val speaking = java.util.Collections.synchronizedSet(mutableSetOf<String>())
         while (true) {
@@ -324,7 +325,7 @@ fun StreamScreen(
                     if (!speaking.add(meeting.key)) return@forEach
                     // Counted as delivered once something reached the user: the notification, Jarvis's
                     // voice, or the phone's. If none did, the next poll tries again while it is still due.
-                    if (JarvisNotifications.post(app, meeting.key.hashCode(), "곧 시작: ${meeting.title}", brief.detail)) {
+                    if (JarvisNotifications.post(app, meeting.key.hashCode(), "곧 시작: ${meeting.title}", brief.detail, owner)) {
                         MeetingBriefer.markDelivered(app, meeting.key)
                     }
                     geminiViewModel.announce(
@@ -397,6 +398,7 @@ fun StreamScreen(
     // Collected directly: a meeting ended by voice with the phone in a pocket must still hand over its
     // follow-ups. Jarvis says them when a conversation is on; otherwise a phone notification does.
     LaunchedEffect(meetingRecordingViewModel) {
+        val owner = com.meta.wearable.dat.externalsampleapps.cameraaccess.account.JarvisAccount.userId
         meetingRecordingViewModel.uiState.map { it.result }.distinctUntilChanged().collect { result ->
             if (result == null) return@collect
             val app = context.applicationContext
@@ -420,7 +422,7 @@ fun StreamScreen(
             ) {
                 JarvisNotifications.post(app, result.meetingId.hashCode(),
                     "회의 후속 할 일 ${result.followups.size}개",
-                    lines.joinToString("\n") + "\n기억 탭의 회의 기록에서 일정에 넣거나 후속 문자를 보낼 수 있어요.")
+                    lines.joinToString("\n") + "\n기억 탭의 회의 기록에서 일정에 넣거나 후속 문자를 보낼 수 있어요.", owner)
             }
         }
     }
