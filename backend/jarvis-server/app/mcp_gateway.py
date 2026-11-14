@@ -452,13 +452,16 @@ class McpGateway:
         self.connections = self._user_conns(admin_user)
         self.tools: dict[str, ExportedTool] = {t.name: t for s in servers.values() for t in s.tools.values()}
 
+    def _new_conns(self, user: str) -> dict[str, _Connection]:
+        def provider(auth: str, user: str = user) -> Optional[str]:
+            return self._token(auth, user)
+        return {n: _Connection(s, provider, user, allow_env=(user == self.admin_user)) for n, s in self.servers.items()}
+
     def _user_conns(self, user: str) -> dict[str, _Connection]:
+        """사용자의 연결 묶음. 이벤트 루프에서만 부른다(작업자 스레드가 만들면 서로 덮어쓸 수 있다)."""
         conns = self._sessions.get(user)
         if conns is None:
-            def provider(auth: str, user: str = user) -> Optional[str]:
-                return self._token(auth, user)
-            conns = {n: _Connection(s, provider, user, allow_env=(user == self.admin_user))
-                     for n, s in self.servers.items()}
+            conns = self._new_conns(user)
             self._sessions[user] = conns
         return conns
 
@@ -735,7 +738,9 @@ class McpGateway:
         return {"is_error": False, "content": text[:RESULT_LIMIT] + ("\n…(뒷부분 생략)" if truncated else "")}
 
     def status(self, user: Optional[str] = None) -> dict[str, Any]:
-        conns = self._user_conns(user or self.admin_user)
+        # 작업자 스레드에서 불릴 수 있어 연결 묶음을 새로 등록하지 않는다. 없으면 등록하지 않은 임시 묶음으로 키만 본다.
+        user = user or self.admin_user
+        conns = self._sessions.get(user) or self._new_conns(user)
         return {n: {"connected": c.ready.is_set(), "credentials": c.credentials_present(), "error": c.error}
                 for n, c in conns.items()}
 

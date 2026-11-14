@@ -475,3 +475,10 @@ def test_a_connection_closed_mid_call_is_not_reopened_after_the_user_is_removed(
         await gw.stop()
 
     asyncio.run(run())
+
+
+def test_status_from_a_worker_thread_does_not_register_connections(tmp_path, monkeypatch):
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+    assert gw.status("alice")["fake"]["credentials"] is True
+    assert "alice" not in gw._sessions  # 이벤트 루프의 ensure_user 가 만든 묶음과 겹쳐 덮어쓰지 않는다
