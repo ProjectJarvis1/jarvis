@@ -40,3 +40,11 @@ def test_revalidation_keeps_positions_so_completion_marks_stay_with_their_task()
     assert out[0]["stale"] is True and out[0]["due_text"] == "" and not out[1].get("stale")
     # 아침 브리핑과 메일 준비 자료는 stale 을 빼되, B 의 자리는 1번 그대로다.
     assert [(i, it["task"]) for i, it in live_followups(out)] == [(1, "B 샘플")]
+
+
+def test_restoring_the_transcript_brings_the_due_date_back():
+    item = {"task": "B 샘플", "evidence": "샘플은 금요일까지 보내요", "due_text": "금요일까지", "due_at": ""}
+    stale = revalidate_followups([item], "샘플 이야기는 취소했어요.")[0]
+    assert stale["stale"] and stale["due_text"] == "" and stale["stale_due_text"] == "금요일까지"
+    again = revalidate_followups([stale], "김 팀장: 샘플은 금요일까지 보내요.")[0]
+    assert not again.get("stale") and again["due_text"] == "금요일까지" and "stale_due_text" not in again

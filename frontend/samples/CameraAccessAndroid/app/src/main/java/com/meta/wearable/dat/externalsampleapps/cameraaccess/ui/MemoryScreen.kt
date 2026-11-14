@@ -722,7 +722,7 @@ private fun FollowupCard(meeting: MeetingHistoryItem) {
                     }
                 }
             }
-            val draft = remember(meeting.id) { MeetingFollowups.draftMessage(meeting.decisions, meeting.followups, start) }
+            val draft = remember(meeting.id, meeting.decisions, meeting.followups, start) { MeetingFollowups.draftMessage(meeting.decisions, meeting.followups, start) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 JarvisSecondaryButton("문자 초안", {
                     if (openDraft(context, android.content.Intent(android.content.Intent.ACTION_SENDTO, android.net.Uri.parse("smsto:"))

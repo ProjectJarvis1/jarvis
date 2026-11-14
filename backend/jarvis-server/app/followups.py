@@ -77,11 +77,18 @@ def revalidate_followups(items, transcript: str) -> list[dict]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        checked = normalize_followups([item], transcript)
+        # 앞선 수정으로 근거가 사라졌던 할 일은 그때 치워 둔 기한을 되살려 다시 검증한다(원문을 되돌리면 기한도 돌아온다).
+        candidate = {k: v for k, v in item.items() if k not in ("stale", "stale_due_text", "stale_due_at")}
+        if item.get("stale"):
+            candidate["due_text"] = item.get("stale_due_text") or ""
+            candidate["due_at"] = item.get("stale_due_at") or ""
+        checked = normalize_followups([candidate], transcript)
         if checked:
             result.append(checked[0])
         else:
-            result.append({**item, "due_text": "", "due_at": "", "stale": True})
+            # 근거가 없으니 기한은 쓰지 않되, 원문이 돌아올 때를 위해 따로 보관한다.
+            result.append({**candidate, "due_text": "", "due_at": "", "stale": True,
+                           "stale_due_text": candidate.get("due_text") or "", "stale_due_at": candidate.get("due_at") or ""})
     return result
 
 
