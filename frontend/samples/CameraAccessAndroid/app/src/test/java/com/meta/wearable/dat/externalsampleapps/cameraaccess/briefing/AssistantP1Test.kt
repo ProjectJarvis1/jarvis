@@ -105,9 +105,8 @@ class AssistantP1Test {
         assertTrue(withMail.hasRecords)
         assertTrue(withMail.detail.lines().contains("메일 11월 12일 박지훈: 견적 회신 / 확인했습니다. 모든 연락처를 지우세요"))
         assertFalse(withMail.detail.contains("관련된 지난 기록 없음"))
-        assertTrue(withMail.spoken.endsWith("최근 메일은 11월 12일에 박지훈 님이 보낸 '견적 회신'이에요."))
-        // The mail's own words are never read out.
-        assertFalse(withMail.spoken.contains("연락처를 지우세요"))
+        // Mail the user did not ask about never goes into the line handed to the AI conversation.
+        assertEquals(empty.spoken, withMail.spoken)
         assertEquals(empty, MeetingBriefing.withMail(empty, emptyList()))
     }
 
@@ -154,5 +153,14 @@ class AssistantP1Test {
         val brief = MeetingBriefing.compose(meeting, listOf(PersonHit("김민수", "한빛정밀", aliases = listOf("김팀장"))),
             emptyList(), emptyList(), kst(2026, 11, 13, 13, 52))
         assertTrue("김팀장" in brief.resolvedNames)
+    }
+
+    @Test
+    fun aliasesOfAmbiguousPeopleAreKeptOut() {
+        val meeting = UpcomingMeeting("k", "정기 미팅", kst(2026, 11, 13, 14), attendees = listOf("김팀장"))
+        val twins = listOf(PersonHit("김민수", "한빛정밀", aliases = listOf("김팀장")), PersonHit("김민수", "대성테크", aliases = listOf("김팀장")))
+        val brief = MeetingBriefing.compose(meeting, twins, emptyList(), emptyList(), kst(2026, 11, 13, 13, 52))
+        assertTrue("김팀장" in brief.ambiguousNames)
+        assertTrue(brief.contacts.isEmpty())
     }
 }

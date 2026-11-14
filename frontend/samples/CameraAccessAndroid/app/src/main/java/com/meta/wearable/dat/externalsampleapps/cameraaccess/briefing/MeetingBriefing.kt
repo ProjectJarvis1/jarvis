@@ -35,7 +35,8 @@ data class MemoryHit(val text: String, val peopleText: String = "", val captured
 data class Brief(val spoken: String, val detail: String, val people: List<String> = emptyList(), val hasRecords: Boolean = true,
     val hasHistory: Boolean = true, val historyWith: List<String> = emptyList(), val mentioned: List<String> = emptyList(),
     val orgs: List<String> = emptyList(), val ambiguous: List<String> = emptyList(),
-    val contacts: List<Pair<String, String>> = emptyList(), val resolvedNames: List<String> = emptyList())
+    val contacts: List<Pair<String, String>> = emptyList(), val resolvedNames: List<String> = emptyList(),
+    val ambiguousNames: List<String> = emptyList())
 
 /** A recent mail with someone in the meeting, as the server found it in Gmail ([date] is "2026-11-12 10:00", KST). */
 data class MailHit(val sender: String, val subject: String, val date: String, val snippet: String = "")
@@ -164,12 +165,14 @@ object MeetingBriefing {
             orgs = persons.map { it.org }.filter { it.isNotBlank() }.distinct(),
             ambiguous = ambiguous.toList(),
             contacts = persons.map { it.name to it.org },
-            resolvedNames = persons.flatMap { it.allNames }.distinct())
+            resolvedNames = persons.flatMap { it.allNames }.distinct(),
+            ambiguousNames = found.filter { it.name in ambiguous }.flatMap { it.allNames }.distinct())
     }
 
     /**
-     * Adds recent mail with the meeting's people to a brief: every mail in the notification text, the latest
-     * one read out by its subject only. Mail is someone else's writing, so nothing in it is said as an instruction.
+     * Adds recent mail with the meeting's people to the brief's text on the phone (notification and offer
+     * detail). Nothing of it goes into [Brief.spoken]: that line is handed to the live AI conversation, and
+     * mail the user did not ask about must not reach the AI service.
      */
     fun withMail(brief: Brief, mails: List<MailHit>): Brief {
         if (mails.isEmpty()) return brief
@@ -177,13 +180,9 @@ object MeetingBriefing {
             "메일 ${mailDay(m.date)} ${m.sender.ifBlank { "보낸 사람 모름" }}: ${m.subject.ifBlank { "(제목 없음)" }}" +
                 (m.snippet.takeIf { it.isNotBlank() }?.let { " / ${it.take(100)}" } ?: "")
         }
-        val latest = mails.first()
-        val said = "최근 메일은 ${mailDay(latest.date)}에 ${latest.sender.ifBlank { "상대" }} 님이 보낸 '${latest.subject.take(40)}'이에요."
         // "관련된 지난 기록 없음" is no longer true once a mail is there.
         val detail = brief.detail.lines().filterNot { it == "관련된 지난 기록 없음" } + lines
-        val spoken = brief.spoken.replace(" 이 일정과 관련된 지난 기록은 찾지 못했어요.", "")
-        return brief.copy(spoken = "$spoken $said".replace("자비스", ""), detail = detail.joinToString("\n"),
-            hasRecords = true, hasHistory = true)
+        return brief.copy(detail = detail.joinToString("\n"), hasRecords = true, hasHistory = true)
     }
 
     /** "2026-11-12 10:00" -> "11월 12일". */

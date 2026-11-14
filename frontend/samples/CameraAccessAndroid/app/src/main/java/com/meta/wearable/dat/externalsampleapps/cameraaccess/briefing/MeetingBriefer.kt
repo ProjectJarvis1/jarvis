@@ -120,7 +120,7 @@ object MeetingBriefer {
         // Saved people go by name and company, which the server turns into their saved mail address. Attendees
         // with no record go by name. A name two saved people share stays out: their mail would be read as this one's.
         val unsaved = meeting.attendees.map { it.trim().removeSuffix("님").trim() }
-            .filter { it.length >= 2 && '@' !in it && it !in brief.resolvedNames } - brief.ambiguous.toSet()
+            .filter { it.length >= 2 && '@' !in it && it !in brief.resolvedNames } - (brief.ambiguous + brief.ambiguousNames).toSet()
         val mails = MailBriefer.context(brief.contacts, unsaved.distinct())
             ?.map { MailHit(it.sender, it.subject, it.date, it.snippet) }.orEmpty()
         return MeetingBriefing.withMail(brief, mails)

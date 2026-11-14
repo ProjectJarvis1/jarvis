@@ -96,11 +96,15 @@ def _prep(mail: mb.MailMeta, match: mb.Match, meetings: list[dict[str, Any]]) ->
     if anchors:
         keys = [mb._squash(a) for a in anchors if len(mb._squash(a)) >= 2]
 
+        # 누구인지 가린 사람이면 이름만으로는 잇지 않는다(같은 이름의 다른 사람 회의가 섞인다). 회사 이름으로만 보조로 찾는다.
+        text_keys = [mb._squash(match.company)] if match.person_id and len(mb._squash(match.company)) >= 2 else keys
+
         def related_to(m: dict[str, Any]) -> bool:
-            # 저장된 참석자 연결이 먼저다. 제목·요약에 이름이 없는 회의도 그 사람이 참석자로 저장돼 있으면 관련 회의다.
-            if match.person_id and match.person_id in {str(p) for p in m.get("person_ids") or []}:
-                return True
-            return any(k in mb._squash(f"{m.get('title') or ''} {m.get('summary') or ''}") for k in keys)
+            # 저장된 참석자 연결이 먼저다. 참석자가 저장된 회의는 그 연결로만 판단한다.
+            linked = {str(p) for p in m.get("person_ids") or []}
+            if match.person_id and linked:
+                return match.person_id in linked
+            return any(k in mb._squash(f"{m.get('title') or ''} {m.get('summary') or ''}") for k in text_keys)
         related = [m for m in meetings if related_to(m)][:2]
         for m in related:
             summary = (m.get("summary") or "").strip().replace("\n", " ")

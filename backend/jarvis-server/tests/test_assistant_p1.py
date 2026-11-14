@@ -403,3 +403,24 @@ def test_live_relay_stops_when_time_runs_out_and_refunds_unused(api, monkeypatch
     with pool.connection() as conn:
         used = conn.execute("SELECT amount FROM ai_usage WHERE user_id = %s AND kind = 'live_seconds'", (uid,)).fetchone()
     assert used and used["amount"] == 2
+
+
+@db
+def test_identified_sender_never_gets_a_namesakes_meetings(api, monkeypatch):
+    from app import mcp_tools
+    client, users, pool = api
+    uid = users["p1a"][0]
+    now = int(datetime.now(timezone.utc).timestamp() * 1000)
+    with pool.connection() as conn:
+        conn.execute("SELECT set_config('role','jarvis_app',false), set_config('app.user_id',%s,false)", (uid,))
+        conn.execute("INSERT INTO people(name, org, email) VALUES ('김민수', '한빛정밀', 'kim@hanbit.example')")
+        other = conn.execute("INSERT INTO people(name, org) VALUES ('김민수', '대성테크') RETURNING id").fetchone()["id"]
+        conn.execute("INSERT INTO meetings(title, started_at, summary, person_ids) VALUES "
+                     "('김민수 님 미팅', now() - interval '2 days', '대성테크 납기', ARRAY[%s]::uuid[])", (other,))
+        conn.commit()
+        conn.execute("RESET ROLE")
+    monkeypatch.setattr(mcp_tools, "_gmail_token_or_reauth", lambda user: ("tok", None))
+    monkeypatch.setattr(mcp_tools, "_gmail_get", _fake_gmail([{"id": "k", "from": "김민수 <kim@hanbit.example>", "subject": "자료", "ms": now - 1000}]))
+    r = client.get("/briefing/mail/new", params={"after_ms": now - 3_600_000}, headers=auth(users, "p1a")).json()
+    prep = " ".join(r["mails"][0]["prep"])
+    assert "한빛정밀" in r["mails"][0]["message"] and "김민수 님 미팅" not in prep and "대성테크" not in prep
