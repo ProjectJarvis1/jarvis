@@ -86,7 +86,7 @@ object ContactCandidates {
     private val NAME_KEYS = listOf("name", "display_name", "person_name")
 
     /** Korean phone and mobile numbers written in free text (business-card notes, evidence lines). */
-    private val PHONE_IN_TEXT = Regex("""(?<![\d])(?:\+?82[-.\s]?0?|0)\d{1,2}[-.\s)]?\d{3,4}[-.\s]?\d{4}(?![\d])""")
+    private val PHONE_IN_TEXT = Regex("""(?<![\d])(?:\+?82[-.\s]*\(?0?|\(?0)\d{1,2}\)?[-.\s]*\d{3,4}[-.\s]*\d{4}(?![\d])""")
 
     fun redactText(text: String): String = PHONE_IN_TEXT.replace(text, "[전화번호]")
 

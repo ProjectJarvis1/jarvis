@@ -92,4 +92,13 @@ class ContactCandidatesTest {
         val text = "견적 2026-11-16, 수량 1200개, 금액 35000000원, 회의 10:30"
         assertEquals(text, ContactCandidates.redactText(text))
     }
+
+    @Test fun parenthesizedAndSpacedNumbersAreRedacted() {
+        listOf("연락처 02) 1234-5678", "연락처 (010) 1234-5678", "대표 (02)1234-5678", "+82 (10) 1234 5678",
+            "010.1234.5678", "010 - 1234 - 5678").forEach { text ->
+            val out = ContactCandidates.redactText(text)
+            assertFalse("not redacted: $text -> $out", out.contains("5678"))
+            assertTrue(out.contains("[전화번호]"))
+        }
+    }
 }

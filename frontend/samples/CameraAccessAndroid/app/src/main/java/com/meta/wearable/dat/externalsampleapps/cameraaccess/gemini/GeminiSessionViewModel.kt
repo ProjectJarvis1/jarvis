@@ -1096,8 +1096,10 @@ class GeminiSessionViewModel : ViewModel() {
             val query = args["query"]?.toString().orEmpty()
             val candidate = pending?.selectedId
                 ?: args["candidate_id"]?.toString()?.takeIf { it.isNotBlank() && it != "null" }
-            val result = if (task.tool == "call_contact") contactActionManager.callContact(query, candidate)
-                else contactActionManager.textContact(query, args["message"]?.toString().orEmpty(), candidate)
+            // A choice among several on the card is the user's own pick; anything else is checked for same names again.
+            val picked = pending != null && pending.choices.size > 1 && pending.selectedId != null
+            val result = if (task.tool == "call_contact") contactActionManager.callContact(query, candidate, picked)
+                else contactActionManager.textContact(query, args["message"]?.toString().orEmpty(), candidate, picked)
             taskManager.completeWaiting(task.id, task.revision, result.asTaskOutcome())
             clearInvalidContactPrompt()
             return result

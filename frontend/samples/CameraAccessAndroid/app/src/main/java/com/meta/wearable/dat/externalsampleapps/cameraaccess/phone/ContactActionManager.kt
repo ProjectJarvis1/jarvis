@@ -15,14 +15,15 @@ class ContactActionManager {
     private val context
         get() = AppContextProvider.require()
 
-    fun callContact(query: String, candidateId: String? = null): ToolResult {
+    /** [picked] is true only when the user chose this person on the device card among same-name people. */
+    fun callContact(query: String, candidateId: String? = null, picked: Boolean = false): ToolResult {
         if (!hasContactsPermission()) {
             return ToolResult.Failure("전화번호부 권한이 없습니다. 연락처 권한을 허용한 뒤 다시 시도해주세요.")
         }
         if (!hasCallPermission()) {
             return ToolResult.Failure("전화 발신 권한이 없습니다. 전화 권한을 허용한 뒤 다시 시도해주세요.")
         }
-        val match = when (val target = target(query, candidateId)) {
+        val match = when (val target = target(query, candidateId, picked)) {
             is Target.One -> target.match
             else -> return target.failure(query)
         }
@@ -30,14 +31,14 @@ class ContactActionManager {
         return ToolResult.Success("${match.displayName}에게 전화를 걸었습니다.")
     }
 
-    fun textContact(query: String, message: String, candidateId: String? = null): ToolResult {
+    fun textContact(query: String, message: String, candidateId: String? = null, picked: Boolean = false): ToolResult {
         if (message.isBlank()) {
             return ToolResult.Failure("보낼 문자 내용을 함께 알려주세요.")
         }
         if (!hasContactsPermission()) {
             return ToolResult.Failure("전화번호부 권한이 없습니다. 연락처 권한을 허용한 뒤 다시 시도해주세요.")
         }
-        val match = when (val target = target(query, candidateId)) {
+        val match = when (val target = target(query, candidateId, picked)) {
             is Target.One -> target.match
             else -> return target.failure(query)
         }
@@ -52,14 +53,17 @@ class ContactActionManager {
     fun choicesFor(query: String, candidateId: String? = null): List<ContactCandidates.Choice> {
         if (!hasContactsPermission()) return emptyList()
         return when (val target = target(query, candidateId)) {
-            is Target.One -> ContactCandidates.choices(listOf(target.match.displayName to target.match.phoneNumber))
+            // Keep the ID the person came with, so a saved business card stays a saved card through the card.
+            is Target.One -> target.id?.let { listOf(ContactCandidates.Choice(it, target.match.displayName,
+                ContactCandidates.lastFour(target.match.phoneNumber))) }
+                ?: ContactCandidates.choices(listOf(target.match.displayName to target.match.phoneNumber))
             is Target.Many -> ContactCandidates.choices(target.matches.map { it.displayName to it.phoneNumber })
             else -> emptyList()
         }
     }
 
     private sealed interface Target {
-        data class One(val match: ContactMatch) : Target
+        data class One(val match: ContactMatch, val id: String? = null) : Target
         data class Many(val matches: List<ContactMatch>) : Target
         object None : Target
         object Stale : Target
@@ -73,16 +77,21 @@ class ContactActionManager {
     }
 
     /** Resolves the person to act on. A candidate ID is checked against the phone book again before use. */
-    private fun target(query: String, candidateId: String?): Target {
+    private fun target(query: String, candidateId: String?, picked: Boolean = false): Target {
         val id = candidateId?.trim()?.takeIf { ContactCandidates.looksLikeId(it) }
             ?: query.trim().takeIf { ContactCandidates.looksLikeId(it) }
         if (id != null) {
             val entry = ContactCandidates.resolve(id) ?: return Target.Stale
             // A number from a Jarvis record (a saved business card) is used as kept; a phone-book entry is
             // looked up again so a contact deleted or changed since the search is not dialled.
-            if (!entry.fromPhoneBook) return Target.One(ContactMatch(entry.name, entry.number))
-            val live = findMatches(entry.name).firstOrNull { normalizeNumber(it.phoneNumber) == normalizeNumber(entry.number) }
-            return live?.let { Target.One(it) } ?: Target.Stale
+            if (!entry.fromPhoneBook) return Target.One(ContactMatch(entry.name, entry.number), id)
+            val sameName = findMatches(entry.name).filter { normalize(it.displayName) == normalize(entry.name) }
+            val live = sameName.firstOrNull { normalizeNumber(it.phoneNumber) == normalizeNumber(entry.number) }
+                ?: return Target.Stale
+            // An ID the AI chose does not settle which of several same-name people is meant: the user picks on
+            // the device. Only a pick made on the device card goes straight through.
+            if (!picked && sameName.size > 1) return Target.Many(sameName)
+            return Target.One(live, id)
         }
         val matches = findMatches(query)
         return when {
