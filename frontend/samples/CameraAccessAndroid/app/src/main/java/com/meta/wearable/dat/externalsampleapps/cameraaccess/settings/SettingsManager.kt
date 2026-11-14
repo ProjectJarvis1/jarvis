@@ -103,6 +103,16 @@ object SettingsManager {
         get() = prefs.getBoolean("proactiveOffersEnabled", true)
         set(value) = prefs.edit().putBoolean("proactiveOffersEnabled", value).apply()
 
+    /** Once a day, a morning notice with today's events, deadlines, follow-ups and overnight business mail (D66). */
+    var morningBriefingEnabled: Boolean
+        get() = prefs.getBoolean("morningBriefingEnabled", true)
+        set(value) = prefs.edit().putBoolean("morningBriefingEnabled", value).apply()
+
+    /** Minutes after midnight, Korean time, when the morning briefing goes out. 08:00 by default. */
+    var morningBriefingMinute: Int
+        get() = prefs.getInt("morningBriefingMinute", 8 * 60)
+        set(value) = prefs.edit().putInt("morningBriefingMinute", value).apply()
+
     /** Keep listening for "자비스" with the screen off (a microphone foreground service). */
     var backgroundWakeWordEnabled: Boolean
         get() = prefs.getBoolean("backgroundWakeWordEnabled", true)

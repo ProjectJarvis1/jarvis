@@ -33,7 +33,11 @@ data class MemoryHit(val text: String, val peopleText: String = "", val captured
  * people, and [hasRecords] is false when nothing stored was about this meeting.
  */
 data class Brief(val spoken: String, val detail: String, val people: List<String> = emptyList(), val hasRecords: Boolean = true,
-    val hasHistory: Boolean = true, val historyWith: List<String> = emptyList(), val mentioned: List<String> = emptyList())
+    val hasHistory: Boolean = true, val historyWith: List<String> = emptyList(), val mentioned: List<String> = emptyList(),
+    val orgs: List<String> = emptyList())
+
+/** A recent mail with someone in the meeting, as the server found it in Gmail ([date] is "2026-11-12 10:00", KST). */
+data class MailHit(val sender: String, val subject: String, val date: String, val snippet: String = "")
 
 /**
  * Builds the briefing a few minutes before a meeting from what Jarvis has stored about the people in it.
@@ -155,8 +159,32 @@ object MeetingBriefing {
             mentioned = persons.filter { p ->
                 val texts = notes.flatMap { listOf(it.text, it.peopleText) }
                 p.allNames.any { n -> texts.any { it.contains(n) } }
-            }.map { it.name })
+            }.map { it.name },
+            orgs = persons.map { it.org }.filter { it.isNotBlank() }.distinct())
     }
+
+    /**
+     * Adds recent mail with the meeting's people to a brief: every mail in the notification text, the latest
+     * one read out by its subject only. Mail is someone else's writing, so nothing in it is said as an instruction.
+     */
+    fun withMail(brief: Brief, mails: List<MailHit>): Brief {
+        if (mails.isEmpty()) return brief
+        val lines = mails.take(3).map { m ->
+            "메일 ${mailDay(m.date)} ${m.sender.ifBlank { "보낸 사람 모름" }}: ${m.subject.ifBlank { "(제목 없음)" }}" +
+                (m.snippet.takeIf { it.isNotBlank() }?.let { " / ${it.take(100)}" } ?: "")
+        }
+        val latest = mails.first()
+        val said = "최근 메일은 ${mailDay(latest.date)}에 ${latest.sender.ifBlank { "상대" }} 님이 보낸 '${latest.subject.take(40)}'이에요."
+        // "관련된 지난 기록 없음" is no longer true once a mail is there.
+        val detail = brief.detail.lines().filterNot { it == "관련된 지난 기록 없음" } + lines
+        val spoken = brief.spoken.replace(" 이 일정과 관련된 지난 기록은 찾지 못했어요.", "")
+        return brief.copy(spoken = "$spoken $said".replace("자비스", ""), detail = detail.joinToString("\n"),
+            hasRecords = true, hasHistory = true)
+    }
+
+    /** "2026-11-12 10:00" -> "11월 12일". */
+    internal fun mailDay(date: String): String =
+        Regex("""^\d{4}-(\d{2})-(\d{2})""").find(date)?.let { "${it.groupValues[1].toInt()}월 ${it.groupValues[2].toInt()}일" } ?: "최근"
 
     /** Up to the first sentence end (". " or end of text; "1.5억" is not an end), at most about 90 characters. */
     private fun firstSentence(text: String): String {

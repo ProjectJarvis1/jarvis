@@ -87,6 +87,8 @@ fun SettingsScreen(
     var meetingBriefingEnabled by remember { mutableStateOf(SettingsManager.meetingBriefingEnabled) }
     var proactiveNotificationsEnabled by remember { mutableStateOf(SettingsManager.proactiveNotificationsEnabled) }
     var proactiveOffersEnabled by remember { mutableStateOf(SettingsManager.proactiveOffersEnabled) }
+    var morningBriefingEnabled by remember { mutableStateOf(SettingsManager.morningBriefingEnabled) }
+    var morningBriefingMinute by remember { mutableStateOf(SettingsManager.morningBriefingMinute) }
     val settingsContext = LocalContext.current
     // "먼저 알려 주기" reads the calendar and shows notifications; ask for both when it is turned on.
     fun calendarAllowed() = settingsContext.checkSelfPermission(android.Manifest.permission.READ_CALENDAR) ==
@@ -134,8 +136,11 @@ fun SettingsScreen(
         SettingsManager.backgroundWakeWordEnabled = backgroundWakeWordEnabled
         SettingsManager.meetingBriefingEnabled = meetingBriefingEnabled
         SettingsManager.proactiveNotificationsEnabled = proactiveNotificationsEnabled
-        if (SettingsManager.proactiveOffersEnabled != proactiveOffersEnabled) {
+        SettingsManager.morningBriefingMinute = morningBriefingMinute
+        if (SettingsManager.proactiveOffersEnabled != proactiveOffersEnabled ||
+            SettingsManager.morningBriefingEnabled != morningBriefingEnabled) {
             SettingsManager.proactiveOffersEnabled = proactiveOffersEnabled
+            SettingsManager.morningBriefingEnabled = morningBriefingEnabled
             com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveWorker.schedule(settingsContext)
         }
         SettingsManager.liveConversationEnabled = liveConversationEnabled
@@ -152,6 +157,8 @@ fun SettingsScreen(
         meetingBriefingEnabled = SettingsManager.meetingBriefingEnabled
         proactiveNotificationsEnabled = SettingsManager.proactiveNotificationsEnabled
         proactiveOffersEnabled = SettingsManager.proactiveOffersEnabled
+        morningBriefingEnabled = SettingsManager.morningBriefingEnabled
+        morningBriefingMinute = SettingsManager.morningBriefingMinute
         liveConversationEnabled = SettingsManager.liveConversationEnabled
         whisperSttEnabled = SettingsManager.speechRecognizerProvider == "whisper"
     }
@@ -159,7 +166,7 @@ fun SettingsScreen(
     // Tab navigation and system Back also persist edits, not only the toolbar Back button.
     LaunchedEffect(systemPrompt, jarvisApiBase, webrtcSignalingURL,
         videoStreamingEnabled, cardOfferEnabled, backgroundWakeWordEnabled, meetingBriefingEnabled, proactiveNotificationsEnabled,
-        proactiveOffersEnabled, liveConversationEnabled,
+        proactiveOffersEnabled, morningBriefingEnabled, morningBriefingMinute, liveConversationEnabled,
         whisperSttEnabled) {
         save()
     }
@@ -203,11 +210,22 @@ fun SettingsScreen(
                     "캘린더 일정 5~10분 전에 상대 정보와 지난 회의 내용을 글라스로 알려 줘요. 대화 화면이 열려 있어야 하고 캘린더 권한이 필요해요.",
                     meetingBriefingEnabled) { meetingBriefingEnabled = it }
                 SettingSwitch("먼저 알려 주기",
-                    "앱을 닫아 둬도 캘린더를 보고, 오늘 미팅 두 시간 전과 제출이나 마감 사흘 전에 준비를 도와드릴지 먼저 물어요. 오전 8시부터 밤 9시 사이에만, 하루 4번까지 알려요.",
+                    "앱을 닫아 둬도 캘린더를 보고, 오늘 미팅 두 시간 전과 제출이나 마감 사흘 전에 준비를 도와드릴지 먼저 물어요. 지메일을 연결해 두면 업무 메일이 왔을 때도 알려요. 오전 8시부터 밤 9시 사이에만, 하루 4번까지 알려요.",
                     proactiveOffersEnabled) { proactiveOffersEnabled = it; if (it) askOfferPermissions() }
                 // On by default, so a fresh install may be on without the calendar permission: say so, offer to allow.
                 if (proactiveOffersEnabled && !calendarGranted) JarvisRow("캘린더 권한이 없어 아직 알려 드리지 못해요",
                     subtitle = "눌러서 허용", onClick = { askOfferPermissions() })
+                SettingSwitch("아침 브리핑",
+                    "매일 아침 한 번, 오늘 일정과 다가오는 마감, 챙길 할 일, 밤사이 온 업무 메일을 모아 알려 줘요.",
+                    morningBriefingEnabled) { morningBriefingEnabled = it; if (it) askOfferPermissions() }
+                if (morningBriefingEnabled) Column(Modifier.padding(start = 14.dp, end = 14.dp, bottom = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("알림 시각", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    val choices = MORNING_TIMES
+                    val selected = choices.indexOfFirst { it.first == morningBriefingMinute }
+                        .takeIf { it >= 0 } ?: choices.indexOfFirst { it.first >= morningBriefingMinute }.coerceAtLeast(0)
+                    JarvisSegmented(choices.map { it.second }, selected, { morningBriefingMinute = choices[it].first })
+                }
                 SettingSwitch("연속 영상 전송", "평소에는 꺼 두세요. 필요한 순간의 사진만 보내요.",
                     videoStreamingEnabled) { videoStreamingEnabled = it }
                 SettingSwitch("명함 보이면 저장 제안", "명함이 보이면 Jarvis가 저장할지 먼저 물어요. 대답하기 전에는 저장하지 않아요.",
@@ -436,6 +454,9 @@ private fun WakeWordTrialRows() {
         TextButton(onClick = { WakeWordTrialLog.reset(context); refresh++ }) { Text("기록 지우기") }
     }
 }
+
+/** Morning briefing times (minutes after midnight, label). Not before 08:00: no notice is sent earlier. */
+private val MORNING_TIMES = listOf(8 * 60 to "오전 8시", 8 * 60 + 30 to "8시 30분", 9 * 60 to "9시", 10 * 60 to "10시")
 
 @Composable
 private fun SettingSwitch(title: String, description: String, checked: Boolean, onChange: (Boolean) -> Unit) {

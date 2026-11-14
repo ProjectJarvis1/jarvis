@@ -18,6 +18,7 @@ logging.basicConfig(
 from .db import close_pool, ensure_schema, open_pool
 from .routers import (
     account,
+    briefing,
     client_errors,
     gemini_relay,
     agent,
@@ -71,6 +72,7 @@ app = FastAPI(
 )
 
 app.include_router(account.router)
+app.include_router(briefing.router)
 app.include_router(client_errors.router)
 app.include_router(gemini_relay.router)
 app.include_router(people.router)

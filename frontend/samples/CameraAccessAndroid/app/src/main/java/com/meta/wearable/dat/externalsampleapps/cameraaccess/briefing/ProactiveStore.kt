@@ -27,6 +27,8 @@ object ProactiveStore {
 
     private var loadedFor: String? = null
     private val claims = mutableMapOf<String, Long>()
+    /** Mail that arrived up to this time was already checked for offers; null before the first check. */
+    private var mailAfter: Long? = null
     /** Notification ids posted for this account, kept apart from the list so a dismissed or dropped offer is still taken down on sign-out. */
     private val posted = linkedSetOf<Int>()
     private const val KEEP_POSTED = 64
@@ -42,6 +44,7 @@ object ProactiveStore {
         if (loadedFor == uid) return
         claims.clear()
         posted.clear()
+        mailAfter = null
         val list = mutableListOf<ProactiveOffer>()
         runCatching {
             val f = file(context)
@@ -49,6 +52,7 @@ object ProactiveStore {
                 val json = JSONObject(f.readText())
                 json.optJSONObject("claimed")?.let { c -> c.keys().forEach { k -> claims[k] = c.getLong(k) } }
                 json.optJSONArray("posted")?.let { a -> for (i in 0 until a.length()) posted += a.getInt(i) }
+                if (json.has("mailAfter")) mailAfter = json.getLong("mailAfter")
                 json.optJSONArray("offers")?.let { a -> for (i in 0 until a.length()) offerFrom(a.getJSONObject(i))?.let(list::add) }
             }
         }
@@ -96,6 +100,24 @@ object ProactiveStore {
         return true
     }
 
+    /** Where the next mail check starts; the first check starts [firstLookbackMs] back, not at old mail. */
+    @Synchronized
+    fun mailCursor(context: Context, nowMs: Long, firstLookbackMs: Long = 3_600_000L): Long {
+        load(context)
+        return mailAfter ?: (nowMs - firstLookbackMs)
+    }
+
+    /** Moves the mail cursor forward (never back), for [uid] only, so a check from a signed-out account changes nothing. */
+    @Synchronized
+    fun advanceMail(context: Context, uid: String, untilMs: Long) {
+        if (!JarvisAccount.isSignedIn || JarvisAccount.userId != uid) return
+        load(context)
+        if (untilMs > (mailAfter ?: Long.MIN_VALUE)) {
+            mailAfter = untilMs
+            save(context)
+        }
+    }
+
     @Synchronized
     fun find(context: Context, id: String): ProactiveOffer? {
         load(context)
@@ -125,6 +147,7 @@ object ProactiveStore {
         runCatching { file(context).delete() }
         claims.clear()
         posted.clear()
+        mailAfter = null
         loadedFor = null
         _offers.value = emptyList()
         _opened.value = null
@@ -134,6 +157,7 @@ object ProactiveStore {
         val json = JSONObject()
             .put("claimed", JSONObject(claims as Map<*, *>))
             .put("posted", JSONArray(posted.toList()))
+            .also { j -> mailAfter?.let { j.put("mailAfter", it) } }
             .put("offers", JSONArray(_offers.value.map { o ->
                 JSONObject().put("id", o.id).put("kind", o.kind.name).put("title", o.title).put("message", o.message)
                     .put("detail", o.detail).put("created", o.createdAtMs).put("begin", o.eventBeginMs)

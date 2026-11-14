@@ -27,7 +27,7 @@ object JarvisNotifications {
         val manager = app.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(OFFER_CHANNEL_ID, "먼저 알려 주기", NotificationManager.IMPORTANCE_DEFAULT)
-                .apply { description = "오늘 미팅과 다가오는 제출·마감 일정을 먼저 챙겨 줘요" },
+                .apply { description = "오늘 미팅, 다가오는 마감, 새로 온 업무 메일, 아침 브리핑을 먼저 챙겨 줘요" },
         )
         fun opener(code: Int) = PendingIntent.getActivity(
             app, code,
@@ -36,10 +36,11 @@ object JarvisNotifications {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         val id = com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore.notificationId(offer)
-        val action = if (offer.kind == com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.OfferKind.MEETING) "정리해 줘" else "모아 줘"
+        val planner = com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner
+        val action = planner.actionLabel(offer.kind)
         val notification = NotificationCompat.Builder(app, OFFER_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentTitle(if (offer.kind == com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.OfferKind.MEETING) "오늘 미팅" else "다가오는 마감")
+            .setContentTitle(planner.kindLabel(offer.kind))
             .setContentText(offer.message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(offer.message))
             .setContentIntent(opener(id))

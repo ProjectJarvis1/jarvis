@@ -16,8 +16,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * Every 15 minutes, even with the app closed: reads the phone calendar and, when it is time, offers to
- * prepare the day's meeting or an upcoming deadline. Reads the calendar on the phone and searches only
- * Jarvis's own server, so it adds no paid API call. Nothing is sent outside 08:00 to 21:00 KST.
+ * prepare the day's meeting or an upcoming deadline, tells about business mail that just arrived (when
+ * Gmail is linked), and once each morning sends the day's briefing. Reads the calendar on the phone and
+ * asks only Jarvis's own server, so it adds no paid API call. Nothing is sent outside 08:00 to 21:00 KST.
  */
 class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -30,10 +31,10 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
         private const val TAG = "ProactiveWorker"
         private const val WORK = "jarvis-proactive"
 
-        /** Starts (or keeps) the periodic check; stops it when the setting is off. */
+        /** Starts (or keeps) the periodic check; stops it when both settings are off. */
         fun schedule(context: Context) {
             val wm = WorkManager.getInstance(context.applicationContext)
-            if (!SettingsManager.proactiveOffersEnabled) {
+            if (!SettingsManager.proactiveOffersEnabled && !SettingsManager.morningBriefingEnabled) {
                 wm.cancelUniqueWork(WORK)
                 return
             }
@@ -48,16 +49,26 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
             JarvisAccount.init(app)
             // The worker can start the app's process on its own; its crashes are kept the same way.
             com.meta.wearable.dat.externalsampleapps.cameraaccess.crash.CrashReporter.install(app)
-            if (!JarvisAccount.isSignedIn || !SettingsManager.proactiveOffersEnabled) return emptyList()
-            if (!MeetingBriefer.hasCalendarPermission(app)) return emptyList()
+            if (!JarvisAccount.isSignedIn) return emptyList()
+            if (!SettingsManager.proactiveOffersEnabled && !SettingsManager.morningBriefingEnabled) return emptyList()
             if (!ProactivePlanner.withinHours(nowMs)) return emptyList()
             val uid = JarvisAccount.userId
             // [nowMs] may be a chosen time (debug); the time spent searching is added to it.
             val startedAt = System.currentTimeMillis()
             fun current() = nowMs + (System.currentTimeMillis() - startedAt)
+            fun sameAccount() = JarvisAccount.isSignedIn && JarvisAccount.userId == uid
 
-            val items = MeetingBriefer.calendarItems(app, nowMs - 24 * 3_600_000L, ProactivePlanner.windowEnd(nowMs))
+            // Without the calendar permission there are no events, but mail offers and the morning briefing still work.
+            val items = if (MeetingBriefer.hasCalendarPermission(app))
+                MeetingBriefer.calendarItems(app, nowMs - 24 * 3_600_000L, ProactivePlanner.windowEnd(nowMs)) else emptyList()
             val sent = mutableListOf<ProactiveOffer>()
+            if (SettingsManager.morningBriefingEnabled) {
+                morningOffer(app, items, nowMs)?.let { (key, o) ->
+                    if (stillWanted() && SettingsManager.morningBriefingEnabled && sameAccount() && ProactivePlanner.withinHours(current()) &&
+                        ProactiveStore.recordAndPost(app, uid, key, o) { JarvisNotifications.postOffer(app, o) }) sent += o
+                }
+            }
+            if (!SettingsManager.proactiveOffersEnabled) return sent
             for (item in items) {
                 // Before each new search: the account may have changed, the switch turned off, the work cancelled.
                 if (JarvisAccount.userId != uid || !JarvisAccount.isSignedIn || !stillWanted() ||
@@ -80,7 +91,51 @@ class ProactiveWorker(context: Context, params: WorkerParameters) : CoroutineWor
                 if (!ProactiveStore.recordAndPost(app, uid, key, o) { JarvisNotifications.postOffer(app, o) }) break
                 sent += o
             }
+            if (stillWanted() && sameAccount()) sent += mailOffers(app, uid, nowMs, ::current, stillWanted)
             return sent
+        }
+
+        /**
+         * Business mail that arrived since the last check (Gmail linked only). Each mail is offered once, within
+         * the day's offer limit; mail over the limit is not offered later. The check point moves on only when
+         * this pass went through, so mail left by a cancelled pass is looked at again next time.
+         */
+        private fun mailOffers(app: Context, uid: String, nowMs: Long, current: () -> Long, stillWanted: () -> Boolean): List<ProactiveOffer> {
+            val result = MailBriefer.newMail(ProactiveStore.mailCursor(app, nowMs)) ?: return emptyList()
+            if (!result.connected) return emptyList()
+            val sent = mutableListOf<ProactiveOffer>()
+            for (mail in result.mails) {
+                if (!stillWanted() || !SettingsManager.proactiveOffersEnabled || !JarvisAccount.isSignedIn ||
+                    JarvisAccount.userId != uid || !ProactivePlanner.withinHours(current())) return sent
+                val claimed = ProactiveStore.claimed(app, nowMs)
+                val key = ProactivePlanner.mailKey(mail.id)
+                if (key in claimed) continue
+                if (ProactivePlanner.sentToday(claimed, nowMs) >= ProactivePlanner.MAX_PER_DAY) break
+                val o = ProactivePlanner.mailOffer(mail, nowMs)
+                if (!ProactiveStore.recordAndPost(app, uid, key, o) { JarvisNotifications.postOffer(app, o) }) return sent
+                sent += o
+            }
+            ProactiveStore.advanceMail(app, uid, result.checkedUntilMs)
+            return sent
+        }
+
+        /**
+         * The day's morning briefing, once, from the chosen time until noon. Null when it is not due, was sent,
+         * or a server call failed (tried again on the next run). Gmail not linked: the briefing goes without mail.
+         */
+        private fun morningOffer(app: Context, items: List<CalendarItem>, nowMs: Long): Pair<String, ProactiveOffer>? {
+            if (!ProactivePlanner.morningDue(nowMs, SettingsManager.morningBriefingMinute)) return null
+            val key = ProactivePlanner.morningKey(nowMs)
+            if (key in ProactiveStore.claimed(app, nowMs)) return null
+            val followups = MailBriefer.followups() ?: return null
+            val mail = MailBriefer.newMail(ProactivePlanner.overnightStart(nowMs))
+            val mails = if (mail?.connected == true) mail.mails else null
+            val today = ProactivePlanner.morningToday(items, nowMs)
+            val deadlines = ProactivePlanner.morningDeadlines(items, nowMs)
+            val detail = ProactivePlanner.morningDetail(items, followups, mails, nowMs, mailFailed = mail == null)
+            val title = "${ProactivePlanner.dateLabel(ProactivePlanner.today(nowMs))} 아침 브리핑"
+            return key to ProactiveOffer("morning-${ProactivePlanner.today(nowMs)}", OfferKind.MORNING, title,
+                ProactivePlanner.morningMessage(today.size, deadlines.size, followups.size, mails?.size), detail, nowMs, nowMs)
         }
 
         /** Offered only when stored records are about this meeting; otherwise there is nothing to sum up. */

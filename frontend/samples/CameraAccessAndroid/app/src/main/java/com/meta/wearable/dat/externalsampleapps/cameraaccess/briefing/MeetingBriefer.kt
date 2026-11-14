@@ -114,7 +114,13 @@ object MeetingBriefer {
         val meetings = if (query.isBlank()) emptyList() else searchMeetings(query)
         val memories = if (query.isBlank()) emptyList() else searchMemories(query)
         // "N분 뒤" counted after the searches, not from when the poll began.
-        return MeetingBriefing.compose(meeting, people, meetings, memories, System.currentTimeMillis())
+        val brief = MeetingBriefing.compose(meeting, people, meetings, memories, System.currentTimeMillis())
+        // Recent mail with the same people (Gmail linked only). A failed mail check leaves the brief as it was.
+        // Only people and companies, never generic title words ("견적" alone would pull in every quote mail).
+        val names = (brief.people + meeting.attendees.map { it.trim().removeSuffix("님").trim() }
+            .filter { it.length >= 2 && '@' !in it }).distinct()
+        val mails = MailBriefer.context(names, brief.orgs)?.map { MailHit(it.sender, it.subject, it.date, it.snippet) }.orEmpty()
+        return MeetingBriefing.withMail(brief, mails)
     }
 
     /** Timed events starting in the next 15 minutes, skipping all-day, canceled and declined ones. */

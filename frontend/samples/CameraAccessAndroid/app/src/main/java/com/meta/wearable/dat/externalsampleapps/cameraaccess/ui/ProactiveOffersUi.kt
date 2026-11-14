@@ -33,7 +33,13 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveS
 
 private val byWord = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase)
 
-private fun kindLabel(offer: ProactiveOffer) = if (offer.kind == OfferKind.MEETING) "오늘 미팅" else "다가오는 마감"
+private fun kindLabel(offer: ProactiveOffer) =
+    com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner.kindLabel(offer.kind)
+
+/** Deadlines stand out in the error color; the other offers use the app's own blue. */
+@Composable
+private fun kindDot(offer: ProactiveOffer) =
+    if (offer.kind == OfferKind.DEADLINE) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
 
 /**
  * What Jarvis offered on its own, newest first, so an offer is still reachable when notifications are off.
@@ -62,7 +68,7 @@ fun ProactiveOfferList(modifier: Modifier = Modifier) {
                 }
                     .padding(horizontal = 14.dp, vertical = 12.dp),
                     horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
-                    Column(Modifier.padding(top = 6.dp)) { JarvisDot(if (offer.kind == OfferKind.MEETING) scheme.primary else scheme.error, 8) }
+                    Column(Modifier.padding(top = 6.dp)) { JarvisDot(kindDot(offer), 8) }
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(kindLabel(offer), style = MaterialTheme.typography.labelMedium, color = scheme.onSurfaceVariant)
                         Text(offer.message, style = MaterialTheme.typography.bodyMedium.copy(lineBreak = byWord))
@@ -84,7 +90,7 @@ fun ProactiveOfferSheet() {
     ModalBottomSheet(onDismissRequest = { ProactiveStore.open(null) }, containerColor = Jarvis.extras.card) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            JarvisStatusChip(kindLabel(current), dot = if (current.kind == OfferKind.MEETING) scheme.primary else scheme.error)
+            JarvisStatusChip(kindLabel(current), dot = kindDot(current))
             Text(current.title, style = MaterialTheme.typography.headlineSmall.copy(lineBreak = byWord))
             val lines = current.detail.lines().filter { it.isNotBlank() }
             // The first line repeats the date and title; the rest is what was found.
