@@ -111,8 +111,6 @@ class GeminiSessionViewModel : ViewModel() {
     /** When the current utterance began, and when the one before it ended. */
     @Volatile private var utteranceStartAt = 0L
     @Volatile private var previousUtteranceAt = 0L
-    /** Jarvis's last finished turn: the question a following "네" can answer. */
-    @Volatile private var lastAsked: VoiceApproval.Asked? = null
     // The visible question stays until the user starts the next turn.
     private var startNewQuestion = true
     private val speechVision = SpeechSyncedVision(
@@ -197,26 +195,6 @@ class GeminiSessionViewModel : ViewModel() {
             if (!VoiceApproval.answersWaitingWrite(waiting.updatedAt, utteranceStartAt, previousAt, newer)) return@launch
             if (takeSpokenApproval()) controlTask(waiting.id, waiting.revision, "approve")
         }
-    }
-
-    /** The value Jarvis must have named when asking about this write; tools without one always show their card. */
-    private fun keyArg(tool: String, args: Map<String, Any?>): String? = when (tool) {
-        "save_person" -> args["name"]
-        "save_memory" -> args["text"]
-        "save_life_memory" -> args["user_note"]
-        "save_meeting", "create_calendar_event", "gcal_create_event" -> args["title"]
-        else -> null
-    }?.toString()
-
-    @Synchronized
-    private fun takeSpokenPreApproval(task: TaskRecord, args: Map<String, Any?>): Boolean {
-        if (lastUtteranceUsed || _uiState.value.pendingContactAction != null) return false
-        val others = taskManager.tasks.value.filter { it.id != task.id }.map { it.createdAt }
-        val calendar = task.tool == "create_calendar_event" || task.tool == "gcal_create_event"
-        val ok = VoiceApproval.preApproves(lastAsked, lastUtterance, utteranceStartAt, previousUtteranceAt, task.createdAt,
-            others, keyArg(task.tool, args), calendar, System.currentTimeMillis())
-        if (ok) lastUtteranceUsed = true
-        return ok
     }
 
     /** Uses up the last utterance as approval, so one "응" never approves two different tasks. */
@@ -474,7 +452,6 @@ class GeminiSessionViewModel : ViewModel() {
         }
 
         geminiService.onTurnComplete = {
-            _uiState.value.aiTranscript.takeIf { it.isNotBlank() }?.let { lastAsked = VoiceApproval.Asked(it, System.currentTimeMillis()) }
             // A question asked during this answer is still waiting for its own.
             awaitingReply = _uiState.value.queuedTranscript.isNotBlank()
             readyForCompletionNotice = true
@@ -1112,10 +1089,10 @@ class GeminiSessionViewModel : ViewModel() {
 
     private suspend fun executeManagedTask(task: TaskRecord, execution: TaskManager.Execution): TaskOutcome {
         val args = parseTaskArgs(task.argsJson)
-        // A "네" said before this write existed only counts when it answered Jarvis's question about exactly
-        // this write (VoiceApproval.preApproves); otherwise it waits on its card, where a "네" to the card's own
-        // question approves it (onUserSpeech).
-        if (needsReview(task.tool) && !task.reviewed && !(task.revision == 1 && takeSpokenPreApproval(task, args))) {
+        // A "네" said before this write existed is never its approval: it may have answered another question
+        // ("이 분 이윤아 님 맞나요?"). Every write waits on its card; a "네" to the card's own question, or a tap,
+        // approves it (onUserSpeech).
+        if (needsReview(task.tool) && !task.reviewed) {
             val external = ExternalTools.isExternal(task.tool)
             return TaskOutcome(result = if (external)
                 "아직 실행하지 않았습니다. 화면에 확인 카드를 띄웠습니다. 사용자가 '확인'이라고 말하거나 카드의 확인을 누르면 실행됩니다. 같은 확인을 다시 묻지 말고 한 문장으로만 안내한 뒤 기다리세요."
