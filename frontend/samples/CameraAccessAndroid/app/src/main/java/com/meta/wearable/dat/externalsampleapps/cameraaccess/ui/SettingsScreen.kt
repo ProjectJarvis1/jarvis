@@ -382,7 +382,12 @@ private fun ServiceConnectionsSection(onServer: (Boolean) -> Unit) {
         AlertDialog(
             onDismissRequest = { confirmDisconnect = null },
             title = { Text("${service.label} 연결을 해제할까요?") },
-            text = { Text("Jarvis가 더 이상 ${service.label}에 접근하지 않아요. 언제든 다시 연결할 수 있어요.") },
+            text = { Text(when (service) {
+                // Gmail rides on the Google connection, so removing Google ends mail access too.
+                Service.GOOGLE -> "Jarvis가 더 이상 구글 캘린더와 지메일에 접근하지 않아요. 언제든 다시 연결할 수 있어요."
+                Service.GMAIL -> "Jarvis가 더 이상 메일을 읽지 않아요. 구글 캘린더 연결은 그대로 남아요."
+                else -> "Jarvis가 더 이상 ${service.label}에 접근하지 않아요. 언제든 다시 연결할 수 있어요."
+            }) },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDisconnect = null

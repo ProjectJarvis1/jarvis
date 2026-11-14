@@ -284,7 +284,9 @@ def test_service_sign_in_finishing_after_account_deletion_keeps_no_tokens(api):
         _upsert_integration(user_id="u_deleted_" + str(uuid4())[:6], provider="google", access_token="tok")
     _upsert_integration(user_id="default", provider="google", access_token="tok-live")
     with get_conn() as conn:
-        assert conn.execute("SELECT access_token_encrypted FROM user_integrations WHERE user_id='default' AND provider='google'").fetchone()["access_token_encrypted"] == "tok-live"
+        from app import token_crypto  # stored encrypted when TOKEN_ENCRYPTION_KEY is set
+        stored = conn.execute("SELECT access_token_encrypted FROM user_integrations WHERE user_id='default' AND provider='google'").fetchone()["access_token_encrypted"]
+        assert token_crypto.decrypt(stored) == "tok-live"
         conn.execute("DELETE FROM user_integrations WHERE user_id='default' AND provider='google'")
         conn.commit()
 

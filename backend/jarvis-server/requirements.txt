@@ -8,6 +8,7 @@ python-dotenv>=1.0
 numpy>=1.26
 openai>=1.68
 httpx>=0.27
+cryptography>=42  # 연결 토큰 암호화(app/token_crypto.py)
 google-auth>=2.30  # 앱 구글 로그인 확인(app/routers/account.py)
 requests>=2.31  # google-auth 의 공개키 받아오기
 websockets>=14  # Gemini Live 중계(app/routers/gemini_relay.py)

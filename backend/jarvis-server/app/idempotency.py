@@ -58,6 +58,22 @@ def eligible(method, path):
     } or (path.startswith("/assistant/changes/") and path.endswith(("/apply", "/undo"))))
 
 
+# 결과를 서버에 남기면 안 되는 읽기 도구. 메일 본문이 request_receipts 에 저장되거나, 지메일을 끈 뒤에
+# 저장된 응답으로 다시 나오면 안 된다. 읽기라 같은 요청을 다시 실행해도 안전하다.
+NO_RECEIPT_TOOLS = frozenset({"gmail_search", "gmail_read_thread"})
+
+
+def no_receipt(path: str, body: bytes) -> bool:
+    if path != "/mcp":
+        return False
+    try:
+        request = json.loads(body or b"{}")
+    except ValueError:
+        return False
+    params = request.get("params") if isinstance(request, dict) else None
+    return isinstance(params, dict) and params.get("name") in NO_RECEIPT_TOOLS
+
+
 class IdempotencyMiddleware:
     def __init__(self, app):
         self.app = app
@@ -88,6 +104,18 @@ class IdempotencyMiddleware:
                 return await JSONResponse({"detail": "Request too large"}, 413)(scope, receive, send)
             if not message.get("more_body", False):
                 break
+        if no_receipt(scope["path"], bytes(body)):
+            delivered = False
+            async def pass_receive():
+                nonlocal delivered
+                if not delivered:
+                    delivered = True
+                    return {"type": "http.request", "body": bytes(body), "more_body": False}
+                return await receive()
+            try:
+                return await self.app(scope, pass_receive, send)
+            finally:
+                current_user.reset(user_token)
         from .config import settings
         # Receipts are per user: one user's key never replays another user's response. The admin keeps
         # the owner value used before sign-in existed, so a write retried across the upgrade still replays.
