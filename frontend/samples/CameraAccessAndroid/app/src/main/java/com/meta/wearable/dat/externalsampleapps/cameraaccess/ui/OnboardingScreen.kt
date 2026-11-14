@@ -217,6 +217,6 @@ private fun FirstWords(byWord: LineBreak) {
     Spacer(Modifier.height(16.dp))
     val glasses = com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig.GLASSES
     Text(if (glasses) "스마트 안경은 홈에서 연결할 수 있어요. 안경이 없어도 휴대폰으로 바로 쓸 수 있어요."
-        else "지원하는 스마트 안경이 있으면 나중에 연결해 함께 쓸 수 있어요.",
+        else "이 버전은 휴대폰 전용이에요. 스마트 안경은 안경 지원 버전에서 연결할 수 있어요.",
         style = MaterialTheme.typography.bodySmall.copy(lineBreak = byWord), color = MaterialTheme.colorScheme.onSurfaceVariant)
 }

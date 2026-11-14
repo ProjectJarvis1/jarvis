@@ -962,6 +962,8 @@ class GeminiSessionViewModel : ViewModel() {
                 // Opens the mail app's compose screen only; the user sends it there. Nothing is kept or sent here.
                 val draft = MailDraft.from(call.args["to"]?.toString(), call.args["subject"]?.toString(), call.args["body"]?.toString())
                     .getOrElse { return ToolResult.Failure(it.message ?: "답장 초안을 만들 수 없습니다.") }
+                // No mail app: nothing was opened, so it fails before being marked as sent out and can be retried.
+                if (!MailComposer.canOpen()) return ToolResult.Failure("이 휴대폰에서 메일 앱을 찾지 못했습니다. 메일 앱을 설치한 뒤 다시 확인해 주세요.")
                 execution.beforeExternalEffect()
                 withContext(Dispatchers.Main) { MailComposer.open(draft) }
             }

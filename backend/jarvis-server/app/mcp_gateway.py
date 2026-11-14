@@ -438,6 +438,7 @@ class McpGateway:
         self.admin_user = admin_user
         self._token = _per_user(token_provider, admin_user)
         self._sessions: dict[str, dict[str, _Connection]] = {}
+        self._gen: dict[str, int] = {}  # 사용자별 세대. close_user 가 올리면 그 전에 시작한 준비는 연결을 열지 못한다
         self._admit_lock: Optional[asyncio.Lock] = None  # 상한 확인, 정리, 시작을 한 번에 하나씩(이벤트 루프 안에서 만든다)
         # 관리자 연결(예전의 서버 하나짜리 연결). 시험과 상태 확인이 이 이름으로 본다.
         self.connections = self._user_conns(admin_user)
@@ -468,12 +469,19 @@ class McpGateway:
         await self._close(idle[0])
         return True
 
-    async def _admit(self, conn: _Connection, fingerprint: Optional[str] = None) -> bool:
-        """연결을 연다. 상한 확인, 오래된 연결 정리, 시작을 잠금 하나로 묶어 동시에 들어온 요청들이 같은 자리를
-        나눠 갖고 상한을 넘기지 않게 한다. 이미 열려 있으면 그대로 둔다."""
+    def _lock(self) -> asyncio.Lock:
         if self._admit_lock is None:
             self._admit_lock = asyncio.Lock()
-        async with self._admit_lock:
+        return self._admit_lock
+
+    async def _admit(self, conn: _Connection, fingerprint: Optional[str] = None, gen: Optional[int] = None) -> bool:
+        """연결을 연다. 상한 확인, 오래된 연결 정리, 시작을 잠금 하나로 묶어 동시에 들어온 요청들이 같은 자리를
+        나눠 갖고 상한을 넘기지 않게 한다. 이미 열려 있으면 그대로 둔다."""
+        async with self._lock():
+            # 닫힌 뒤(연결 해제, 계정 삭제)에 끝난 준비는 열지 않는다: 세대가 바뀌었거나 더 이상 관리하는 연결이 아니면.
+            if (gen is not None and self._gen.get(conn.user, 0) != gen) or \
+                    (self._sessions.get(conn.user) or {}).get(conn.cfg.name) is not conn:
+                return False
             if conn.running:
                 return True
             if not await self._make_room():
@@ -495,6 +503,7 @@ class McpGateway:
     async def ensure_user(self, user: str, wait_s: float = USER_WAIT_S) -> None:
         """이 사용자의 연결 가운데 키가 있는 것을 연다(이미 열려 있으면 그대로). 새로 연 연결은 wait_s 까지 기다린다.
         키가 없어졌거나 바뀐 연결은 닫거나 다시 연다."""
+        gen = self._gen.get(user, 0)
         conns = self._user_conns(user)
         checks = await _isolated(lambda: {n: (c.credentials_present(), c.credential_fingerprint())
                                           for n, c in conns.items()})
@@ -508,7 +517,7 @@ class McpGateway:
             if conn.running and fingerprint != conn.fingerprint:
                 await self._close(conn)
             if not conn.running and ok:
-                await self._admit(conn, fingerprint)
+                await self._admit(conn, fingerprint, gen)
         pending = [asyncio.create_task(c.ready.wait()) for c in conns.values() if c.running and not c.ready.is_set()]
         if pending:
             _, late = await asyncio.wait(pending, timeout=wait_s)
@@ -517,13 +526,15 @@ class McpGateway:
 
     async def close_user(self, user: str, auths: Optional[set[str]] = None) -> None:
         """사용자의 연결을 바로 닫는다(연결 해제, 계정 삭제). auths 를 주면 그 계정 연결을 쓰는 서버만 닫는다."""
-        conns = self._sessions.get(user) or {}
-        for conn in conns.values():
-            used = {conn.cfg.auth} | {v.partition("|db:")[2] for v in conn.cfg.env.values()}
-            if auths is None or used & auths:
-                await self._close(conn)
-        if auths is None and user != self.admin_user:
-            self._sessions.pop(user, None)
+        async with self._lock():
+            self._gen[user] = self._gen.get(user, 0) + 1
+            conns = self._sessions.get(user) or {}
+            for conn in conns.values():
+                used = {conn.cfg.auth} | {v.partition("|db:")[2] for v in conn.cfg.env.values()}
+                if auths is None or used & auths:
+                    await self._close(conn)
+            if auths is None and user != self.admin_user:
+                self._sessions.pop(user, None)
 
     async def _reconnect(self) -> None:
         conns = self._all_conns()
@@ -629,6 +640,7 @@ class McpGateway:
         except (KeyError, TypeError, ValueError) as exc:
             return {"is_error": True, "error": f"{tool.title} 입력이 올바르지 않습니다: {exc}"}
         args = {**tool.fixed, **args}
+        gen = self._gen.get(user, 0)
         conn = self._user_conns(user)[tool.server]
         if not conn.running:
             # 키가 없으면 남의 키나 빈 키로 연결하지 않고, 연결이 필요하다고 돌려준다(아무것도 실행하지 않음).
@@ -636,7 +648,10 @@ class McpGateway:
                 return {"is_error": True, "needs_auth": True,
                         "error": f"{tool.title}: 계정 연결이 필요합니다. 앱 설정의 서비스 연결에서 연결해 달라고 안내하세요."}
             conn = self._user_conns(user)[tool.server]
-            if not await self._admit(conn):
+            if not await self._admit(conn, gen=gen):
+                if self._gen.get(user, 0) != gen:  # 그사이 연결 해제나 계정 삭제
+                    return {"is_error": True, "needs_auth": True,
+                            "error": f"{tool.title}: 연결이 해제되었습니다. 다시 연결해 달라고 안내하세요."}
                 return {"is_error": True, "error": f"{tool.title}: 지금은 연결이 많아 잠시 뒤에 다시 시도해 주세요."}
         try:
             result = await conn.call(tool.upstream, args)

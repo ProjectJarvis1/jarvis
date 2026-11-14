@@ -64,6 +64,14 @@ data class MailDraft(val to: String, val subject: String, val body: String) {
 object MailComposer {
     private const val GMAIL = "com.google.android.gm"
 
+    /** True when some app can compose mail. Checked before anything is marked as sent out, so a phone without one
+     *  fails cleanly and the draft can be tried again after a mail app is installed. */
+    fun canOpen(): Boolean {
+        val context = AppContextProvider.require()
+        val probe = Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:"))
+        return probe.resolveActivity(context.packageManager) != null
+    }
+
     /** Opens the compose screen (Gmail first, any mail app otherwise). Nothing is sent from here. */
     fun open(d: MailDraft): ToolResult {
         val context = AppContextProvider.require()

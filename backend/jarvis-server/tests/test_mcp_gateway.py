@@ -414,3 +414,29 @@ def test_token_lookup_does_not_see_the_request_context(tmp_path, monkeypatch):
         assert seen and all(v is None for v in seen)
 
     asyncio.run(run())
+
+
+def test_closing_a_user_cancels_a_connection_still_being_prepared(tmp_path, monkeypatch):
+    import threading
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+    entered, release = threading.Event(), threading.Event()
+
+    def provider(auth, user):
+        if user == "alice" and not release.is_set():
+            entered.set()
+            release.wait(10)
+        return _TOKENS.get(user) if auth == "fake" else None
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), provider)
+        task = asyncio.create_task(gw.ensure_user("alice", wait_s=1))
+        await asyncio.to_thread(entered.wait, 10)  # 키를 읽는 중에
+        prepared = gw._user_conns("alice")["fake"]  # 그 준비가 들고 있는 연결(관리 목록에서 빠질 것)
+        await gw.close_user("alice")              # 계정이 지워짐
+        release.set()
+        await task
+        assert not prepared.running  # 관리 밖에 남는 연결이 생기지 않음
+        assert not any(c.running for c in gw._all_conns())
+        await gw.stop()
+
+    asyncio.run(run())
