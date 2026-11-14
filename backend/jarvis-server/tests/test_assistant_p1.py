@@ -240,7 +240,7 @@ def test_new_mail_offers_only_business_mail_with_prep(api, monkeypatch):
     assert offer["prep"][0] == "메일 요점: 다음 주 화요일 기술협상에 참석 부탁드립니다 & 자료"
     assert any("대성테크 견적 미팅" in line for line in offer["prep"]) or any("주간 미팅" in line for line in offer["prep"])
     assert any("주간 미팅" in line for line in offer["prep"])
-    assert any(line == "아직 남은 할 일: 수정 견적서 보내기 (다음 주)" for line in offer["prep"])
+    assert any(line == "그때 정한 할 일: 수정 견적서 보내기 (다음 주)" for line in offer["prep"])
     assert r["checked_until_ms"] == now - 30_000
     # 다른 사용자에게는 이 사람과 회의가 보이지 않는다(회사 이름으로 맞추지 못하고 업무 단어로만 고른다).
     other = client.get("/briefing/mail/new", params={"after_ms": now - 3_600_000}, headers=auth(users, "p1a")).json()

@@ -145,4 +145,12 @@ class AssistantP1Test {
         assertEquals(listOf("김민수" to "한빛정밀"), brief.contacts)
         assertTrue(brief.ambiguous.isEmpty())
     }
+
+    @Test
+    fun aliasesOfResolvedPeopleAreKnown() {
+        val meeting = UpcomingMeeting("k", "정기 미팅", kst(2026, 11, 13, 14), attendees = listOf("김팀장"))
+        val brief = MeetingBriefing.compose(meeting, listOf(PersonHit("김민수", "한빛정밀", aliases = listOf("김팀장"))),
+            emptyList(), emptyList(), kst(2026, 11, 13, 13, 52))
+        assertTrue("김팀장" in brief.resolvedNames)
+    }
 }

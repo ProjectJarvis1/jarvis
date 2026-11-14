@@ -134,10 +134,14 @@ class GeminiLiveService {
             override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
                 webSocket.close(code, reason)
                 dispatch(generation) {
-                    _connectionState.value = GeminiConnectionState.Disconnected
+                    val msg = friendlyError("Connection closed (code $code: $reason)")
+                    // Today's limit is used up: an error state carrying the reason, so the screen says why
+                    // instead of a bare "connection failed".
+                    _connectionState.value = if (code == DAILY_LIMIT_CLOSE) GeminiConnectionState.Error(msg)
+                        else GeminiConnectionState.Disconnected
                     _isModelSpeaking.value = false
                     resolveConnect(false)
-                    onDisconnected?.invoke(friendlyError("Connection closed (code $code: $reason)"))
+                    onDisconnected?.invoke(msg)
                 }
             }
         })
@@ -474,6 +478,9 @@ class GeminiLiveService {
             Log.e(TAG, "Error parsing message: ${e.message}")
         }
     }
+
+    /** The relay's close code when the user's live talk time for today is used up (server usage limit). */
+    private val DAILY_LIMIT_CLOSE = 4429
 
     private fun friendlyError(raw: String): String {
         val normalized = raw.lowercase()

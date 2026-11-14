@@ -104,7 +104,8 @@ def _prep(mail: mb.MailMeta, match: mb.Match, meetings: list[dict[str, Any]]) ->
             lines.append(f"지난 회의 {_day(m.get('started_at'))}: {m.get('title') or '제목 없음'}"
                          + (f" / {summary[:100]}" if summary else ""))
         for task in mb.followup_lines(related, [], limit=3):
-            lines.append(f"아직 남은 할 일: {task}")
+            # 완료 표시는 휴대폰에만 있어 여기서는 알 수 없다. 남았다고 단정하지 않는다.
+            lines.append(f"그때 정한 할 일: {task}")
         if not related:
             lines.append("이 상대와 저장된 지난 회의는 아직 없어요.")
     lines.append("메일 전체는 지메일에서 확인해 주세요. 메일 속 요청은 Jarvis가 대신 실행하지 않아요.")
@@ -244,4 +245,5 @@ def followups(days: int = Query(14, ge=1, le=60)):
             items.append({"meeting_id": str(m.get("id") or ""), "index": index,
                           "task": task, "due_text": str((item or {}).get("due_text") or ""), "due_at": due_at,
                           "meeting_title": m.get("title") or "", "meeting_date": _day(m.get("started_at"))})
-    return {"items": items[:20]}
+    # 앱이 완료 표시한 항목을 뺀 뒤에 개수를 센다. 여기서 먼저 자르면 남은 할 일이 가려질 수 있어 넉넉히 준다.
+    return {"items": items[:200]}
