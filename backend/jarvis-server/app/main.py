@@ -32,10 +32,22 @@ from .routers import (
 )
 
 
+def _check_token_key() -> None:
+    """연결 토큰 암호화 키 점검. 운영(ADMIN_EMAIL 설정)에서 키가 없거나 DB 의 암호문을 못 풀면 서버를 띄우지 않는다."""
+    from . import token_crypto
+    from .db import get_conn
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT access_token_encrypted AS v FROM user_integrations "
+            "WHERE access_token_encrypted LIKE %s LIMIT 1", (token_crypto.PREFIX + "%",)).fetchone()
+    token_crypto.check_on_startup(row["v"] if row else None)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     open_pool()
     ensure_schema()
+    _check_token_key()
     from . import mcp_gateway
     from .mcp_tools import integration_token
 

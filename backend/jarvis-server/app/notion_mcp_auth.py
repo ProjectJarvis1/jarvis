@@ -19,6 +19,7 @@ from typing import Any, Optional
 
 from psycopg.types.json import Jsonb
 
+from . import token_crypto
 from .config import settings
 from .db import get_conn
 
@@ -61,7 +62,8 @@ def _stored_client() -> Optional[dict[str, Any]]:
             row = cur.fetchone()
     if not row or (row["metadata"] or {}).get("redirect_uri") != redirect_uri():
         return None
-    return {"client_id": row["access_token_encrypted"], "client_secret": (row["metadata"] or {}).get("client_secret")}
+    return {"client_id": token_crypto.decrypt(row["access_token_encrypted"]),
+            "client_secret": token_crypto.decrypt((row["metadata"] or {}).get("client_secret"))}
 
 
 def _client() -> dict[str, Any]:
@@ -86,8 +88,8 @@ def _client() -> dict[str, Any]:
                 ON CONFLICT (user_id, provider) DO UPDATE SET
                     access_token_encrypted = EXCLUDED.access_token_encrypted, metadata = EXCLUDED.metadata, updated_at = now()
                 """,
-                (*_CLIENT_ROW, data["client_id"],
-                 Jsonb({"client_secret": data.get("client_secret"), "redirect_uri": redirect_uri()})),
+                (*_CLIENT_ROW, token_crypto.encrypt(data["client_id"]),
+                 Jsonb({"client_secret": token_crypto.encrypt(data.get("client_secret")), "redirect_uri": redirect_uri()})),
             )
         conn.commit()
     return {"client_id": data["client_id"], "client_secret": data.get("client_secret")}
@@ -130,7 +132,8 @@ def _save_tokens(user_id: str, data: dict[str, Any]) -> None:
                     metadata = user_integrations.metadata || EXCLUDED.metadata,
                     updated_at = now()
                 """,
-                (user_id, data["access_token"], data.get("refresh_token"), (data.get("scope") or "").split(),
+                (user_id, token_crypto.encrypt(data["access_token"]), token_crypto.encrypt(data.get("refresh_token")),
+                 (data.get("scope") or "").split(),
                  Jsonb({"expires_at": expires_at})),
             )
         conn.commit()

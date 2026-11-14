@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from psycopg.types.json import Jsonb
 
+from . import token_crypto
 from .config import settings
 from .db import get_conn
 
@@ -90,6 +91,9 @@ def _integration_token(user_id: str, provider: str) -> Optional[str]:
             row = cur.fetchone()
     if not row:
         return None
+    # 저장된 토큰은 암호문이다(예전 줄은 평문일 수 있음). 여기서 풀어서 넘긴다.
+    row = {**row, "access_token_encrypted": token_crypto.decrypt(row["access_token_encrypted"]),
+           "refresh_token_encrypted": token_crypto.decrypt(row.get("refresh_token_encrypted"))}
     if provider == "google":
         return _fresh_google_token(user_id, row)
     if provider == "notion_mcp":
@@ -128,7 +132,7 @@ def _fresh_google_token(user_id: str, row: dict[str, Any]) -> Optional[str]:
                     updated_at = now()
                 WHERE user_id = %s AND provider = 'google'
                 """,
-                (token, Jsonb({"expires_at": new_expiry}), user_id),
+                (token_crypto.encrypt(token), Jsonb({"expires_at": new_expiry}), user_id),
             )
         conn.commit()
     return token
@@ -138,6 +142,10 @@ def integration_token(provider: str, user_id: str = "default") -> Optional[str]:
     """외부 MCP 연결(mcp_gateway)이 쓰는 토큰 조회. 실패하면 None."""
     try:
         return _integration_token(user_id, provider)
+    except token_crypto.TokenKeyError as exc:
+        import logging
+        logging.getLogger("jarvis.tokens").error("연결 토큰을 풀지 못함(%s): %s", provider, exc)
+        return None
     except Exception:
         return None
 

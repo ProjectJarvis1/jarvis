@@ -15,6 +15,7 @@ from .. import notion_mcp_auth
 from ..auth import require_api_key
 from ..auth import user_id as current_user_id
 from ..config import settings
+from .. import token_crypto
 from ..db import get_conn
 from ..mcp_tools import CALENDAR_SCOPE, GMAIL_SCOPE, calendar_active, gmail_active
 
@@ -77,8 +78,8 @@ def _upsert_integration(
                 (
                     user_id,
                     provider,
-                    access_token,
-                    refresh_token,
+                    token_crypto.encrypt(access_token),
+                    token_crypto.encrypt(refresh_token),
                     scopes or [],
                     Jsonb(metadata or {}),
                 ),
