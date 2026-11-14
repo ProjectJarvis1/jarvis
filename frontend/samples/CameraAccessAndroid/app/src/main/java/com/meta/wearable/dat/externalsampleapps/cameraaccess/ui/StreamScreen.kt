@@ -576,7 +576,8 @@ fun StreamScreen(
             geminiViewModel.pendingSave(taskRecords)?.let { save -> item(key = "save-${save.id}-${save.revision}") {
                 SaveConfirmCard(save, onSave = { geminiViewModel.controlTask(save.id, save.revision, "approve") },
                     onCancel = { geminiViewModel.controlTask(save.id, save.revision, "cancel") },
-                    loadChange = geminiViewModel::readChange)
+                    loadChange = geminiViewModel::readChange,
+                    onPreviewShown = { shown -> geminiViewModel.setRecordPreviewShown(save.id, save.revision, shown) })
             } }
             if (geminiUiState.userTranscript.isNotBlank()) item {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -735,10 +736,11 @@ private fun ContactActionConfirmCard(
 /** Shown the moment Jarvis waits on a save, so the user can tap or just say "확인". */
 @Composable
 private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskRecord, onSave: () -> Unit, onCancel: () -> Unit,
-    loadChange: suspend (String) -> org.json.JSONObject) {
+    loadChange: suspend (String) -> org.json.JSONObject, onPreviewShown: (Boolean) -> Unit = {}) {
     val args = remember(task.argsJson) { runCatching { org.json.JSONObject(task.argsJson) }.getOrNull() }
     if (task.tool == "apply_record_change" || task.tool == "undo_record_change") {
-        RecordChangeCard(task.tool == "undo_record_change", args?.optString("change_id").orEmpty(), onSave, onCancel, loadChange)
+        RecordChangeCard(task.tool == "undo_record_change", args?.optString("change_id").orEmpty(), onSave, onCancel, loadChange,
+            onPreviewShown)
         return
     }
     fun arg(key: String) = args?.optString(key)?.takeIf { it.isNotBlank() && it != "null" }
@@ -781,12 +783,16 @@ private fun SaveConfirmCard(task: com.meta.wearable.dat.externalsampleapps.camer
  */
 @Composable
 private fun RecordChangeCard(undo: Boolean, changeId: String, onApprove: () -> Unit, onCancel: () -> Unit,
-    loadChange: suspend (String) -> org.json.JSONObject) {
+    loadChange: suspend (String) -> org.json.JSONObject, onPreviewShown: (Boolean) -> Unit = {}) {
     var change by remember(changeId) { mutableStateOf<org.json.JSONObject?>(null) }
     var failed by remember(changeId) { mutableStateOf<String?>(null) }
     LaunchedEffect(changeId) {
-        runCatching { loadChange(changeId) }.onSuccess { change = it }.onFailure { failed = it.message ?: "변경 내용을 불러오지 못했어요." }
+        onPreviewShown(false)
+        runCatching { loadChange(changeId) }.onSuccess { change = it; onPreviewShown(true) }
+            .onFailure { failed = it.message ?: "변경 내용을 불러오지 못했어요."; onPreviewShown(false) }
     }
+    // Off screen, the preview is no longer in front of the user: a spoken "확인" stops counting (D70).
+    androidx.compose.runtime.DisposableEffect(changeId) { onDispose { onPreviewShown(false) } }
     val loaded = change
     val noun = when (loaded?.optString("kind")) { "person" -> "사람 정보를"; "meeting" -> "회의 기록을"; else -> "기억을" }
     val delete = loaded?.optJSONObject("after_data")?.optString("action") == "delete"

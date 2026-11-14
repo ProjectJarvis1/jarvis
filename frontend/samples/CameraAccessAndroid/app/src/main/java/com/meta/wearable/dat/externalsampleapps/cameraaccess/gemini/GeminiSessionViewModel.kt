@@ -190,9 +190,13 @@ class GeminiSessionViewModel : ViewModel() {
             delay(700L) // wait for the rest of the sentence before judging it a plain yes
             val tasks = taskManager.tasks.value
             val waiting = pendingSave(tasks) ?: return@launch
+            // A record change takes a spoken yes only after its card showed the preview of this revision (D70).
+            val shown = shownPreviews[waiting.id]
+            val presentedAt = VoiceApproval.presentedAtForVoice(waiting.tool, waiting.revision, waiting.updatedAt,
+                shown?.first, shown?.second) ?: return@launch
             // The "네" must answer this write's own question (this id and revision), not a later one about something else.
             val newer = tasks.filter { it.id != waiting.id }.map { it.createdAt }
-            if (!VoiceApproval.answersWaitingWrite(waiting.updatedAt, utteranceStartAt, previousAt, newer)) return@launch
+            if (!VoiceApproval.answersWaitingWrite(presentedAt, utteranceStartAt, previousAt, newer)) return@launch
             if (takeSpokenApproval()) controlTask(waiting.id, waiting.revision, "approve")
         }
     }
@@ -218,6 +222,15 @@ class GeminiSessionViewModel : ViewModel() {
         .maxByOrNull { it.createdAt }
 
     private var voiceApprovalJob: Job? = null
+
+    /** Record changes whose card shows the server's preview now: task id to (revision, when it appeared). */
+    private val shownPreviews = java.util.concurrent.ConcurrentHashMap<String, Pair<Int, Long>>()
+
+    /** The record-change card reports whether it shows the preview of [revision] (false: loading, failed or gone). */
+    fun setRecordPreviewShown(id: String, revision: Int, shown: Boolean) {
+        if (shown) shownPreviews[id] = revision to System.currentTimeMillis()
+        else shownPreviews.remove(id, shownPreviews[id]?.takeIf { it.first == revision } ?: return)
+    }
     private val reviewTools = setOf("save_memory", "save_life_memory", "save_person", "save_meeting", "save_need",
         "apply_record_change", "undo_record_change", "create_calendar_event")
     /** Saves, record changes and outside-service writes (Slack post, Notion append) wait for "확인". */

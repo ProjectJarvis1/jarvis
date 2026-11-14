@@ -2,6 +2,8 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class VoiceApprovalTest {
@@ -29,5 +31,21 @@ class VoiceApprovalTest {
         assertFalse(VoiceApproval.answersWaitingWrite(shown, shown + 9_000, previousUtteranceAt = shown + 4_000, newerTaskCreatedAts = emptyList()))
         // Arguments edited after the "네": the new revision went on screen after it was said.
         assertFalse(VoiceApproval.answersWaitingWrite(presentedAt = shown + 6_000, utteranceAt = shown + 4_000, previousUtteranceAt = 98_000, newerTaskCreatedAts = emptyList()))
+    }
+
+    @Test
+    fun recordChangeTakesVoiceOnlyOnceItsPreviewIsShown() {
+        val v = VoiceApproval
+        // Not loaded yet, failed, or never shown: only a tap.
+        assertNull(v.presentedAtForVoice("apply_record_change", 2, 1_000L, null, null))
+        assertNull(v.presentedAtForVoice("undo_record_change", 2, 1_000L, null, null))
+        // Shown for an older revision (edited since): not this preview.
+        assertNull(v.presentedAtForVoice("apply_record_change", 2, 1_000L, 1, 1_500L))
+        // Shown: the answer window starts when the preview appeared, not when the task was made.
+        assertEquals(5_000L, v.presentedAtForVoice("apply_record_change", 2, 1_000L, 2, 5_000L))
+        assertFalse(v.answersWaitingWrite(5_000L, 4_000L, 0L, emptyList()))  // a yes said before the preview
+        assertTrue(v.answersWaitingWrite(5_000L, 6_000L, 0L, emptyList()))
+        // Other saves are unchanged.
+        assertEquals(1_000L, v.presentedAtForVoice("save_person", 2, 1_000L, null, null))
     }
 }

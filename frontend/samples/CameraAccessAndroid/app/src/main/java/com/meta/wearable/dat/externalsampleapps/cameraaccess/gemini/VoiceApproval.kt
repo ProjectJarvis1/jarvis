@@ -33,6 +33,21 @@ object VoiceApproval {
         return newerTaskCreatedAts.none { it > presentedAt }
     }
 
+    /** Record edits and their undo, approved on the server's preview of what they change (D70). */
+    val RECORD_CHANGE_TOOLS = setOf("apply_record_change", "undo_record_change")
+
+    /**
+     * When a spoken yes may count for [tool] at [revision], the moment its question was put; null when only a tap
+     * may approve it. A record change is approved on its preview: a voice yes counts only once the card has shown
+     * the preview of this very revision ([shownRevision], at [shownAt]), and its answer window starts then. Not
+     * loaded yet, failed to load, or never shown (card off screen): null, and the card's button is the only way.
+     */
+    fun presentedAtForVoice(tool: String, revision: Int, presentedAt: Long, shownRevision: Int?, shownAt: Long?): Long? {
+        if (tool !in RECORD_CHANGE_TOOLS) return presentedAt
+        if (shownRevision != revision || shownAt == null) return null
+        return maxOf(presentedAt, shownAt)
+    }
+
     const val LATE_TRANSCRIPT_MS = 3_000L
     const val ANSWER_WINDOW_MS = 20_000L
 
