@@ -340,3 +340,36 @@ def test_mail_reads_are_not_stored_as_receipts():
     assert idempotency.no_receipt("/mcp", read)
     assert not idempotency.no_receipt("/mcp", send)  # 쓰기는 그대로 저장해 두 번 실행을 막는다
     assert not idempotency.no_receipt("/people", read) and not idempotency.no_receipt("/mcp", b"not json")
+
+
+def _http_error(code, body):
+    import io
+    import urllib.error
+    return urllib.error.HTTPError("https://gmail.googleapis.com/x", code, "err", {}, io.BytesIO(json.dumps(body).encode()))
+
+
+def test_403_quota_is_not_a_reconnect(monkeypatch):
+    conn = use_rows(monkeypatch, t, [])
+    quota = _http_error(403, {"error": {"code": 403, "errors": [{"reason": "rateLimitExceeded"}]}})
+    result = t._gmail_http_error(quota, "u1")
+    assert result["is_error"] and "한도" in result["error"] and not result.get("needs_auth")
+    off = _http_error(403, {"error": {"code": 403, "status": "PERMISSION_DENIED", "details": [{"reason": "SERVICE_DISABLED"}]}})
+    assert "Gmail API" in t._gmail_http_error(off, "u1")["error"]
+    assert conn.sql == []  # 한도, API 꺼짐은 연결 상태를 바꾸지 않는다
+    denied = _http_error(403, {"error": {"code": 403, "errors": [{"reason": "insufficientPermissions"}]}})
+    assert t._gmail_http_error(denied, "u1")["needs_auth"]
+    assert conn.sql and conn.sql[-1][1][0].obj == {"needs_reconnect": True}
+
+
+def test_rejected_token_shows_connect_button_until_reconnected(monkeypatch):
+    monkeypatch.setattr(integ, "current_user_id", lambda: "u1")
+    row = {"provider": "google", "scopes": [integ._CALENDAR_SCOPE, t.GMAIL_SCOPE],
+           "metadata": {"gmail_enabled": True, "needs_reconnect": True}, "updated_at": None}
+    use_rows(monkeypatch, integ, [row])
+    services = integ.status()["services"]
+    assert not services["gmail"]["connected"] and not services["google"]["connected"]
+    saved = []
+    monkeypatch.setattr(integ, "_upsert_integration", lambda **kw: saved.append(kw))
+    monkeypatch.setattr(integ, "_form_post", lambda *a, **k: {"access_token": "a", "scope": f"{integ._CALENDAR_SCOPE} {t.GMAIL_SCOPE}"})
+    integ.callback("google", "code", _state("gmail"))
+    assert saved[0]["metadata"]["needs_reconnect"] is False and saved[0]["metadata"]["gmail_enabled"] is True

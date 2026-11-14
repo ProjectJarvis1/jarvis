@@ -274,7 +274,8 @@ def callback(provider: str, code: str = Query(...), state: str = Query(...)):
             raise HTTPException(400, f"google token exchange failed: {data}")
         granted = (data.get("scope") or "").split()
         metadata = {"token_type": data.get("token_type"), "expires_in": data.get("expires_in"),
-                    "expires_at": time.time() + float(data.get("expires_in") or 3600)}
+                    "expires_at": time.time() + float(data.get("expires_in") or 3600),
+                    "needs_reconnect": False}
         if requested == "gmail":
             # 지메일을 켜는 건 지메일 연결뿐이다. 캘린더 연결은 이 값을 건드리지 않아 예전 선택이 남는다.
             metadata["gmail_enabled"] = GMAIL_SCOPE in granted

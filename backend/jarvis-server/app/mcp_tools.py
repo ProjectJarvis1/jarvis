@@ -371,17 +371,34 @@ CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events"
 def gmail_active(row: Optional[dict[str, Any]]) -> bool:
     """구글 연결 줄에서 지메일을 써도 되는지. 구글이 준 권한(scopes)과 사용자가 앱에서 켠 상태(metadata.gmail_enabled)가
     둘 다 있어야 한다. 캘린더를 다시 연결할 때 구글이 예전 메일 권한을 함께 돌려줘도, 앱에서 끈 지메일은 꺼진 채로 둔다."""
-    if not row:
+    if not row or _needs_reconnect(row):
         return False
     return GMAIL_SCOPE in (row.get("scopes") or []) and (row.get("metadata") or {}).get("gmail_enabled") is True
 
 
 def calendar_active(row: Optional[dict[str, Any]]) -> bool:
     """캘린더 권한이 실제로 있는지. 권한 목록이 비어 있는 아주 예전 줄은 캘린더만 쓰던 연결로 본다."""
-    if not row:
+    if not row or _needs_reconnect(row):
         return False
     scopes = row.get("scopes") or []
     return CALENDAR_SCOPE in scopes or not scopes
+
+
+def _needs_reconnect(row: dict[str, Any]) -> bool:
+    """구글이 토큰을 거절한 적이 있으면(7일 만료, 권한 철회) 설정에 「연결」 버튼이 다시 보이게 미연결로 본다.
+    구글 연결을 다시 마치면 콜백이 이 표시를 지운다."""
+    return (row.get("metadata") or {}).get("needs_reconnect") is True
+
+
+def mark_google_reconnect(user_id: str) -> None:
+    try:
+        with get_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE user_integrations SET metadata = metadata || %s, updated_at = now() "
+                            "WHERE user_id = %s AND provider = 'google'", (Jsonb({"needs_reconnect": True}), user_id))
+            conn.commit()
+    except Exception:
+        pass  # 표시를 못 남겨도 이번 답은 재연결 안내로 나간다
 
 
 def _gmail_token(user_id: str) -> Optional[str]:
@@ -506,8 +523,36 @@ def _mail_text(payload: dict[str, Any], fetch: Optional[Callable[[str], str]] = 
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
-def _gmail_auth_failed(exc: Exception) -> bool:
-    return isinstance(exc, urllib.error.HTTPError) and exc.code in (401, 403)
+_QUOTA_REASONS = {"rateLimitExceeded", "userRateLimitExceeded", "dailyLimitExceeded", "quotaExceeded",
+                  "RATE_LIMIT_EXCEEDED", "RESOURCE_EXHAUSTED"}
+_API_OFF_REASONS = {"accessNotConfigured", "SERVICE_DISABLED"}
+
+
+def _gmail_error_reasons(exc: urllib.error.HTTPError) -> set[str]:
+    try:
+        error = json.loads(exc.read().decode("utf-8", errors="replace") or "{}").get("error") or {}
+    except (ValueError, AttributeError, OSError):
+        return set()
+    if not isinstance(error, dict):
+        return set()
+    reasons = {str(e.get("reason")) for e in error.get("errors") or [] if isinstance(e, dict)}
+    reasons |= {str(d.get("reason")) for d in error.get("details") or [] if isinstance(d, dict)}
+    reasons.add(str(error.get("status") or ""))
+    return reasons
+
+
+def _gmail_http_error(exc: Exception, user_id: str) -> Optional[dict[str, Any]]:
+    """지메일 API 오류를 사용자가 할 수 있는 안내로. 처리할 오류가 아니면 None.
+    403 은 권한 문제뿐 아니라 조회 한도, API 꺼짐에도 나오므로 원인을 보고 나눈다."""
+    if not isinstance(exc, urllib.error.HTTPError) or exc.code not in (401, 403, 429):
+        return None
+    reasons = _gmail_error_reasons(exc)
+    if exc.code == 429 or reasons & _QUOTA_REASONS:
+        return {"is_error": True, "error": "메일 조회 한도를 넘었어요. 잠시 뒤 다시 물어봐 달라고 안내하세요."}
+    if reasons & _API_OFF_REASONS:
+        return {"is_error": True, "error": "서버의 지메일 연결 설정(Gmail API)이 꺼져 있어요. 운영자에게 알려 달라고 안내하세요."}
+    mark_google_reconnect(user_id)
+    return _gmail_needs_auth()
 
 
 def _gmail_token_or_reauth(user_id: str) -> tuple[Optional[str], Optional[dict[str, Any]]]:
@@ -517,6 +562,7 @@ def _gmail_token_or_reauth(user_id: str) -> tuple[Optional[str], Optional[dict[s
         token = _gmail_token(user_id)
     except urllib.error.HTTPError as exc:
         if exc.code in (400, 401):
+            mark_google_reconnect(user_id)
             return None, _gmail_needs_auth()
         raise
     return (token, None) if token else (None, _gmail_needs_auth())
@@ -552,8 +598,9 @@ def _gmail_search(args: dict[str, Any], user_id: str) -> dict[str, Any]:
             mails.append(item)
             used += size
     except Exception as exc:
-        if _gmail_auth_failed(exc):
-            return _gmail_needs_auth()
+        handled = _gmail_http_error(exc, user_id)
+        if handled:
+            return handled
         raise
     return {
         "is_error": False,
@@ -572,8 +619,9 @@ def _gmail_read_thread(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     try:
         thread = _gmail_get(f"threads/{urllib.parse.quote(thread_id, safe='')}", token, [("format", "full")])
     except Exception as exc:
-        if _gmail_auth_failed(exc):
-            return _gmail_needs_auth()
+        handled = _gmail_http_error(exc, user_id)
+        if handled:
+            return handled
         if isinstance(exc, urllib.error.HTTPError) and exc.code == 404:
             return {"is_error": True, "error": "그 메일을 찾지 못했습니다. 다시 검색해 보세요."}
         raise
