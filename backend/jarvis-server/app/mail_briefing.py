@@ -5,6 +5,7 @@
 DB 와 지메일 없이 시험할 수 있게 했다.
 """
 import re
+from .followups import stored_followups
 from dataclasses import dataclass, field
 from email.utils import parseaddr
 from typing import Any, Iterable, Optional
@@ -169,7 +170,7 @@ def followup_lines(meetings: list[dict[str, Any]], anchors: list[str], limit: in
         if keys and not any(k in text for k in keys):
             continue
         meta = m.get("metadata") or {}
-        items = meta.get("followups") or [{"task": t} for t in meta.get("action_items") or []]
+        items = stored_followups(meta)
         for item in items:
             task = str((item or {}).get("task") or "").strip()
             if task:

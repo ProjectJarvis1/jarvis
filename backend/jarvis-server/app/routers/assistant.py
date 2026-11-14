@@ -9,6 +9,7 @@ from psycopg.types.json import Jsonb
 
 from ..auth import require_api_key
 from ..db import get_conn
+from ..followups import stored_followups
 from ..idempotency import run_after_commit
 from ..embeddings import embed_text
 from ..meeting_projection import sync_meeting_memory
@@ -189,6 +190,6 @@ def followups(meeting_id: UUID):
     if not row:
         raise HTTPException(404, "Meeting not found")
     metadata = row["metadata"] or {}
-    items = metadata.get("followups") or [{"task": str(item), "owner": "", "due_at": "", "evidence": ""} for item in metadata.get("action_items", [])]
+    items = stored_followups(metadata)
     return jsonable_encoder({"meeting_id": meeting_id, "title": row["title"], "started_at": row["started_at"],
                              "items": items, "requires_calendar_confirmation": True})

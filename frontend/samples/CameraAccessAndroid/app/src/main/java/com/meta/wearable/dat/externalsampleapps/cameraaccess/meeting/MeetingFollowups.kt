@@ -24,7 +24,7 @@ data class MeetingFollowup(
 object MeetingFollowups {
     private val KST: ZoneId = ZoneId.of("Asia/Seoul")
 
-    /** Server `followups`; meetings recorded before that existed fall back to plain `action_items`. */
+    /** Server `followups`; only meetings recorded before that field existed fall back to plain `action_items`. */
     fun parse(followups: JSONArray?, actionItems: List<String>): List<MeetingFollowup> {
         val parsed = (0 until (followups?.length() ?: 0)).mapNotNull { i ->
             val o = followups?.optJSONObject(i) ?: return@mapNotNull null
@@ -33,7 +33,10 @@ object MeetingFollowups {
             else MeetingFollowup(task, o.optString("owner").trim(), o.optString("due_text").trim(),
                 o.optString("due_at").trim(), o.optString("evidence").trim())
         }
-        return parsed.ifEmpty { actionItems.filter { it.isNotBlank() }.map { MeetingFollowup(it.trim()) } }
+        // A verified list that came back empty stays empty: every item failed the check against the transcript.
+        // Only records made before `followups` existed fall back to the unverified `action_items`.
+        if (followups != null) return parsed
+        return actionItems.filter { it.isNotBlank() }.map { MeetingFollowup(it.trim()) }
     }
 
     /**
@@ -42,8 +45,8 @@ object MeetingFollowups {
      * 금요일"). "다음 주" alone, "다다음 주 금요일" and anything else stay null, and the user picks the date.
      */
     fun dueDate(item: MeetingFollowup, meetingStart: ZonedDateTime): LocalDate? {
-        // "전에" (before) and "쯤" (around) are not "by": the user confirms those dates, even when the
-        // server also filled due_at.
+        // "전에" (before) and "쯤", "즈음", "무렵", "전후" (around) are not "by": the user confirms those
+        // dates, even when the server also filled due_at.
         if (QUALIFIED.containsMatchIn(item.dueText)) return null
         parseIsoDate(item.dueAt)?.let { return it }
         // Whole-phrase matches only: "다다음 주 금요일" or "다음 달 금요일" must not read as a nearer date.
@@ -114,7 +117,7 @@ object MeetingFollowups {
     // Only endings that mean "by that day"; "전에" (before) and "쯤" (around) change the date, so they stay
     // in the text, the whole-phrase match fails, and the user picks the date.
     private val DUE_SUFFIX = Regex("""(까지|안에|중에|중|에)$""")
-    private val QUALIFIED = Regex("""전에?\s*$|쯤|경\s*$""")
+    private val QUALIFIED = Regex("""전에?\s*$|쯤|즈음|무렵|전후|경\s*$""")
     private val EXPLICIT_DATE = Regex("""(?:(\d{4})년)?(\d{1,2})월(\d{1,2})일""")
     private val WEEKDAY_PHRASE = Regex("""(이번주|다음주)?([월화수목금토일])요일""")
     private val WEEKDAYS = mapOf(

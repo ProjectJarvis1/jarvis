@@ -60,4 +60,19 @@ class MeetingFollowupsTest {
         val later = MeetingFollowups.draftMessage(emptyList(), listOf(MeetingFollowup("계약", dueText = "2027년 11월 20일")), start)
         assertTrue(later.contains("2027년 11월 20일까지"))
     }
+
+    @Test
+    fun verifiedEmptyListStaysEmptyAndOnlyOldRecordsFallBack() {
+        // Every item failed the check against the transcript: nothing comes back from action_items.
+        assertTrue(MeetingFollowups.parse(JSONArray(), listOf("견적서 보내기")).isEmpty())
+        // A record made before `followups` existed still shows its plain items.
+        assertEquals(listOf("견적서 보내기"), MeetingFollowups.parse(null, listOf("견적서 보내기", " ")).map { it.task })
+    }
+
+    @Test
+    fun approximateDatesNeedTheUsersChoice() {
+        assertNull(due("금요일 무렵"))
+        assertNull(due("11월 20일 전후"))
+        assertNull(due("다음 주 금요일 즈음", "2026-11-20"))
+    }
 }

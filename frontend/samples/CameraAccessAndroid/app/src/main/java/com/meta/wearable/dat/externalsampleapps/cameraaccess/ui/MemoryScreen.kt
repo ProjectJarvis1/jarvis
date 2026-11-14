@@ -675,6 +675,10 @@ private fun FollowupCard(meeting: MeetingHistoryItem) {
                 Icon(Icons.Default.TaskAlt, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                 Text("후속 할 일", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
+            if (meeting.followupsNeedReview) {
+                Text("회의 원문이 바뀌었어요. 아래 할 일과 기한이 지금 원문과 맞는지 다시 확인해 주세요.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
+            }
             meeting.followups.forEachIndexed { index, item ->
                 val steps = remember(version) { MeetingFollowupStatus.read(context, meeting.id, index) }
                 val done = MeetingFollowupStatus.Step.DONE in steps

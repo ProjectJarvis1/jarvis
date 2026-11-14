@@ -142,6 +142,8 @@ class MeetingHistoryRepository {
             actionItems = metadata.optJSONArray("action_items").toStringList(),
             keywords = metadata.optJSONArray("keywords").toStringList(),
             followups = MeetingFollowups.parse(metadata.optJSONArray("followups"), metadata.optJSONArray("action_items").toStringList()),
+            // The server re-checks verified follow-ups when the transcript changes; older ones it cannot.
+            followupsNeedReview = metadata.optString("transcript_changed_at").isNotBlank() && !metadata.has("followups"),
         )
     }
 

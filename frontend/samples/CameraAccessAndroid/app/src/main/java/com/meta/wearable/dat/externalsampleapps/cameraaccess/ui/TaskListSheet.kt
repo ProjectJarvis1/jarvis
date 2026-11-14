@@ -186,6 +186,7 @@ private fun actionLabel(action: TaskListAction, task: TaskRecord) = when (action
     TaskListAction.APPROVE -> when (task.tool) {
         "call_contact" -> "전화 걸기"
         "text_contact" -> "문자 앱 열기"
+        "create_calendar_event" -> "일정 등록"
         else -> "확인"
     }
     TaskListAction.EDIT -> "고치기"
@@ -213,7 +214,7 @@ private fun detail(task: TaskRecord, args: JSONObject?): String? {
             ExternalTools.isExternal(task.tool) -> ExternalTools.preview(task.tool, task.argsJson)
             task.tool == "save_person" -> listOfNotNull(arg("name"), arg("org"), arg("role"), arg("notes_summary"),
                 if (args?.optBoolean("include_face") == true) "얼굴도 함께 저장해요. 상대방이 동의했을 때만 승인해 주세요." else null).joinToString("\n")
-            task.tool == "create_calendar_event" -> listOfNotNull(arg("title"), arg("start_at"), arg("location")).joinToString("\n")
+            task.tool == "create_calendar_event" -> com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.CalendarEventPreview.lines(task.argsJson).joinToString("\n")
             task.tool in setOf("apply_record_change", "undo_record_change") -> "대화 화면의 확인 카드에서 바뀌는 내용을 보고 승인해 주세요."
             else -> TaskListRules.mainField(task)?.let(::arg) ?: arg("query")
         }

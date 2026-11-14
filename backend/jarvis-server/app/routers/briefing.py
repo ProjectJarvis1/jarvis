@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 
 from .. import mail_briefing as mb
 from .. import mcp_tools
+from ..followups import stored_followups
 from ..auth import require_user
 from ..auth import user_id as current_user_id
 from ..db import get_conn
@@ -238,7 +239,7 @@ def followups(days: int = Query(14, ge=1, le=60)):
     items = []
     for m in _meetings(days):
         meta = m.get("metadata") or {}
-        raw = meta.get("followups") or [{"task": t} for t in meta.get("action_items") or []]
+        raw = stored_followups(meta)
         # 앱은 빈 항목을 뺀 목록의 순서(index)로 완료 여부를 기억한다. 같은 순서를 돌려준다.
         raw = [item for item in raw if str((item or {}).get("task") or "").strip()]
         for index, item in enumerate(raw):

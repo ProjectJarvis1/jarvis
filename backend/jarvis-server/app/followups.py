@@ -49,3 +49,16 @@ def normalize_followups(items, transcript: str) -> list[dict]:
                        "owner": owner if isinstance(owner, str) and owner and owner in evidence else "",
                        "due_at": due if isinstance(due, str) and due and due in evidence else ""})
     return result
+
+
+def stored_followups(metadata) -> list[dict]:
+    """회의 기록에 남은 후속 할 일.
+
+    서버가 검증한 `followups` 가 있으면 비어 있어도 그대로 쓴다(검증에서 모두 빠졌다는 뜻이다).
+    `followups` 필드가 아예 없는 예전 기록만 검증 전 `action_items` 로 대신한다.
+    """
+    meta = metadata if isinstance(metadata, dict) else {}
+    if isinstance(meta.get("followups"), list):
+        return [item for item in meta["followups"] if isinstance(item, dict)]
+    return [{"task": str(item), "owner": "", "due_text": "", "due_at": "", "evidence": ""}
+            for item in meta.get("action_items") or [] if str(item).strip()]
