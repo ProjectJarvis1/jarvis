@@ -70,6 +70,10 @@ class FakeGmail(BaseHTTPRequestHandler):
         if url.path.endswith("/messages"):
             assert q["q"] == ["김 팀장"]
             return self._send(200, {"messages": [{"id": "m1", "threadId": "t1"}, {"id": "m2", "threadId": "t1"}]})
+        if url.path.endswith("/messages/big/attachments/att1"):
+            return self._send(200, {"data": b64("밖에 저장된 긴 본문")})
+        if "/attachments/" in url.path:
+            return self._send(404, {"error": "not found"})
         if "/messages/" in url.path:
             mid = url.path.rsplit("/", 1)[1]
             msg = next(m for m in THREAD["messages"] if m["id"] == mid)
@@ -302,3 +306,37 @@ def test_long_thread_keeps_latest_mail_inside_result_limit(gmail, monkeypatch):
     shown = mcp_router._with_details(result)["content"]
     assert "본문 39" in shown  # 가장 최근 메일은 모델에 넘어가는 글 안에 있다
     assert result["structured_content"]["omitted_older"] > 0 and "뺐습니다" in result["content"]
+
+
+def test_mixed_body_keeps_html_main_and_plain_footer():
+    payload = {"mimeType": "multipart/mixed", "parts": [
+        {"mimeType": "text/html", "body": {"data": b64("<p>회의는 화요일 3시</p>")}},
+        {"mimeType": "text/plain", "body": {"data": b64("이 메일은 수신인만 읽을 수 있습니다.")}},
+        {"mimeType": "text/plain", "filename": "memo.txt", "body": {"data": b64("첨부 파일 내용")}}]}
+    text = t._mail_text(payload)
+    assert "회의는 화요일 3시" in text and "수신인만" in text and "첨부 파일" not in text
+
+
+def test_body_stored_outside_message_is_fetched(gmail, monkeypatch):
+    use_rows(monkeypatch, t, [{"scopes": [t.GMAIL_SCOPE], "metadata": ON}])
+    monkeypatch.setattr(t, "_integration_token", lambda *a: "good-token")
+    monkeypatch.setitem(THREAD, "messages", [
+        {"id": "big", "internalDate": "1762995600000", "payload": {"mimeType": "text/plain", "headers": [
+            {"name": "Subject", "value": "=?utf-8?b?6rKs7KCB7IScIOyalOyyrQ==?="},
+            {"name": "From", "value": "=?utf-8?b?6rmAIO2MgOyepQ==?= <kim@example.com>"}],
+            "body": {"attachmentId": "att1", "size": 90000}}},
+        {"id": "gone", "internalDate": "1762995600000", "payload": {"mimeType": "text/plain", "headers": [],
+                                                                  "body": {"attachmentId": "missing"}}}])
+    first, second = t.call_tool("gmail_read_thread", {"thread_id": "t1"}, "u1", app=True)["structured_content"]["messages"]
+    assert first["body"] == "밖에 저장된 긴 본문"
+    assert first["subject"] == "견적서 요청" and first["from"].startswith("김 팀장")
+    assert second["body"] == "" and second["body_missing"]
+
+
+def test_mail_reads_are_not_stored_as_receipts():
+    from app import idempotency
+    read = json.dumps({"method": "tools/call", "params": {"name": "gmail_read_thread", "arguments": {}}}).encode()
+    send = json.dumps({"method": "tools/call", "params": {"name": "slack_send_message", "arguments": {}}}).encode()
+    assert idempotency.no_receipt("/mcp", read)
+    assert not idempotency.no_receipt("/mcp", send)  # 쓰기는 그대로 저장해 두 번 실행을 막는다
+    assert not idempotency.no_receipt("/people", read) and not idempotency.no_receipt("/mcp", b"not json")

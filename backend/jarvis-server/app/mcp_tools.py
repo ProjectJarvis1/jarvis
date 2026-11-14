@@ -405,8 +405,17 @@ def _gmail_get(path: str, token: str, query: Optional[list[tuple[str, str]]] = N
     return _http_json(url, headers={"Authorization": f"Bearer {token}"})
 
 
+def _decode_header(value: str) -> str:
+    """=?utf-8?b?...?= 처럼 인코딩된 제목과 이름을 읽을 수 있는 글로. 자르기 전에 푼다."""
+    from email.header import decode_header, make_header
+    try:
+        return str(make_header(decode_header(value)))
+    except (ValueError, LookupError, UnicodeDecodeError):
+        return value
+
+
 def _headers(payload: dict[str, Any]) -> dict[str, str]:
-    return {h.get("name", "").lower(): h.get("value", "") for h in (payload or {}).get("headers", [])}
+    return {h.get("name", "").lower(): _decode_header(h.get("value", "")) for h in (payload or {}).get("headers", [])}
 
 
 def _kst(internal_date: Any) -> Optional[str]:
@@ -454,23 +463,46 @@ def _strip_html(text: str) -> str:
     return html.unescape(text)
 
 
-def _mail_text(payload: dict[str, Any]) -> str:
-    """본문에서 글만 뽑는다. text/plain 을 먼저 쓰고, 없으면 HTML 에서 태그를 걷어 낸다. 인용한 이전 메일 줄은 뺀다."""
-    plain: list[str] = []
-    html_parts: list[str] = []
-    stack = [payload or {}]
-    while stack:
-        part = stack.pop(0)
-        mime = (part.get("mimeType") or "").lower()
-        data = (part.get("body") or {}).get("data")
-        if data and mime == "text/plain":
-            plain.append(_decode_part(data, _charset(part)))
-        elif data and mime == "text/html":
-            html_parts.append(_strip_html(_decode_part(data, _charset(part))))
-        stack.extend(part.get("parts") or [])
-    text = "\n".join(plain) if plain else "\n".join(html_parts)
-    lines = [line.rstrip() for line in text.splitlines() if not line.lstrip().startswith(">")]
+def _part_text(part: dict[str, Any], fetch: Optional[Callable[[str], str]]) -> tuple[str, str]:
+    """(글, 종류) 한 파트의 글. 본문이 메시지 밖에 따로 저장된 파트(attachmentId)는 fetch 로 받아 온다."""
+    mime = (part.get("mimeType") or "").lower()
+    if mime not in ("text/plain", "text/html") or (part.get("filename") or ""):
+        return "", ""
+    body = part.get("body") or {}
+    data = body.get("data")
+    if not data and body.get("attachmentId") and fetch:
+        data = fetch(body["attachmentId"])
+    if not data:
+        return "", ""
+    text = _decode_part(data, _charset(part))
+    return (_strip_html(text), "html") if mime == "text/html" else (text, "plain")
+
+
+def _walk(part: dict[str, Any], fetch: Optional[Callable[[str], str]]) -> str:
+    """MIME 구조를 따라 글을 모은다. multipart/alternative 안에서만 일반 글을 HTML 보다 먼저 고르고,
+    mixed, related 처럼 여러 조각이 이어진 메일은 조각을 모두 잇는다(HTML 본문 뒤 일반 글 꼬리말 같은 경우)."""
+    mime = (part.get("mimeType") or "").lower()
+    children = part.get("parts") or []
+    if not mime.startswith("multipart/"):
+        return _part_text(part, fetch)[0]
+    if mime == "multipart/alternative":
+        texts = [(_walk(child, fetch), (child.get("mimeType") or "").lower()) for child in children]
+        for wanted in ("text/plain",):
+            for text, kind in texts:
+                if kind == wanted and text.strip():
+                    return text
+        for text, _ in texts:
+            if text.strip():
+                return text
+        return ""
+    return "\n".join(t for t in (_walk(child, fetch) for child in children) if t.strip())
+
+
+def _mail_text(payload: dict[str, Any], fetch: Optional[Callable[[str], str]] = None) -> str:
+    """본문에서 글만 뽑는다. 인용한 이전 메일 줄(>)은 뺀다."""
     import re
+    text = _walk(payload or {}, fetch)
+    lines = [line.rstrip() for line in text.splitlines() if not line.lstrip().startswith(">")]
     return re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip()
 
 
@@ -554,7 +586,16 @@ def _gmail_read_thread(args: dict[str, Any], user_id: str) -> dict[str, Any]:
     # 앱은 잘린 글만 모델에 넘기므로, 한도 안에 최근 메일이 꼭 들어 있어야 한다.
     for message in reversed(messages):
         head = _headers(message.get("payload") or {})
-        full = _mail_text(message.get("payload") or {})
+        message_id = urllib.parse.quote(str(message.get("id") or ""), safe="")
+
+        def fetch(attachment_id: str, message_id: str = message_id) -> str:
+            # 본문이 커서 메시지 밖에 저장된 경우. 실패하면 그 조각만 비운다(아래 body_missing 로 알림).
+            try:
+                path = f"messages/{message_id}/attachments/{urllib.parse.quote(attachment_id, safe='')}"
+                return _gmail_get(path, token).get("data") or ""
+            except urllib.error.URLError:
+                return ""
+        full = _mail_text(message.get("payload") or {}, fetch)
         body = full[:min(_MAIL_BODY_LIMIT, max(budget, 0))]
         item = {
             "from": head.get("from", "")[:200],
@@ -564,6 +605,8 @@ def _gmail_read_thread(args: dict[str, Any], user_id: str) -> dict[str, Any]:
             "body": body,
             "body_cut": len(body) < len(full),
         }
+        if not full:
+            item["body_missing"] = True  # 본문을 읽지 못함(첨부만 있거나 받아 오지 못함). 지어내지 말 것
         size = len(json.dumps(item, ensure_ascii=False)) + 2
         if out and used + size > _THREAD_JSON_BUDGET:
             omitted = len(messages) - len(out)
