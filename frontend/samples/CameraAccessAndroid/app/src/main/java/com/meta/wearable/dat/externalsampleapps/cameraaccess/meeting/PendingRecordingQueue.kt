@@ -19,8 +19,19 @@ class PendingRecordingQueue(
     companion object {
         const val KEEP_MS = 7 * 24 * 3_600_000L
 
-        /** 4xx answers that will repeat for the same file. 401/403 (sign-in), 408 and 429 (limit) are temporary. */
-        fun isPermanentFailure(code: Int): Boolean = code in 400..499 && code !in setOf(401, 403, 408, 409, 425, 429)
+        /**
+         * Only answers about the recording itself repeat for the same file: too large (413), unreadable format (415),
+         * no speech in it (422). Anything else (sign-in, a wrong address, limits, server errors) is kept for a retry.
+         */
+        fun isPermanentFailure(code: Int): Boolean = code in setOf(413, 415, 422)
+
+        /** What the person reads when a kept recording could not be turned into notes. */
+        fun reasonText(code: Int): String = when (code) {
+            422 -> "녹음에서 말소리를 알아듣지 못해 회의록을 만들지 못했어요."
+            413 -> "녹음 파일이 너무 커서 정리하지 못했어요."
+            415 -> "녹음 파일 형식을 읽지 못했어요."
+            else -> "녹음을 정리하지 못했어요."
+        }
     }
 
     fun keep(file: File, title: String, startedAt: String, endedAt: String): Boolean = runCatching {

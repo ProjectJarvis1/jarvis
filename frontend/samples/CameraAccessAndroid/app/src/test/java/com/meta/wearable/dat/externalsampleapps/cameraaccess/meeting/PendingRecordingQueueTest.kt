@@ -82,7 +82,7 @@ class PendingRecordingQueueTest {
     fun permanentCodes() {
         assertTrue(PendingRecordingQueue.isPermanentFailure(422))
         assertTrue(PendingRecordingQueue.isPermanentFailure(413))
-        assertTrue(PendingRecordingQueue.isPermanentFailure(400))
-        for (code in listOf(401, 403, 408, 429, 500, 503)) assertFalse("$code", PendingRecordingQueue.isPermanentFailure(code))
+        assertTrue(PendingRecordingQueue.isPermanentFailure(415))
+        for (code in listOf(400, 401, 403, 404, 405, 408, 429, 500, 503)) assertFalse("$code", PendingRecordingQueue.isPermanentFailure(code))
     }
 }

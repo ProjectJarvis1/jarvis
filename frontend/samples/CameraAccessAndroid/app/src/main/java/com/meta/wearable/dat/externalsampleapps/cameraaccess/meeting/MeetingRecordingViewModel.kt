@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -71,21 +72,25 @@ class MeetingRecordingViewModel(application: Application) : AndroidViewModel(app
         if (!drainLock.tryLock()) return
         try {
             if (_uiState.value.isRecording || _uiState.value.isProcessing) return
-            val q = withContext(Dispatchers.IO) { queue() }
             var showing = false
-            q.drain(
-                upload = { item ->
-                    if (!showing) { _uiState.value = _uiState.value.copy(isProcessing = true); showing = true }
-                    withContext(Dispatchers.IO) { repository.upload(item.file, item.title, item.startedAt, item.endedAt) }
-                },
-                onResult = { _results.send(it) },
-                onPermanentFailure = { item, e ->
-                    _uiState.value = _uiState.value.copy(errorMessage =
-                        "보관해 둔 ${item.title} 녹음은 정리하지 못했어요. ${e.message.orEmpty()}".trim())
-                },
-                shouldStop = { _uiState.value.isRecording },
-            )
-            if (showing && !_uiState.value.isRecording) _uiState.value = _uiState.value.copy(isProcessing = false)
+            // File work runs off the main thread; state and channel updates are safe from any thread.
+            withContext(Dispatchers.IO) {
+                queue().drain(
+                    upload = { item ->
+                        if (!showing) { _uiState.update { it.copy(isProcessing = true) }; showing = true }
+                        repository.upload(item.file, item.title, item.startedAt, item.endedAt)
+                    },
+                    onResult = { _results.send(it) },
+                    onPermanentFailure = { item, e ->
+                        Log.w(TAG, "Kept recording refused for good (${e.code}): ${e.message}")
+                        val line = "보관해 둔 ${item.title} 녹음: ${PendingRecordingQueue.reasonText(e.code)}"
+                        // Several failures in a row are all shown, not just the last one.
+                        _uiState.update { st -> st.copy(errorMessage = listOfNotNull(st.errorMessage, line).joinToString("\n")) }
+                    },
+                    shouldStop = { _uiState.value.isRecording },
+                )
+            }
+            if (showing) _uiState.update { if (it.isRecording) it else it.copy(isProcessing = false) }
         } finally {
             drainLock.unlock()
         }
@@ -161,6 +166,9 @@ class MeetingRecordingViewModel(application: Application) : AndroidViewModel(app
                 val kept = withContext(Dispatchers.IO) { keepForLater(file, title, startedText, endedText) }
                 _uiState.value = MeetingRecordingUiState(errorMessage = if (kept)
                     "${e.message} 녹음은 휴대폰에 남겨 뒀다가 내일 앱을 열면 다시 올려요." else "회의 처리 실패: ${e.message}")
+            } catch (e: PermanentUploadFailure) {
+                Log.w(TAG, "Recording refused (${e.code}): ${e.message}")
+                _uiState.value = MeetingRecordingUiState(errorMessage = PendingRecordingQueue.reasonText(e.code))
             } catch (e: Exception) {
                 _uiState.value = MeetingRecordingUiState(
                     errorMessage = "회의 처리 실패: ${e.message}"
