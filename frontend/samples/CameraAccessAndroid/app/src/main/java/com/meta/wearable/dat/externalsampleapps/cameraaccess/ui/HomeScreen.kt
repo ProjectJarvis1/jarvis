@@ -38,7 +38,6 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveO
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
-import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListRules
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListSection
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskRecord
@@ -46,6 +45,7 @@ import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -154,7 +154,11 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
     // Newest at the bottom, like any chat: open at the latest message and follow new ones, also when an old one
     // drops off the top as a new one arrives (the count stays, the last key changes).
     val newest = contact?.id ?: entries.lastOrNull()?.let { "${it.key}@${it.at}" }
-    LaunchedEffect(itemCount, newest) { listState.scrollToItem(itemCount - 1) }
+    LaunchedEffect(itemCount, newest) {
+        // To the very end, not the top of the last item: a long last answer or card ends where the eye lands.
+        listState.scrollToItem(itemCount - 1)
+        listState.scrollBy(100_000f)
+    }
 
     val scheme = MaterialTheme.colorScheme
     Column(modifier.fillMaxSize().background(scheme.background).statusBarsPadding()) {
@@ -163,13 +167,10 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
             JarvisAvatar(40.dp)
             Column(Modifier.weight(1f)) {
                 Text("Jarvis", style = MaterialTheme.typography.titleMedium)
-                val (status, tone) = when (gemini.openClawConnectionState) {
-                    OpenClawConnectionState.Connected -> "서버와 연결돼 있어요" to scheme.primary
-                    OpenClawConnectionState.Checking -> "서버를 확인하는 중이에요" to scheme.onSurfaceVariant
-                    is OpenClawConnectionState.Unreachable -> "서버에 연결하지 못했어요" to scheme.error
-                    OpenClawConnectionState.NotConfigured -> "말을 걸면 바로 준비해요" to scheme.onSurfaceVariant
-                }
-                Text(status, style = MaterialTheme.typography.labelMedium, color = tone)
+                // The server is only checked inside a conversation, so home says what it knows for sure:
+                // what is waiting on the user. The live screen shows the connection once talking starts.
+                Text(if (needsYou > 0) "확인할 일 ${needsYou}개가 있어요" else "부르기 전에 먼저 챙겨요",
+                    style = MaterialTheme.typography.labelMedium, color = if (needsYou > 0) scheme.primary else scheme.onSurfaceVariant)
             }
             IconButton(onClick = { showTasks = true }, modifier = Modifier.size(48.dp)) {
                 BadgedBox(badge = { if (needsYou > 0) Badge { Text("$needsYou") } }) {
