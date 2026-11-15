@@ -88,6 +88,17 @@ object ProactiveStore {
     }
 
     /**
+     * Lists [offer] without counting it as sent: no claim, no notification bookkeeping, so it never uses up the
+     * day's limit or blocks a real offer. For debug sample data only.
+     */
+    @Synchronized
+    fun listOnly(context: Context, offer: ProactiveOffer) {
+        load(context)
+        _offers.value = (listOf(offer) + _offers.value.filterNot { it.id == offer.id }).take(KEEP_OFFERS)
+        save(context)
+    }
+
+    /**
      * Records and shows [offer] only if [uid] is still the signed-in account, all under this store's lock,
      * which sign-out also holds while it clears: an offer can never land in another account's folder, nor
      * be posted after the sign-out cleanup took the notifications down.

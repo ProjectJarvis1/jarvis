@@ -195,7 +195,7 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
             items(entries, key = { it.key }) { entry ->
                 when (entry) {
                     is FeedEntry.Offer -> OfferMessage(entry.offer, now) { now = System.currentTimeMillis() }
-                    is FeedEntry.Work -> WorkMessage(entry.task) { showTasks = true }
+                    is FeedEntry.Work -> WorkMessage(entry.task, onOpenList = { showTasks = true }, onOpenConversation = start)
                     is FeedEntry.Exchange -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         ChatMeta("${taskWhen(entry.last.atMs)}, 마지막 대화", Icons.Outlined.ChatBubbleOutline)
                         if (entry.last.user.isNotBlank()) UserBubble(entry.last.user)
@@ -256,7 +256,7 @@ private fun OfferMessage(offer: ProactiveOffer, now: Long, onExpired: () -> Unit
 
 /** A task: waiting on the user (opens the list to approve), still running, or what came of it. */
 @Composable
-private fun WorkMessage(task: TaskRecord, onOpenList: () -> Unit) {
+private fun WorkMessage(task: TaskRecord, onOpenList: () -> Unit, onOpenConversation: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
     val section = TaskListRules.section(task)
     val (label, icon, tone) = when {
@@ -272,8 +272,12 @@ private fun WorkMessage(task: TaskRecord, onOpenList: () -> Unit) {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant, maxLines = 4,
                     overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             }
-            Row { ChatAction(if (section == TaskListSection.NEEDS_YOU) "확인하기" else "작업 기록", onOpenList,
-                main = section == TaskListSection.NEEDS_YOU) }
+            // Record edits are approved only on the card that shows the server's preview, which lives on the
+            // conversation screen; the list cannot approve them.
+            val onCard = section == TaskListSection.NEEDS_YOU && task.state == TaskState.WAITING_USER &&
+                task.tool in setOf("apply_record_change", "undo_record_change")
+            Row { ChatAction(when { onCard -> "대화에서 확인하기"; section == TaskListSection.NEEDS_YOU -> "확인하기"; else -> "작업 기록" },
+                if (onCard) onOpenConversation else onOpenList, main = section == TaskListSection.NEEDS_YOU) }
         }
     }
 }
