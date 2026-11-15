@@ -136,9 +136,18 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
         delete = { task -> geminiViewModel.deleteTask(task.id) },
     ) }, onDismiss = { showTasks = false })
 
+    // Errors from the task list (e.g. a result another task still uses cannot be deleted) show here too.
+    LaunchedEffect(gemini.errorMessage) {
+        gemini.errorMessage?.let {
+            android.widget.Toast.makeText(context, it, android.widget.Toast.LENGTH_LONG).show()
+            geminiViewModel.clearError()
+        }
+    }
+    val last by geminiViewModel.lastExchange.collectAsStateWithLifecycle()
+    // A call or text approved from the task list waits here for its card, same-name choice included.
+    val contact = gemini.pendingContactAction
     val listState = rememberLazyListState()
-    val lastExchange = gemini.userTranscript.isNotBlank() || gemini.aiTranscript.isNotBlank()
-    val itemCount = 1 + entries.size + if (lastExchange) 1 else 0
+    val itemCount = 1 + entries.size + (if (last != null) 1 else 0) + (if (contact != null) 1 else 0)
     // Newest at the bottom, like any chat: open at the latest message and follow new ones.
     LaunchedEffect(itemCount) { listState.scrollToItem(itemCount - 1) }
 
@@ -170,7 +179,7 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
             item(key = "hello") {
                 JarvisBubble(if (entries.isEmpty()) "안녕하세요, 자비스예요. 미팅이나 마감이 다가오면 여기서 먼저 말씀드릴게요."
                     else "안녕하세요, 자비스예요. 오늘 챙길 일을 모아 뒀어요.") {
-                    Text("아래 버튼을 누르거나 \"자비스\"라고 부르고 이렇게 말해 보세요.", style = MaterialTheme.typography.bodyMedium,
+                    Text("아래 말하기 바를 눌러 대화를 연 뒤 이렇게 말해 보세요.", style = MaterialTheme.typography.bodyMedium,
                         color = scheme.onSurfaceVariant)
                     listOf("이 명함 기억해 줘", "다음 미팅 상대랑 지난번에 무슨 얘기 했지?", "내일 오후 4시 미팅 캘린더에 넣어 줘").forEach {
                         Text("\"$it\"", style = MaterialTheme.typography.bodyMedium, color = Jarvis.extras.onJarvisBubble)
@@ -183,13 +192,17 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
                     is FeedEntry.Work -> WorkMessage(entry.task) { showTasks = true }
                 }
             }
-            if (lastExchange) item(key = "last") {
+            last?.let { exchange -> item(key = "last") {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChatMeta("방금 나눈 대화", Icons.Outlined.ChatBubbleOutline)
-                    if (gemini.userTranscript.isNotBlank()) UserBubble(gemini.userTranscript)
-                    if (gemini.aiTranscript.isNotBlank()) JarvisBubble(gemini.aiTranscript)
+                    ChatMeta("${taskWhen(exchange.atMs)}, 마지막 대화", Icons.Outlined.ChatBubbleOutline)
+                    if (exchange.user.isNotBlank()) UserBubble(exchange.user)
+                    if (exchange.jarvis.isNotBlank()) JarvisBubble(exchange.jarvis)
                 }
-            }
+            } }
+            contact?.let { action -> item(key = "contact-${action.id}") {
+                ContactActionConfirmCard(action, geminiViewModel::confirmPendingContactAction,
+                    geminiViewModel::cancelPendingContactAction, geminiViewModel::selectContactChoice, voice = false)
+            } }
         }
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 12.dp)) {
             if (micOff) Text("마이크가 꺼져 있으면 말로는 대화할 수 없어요. 아래를 누르면 다시 여쭤볼게요.",

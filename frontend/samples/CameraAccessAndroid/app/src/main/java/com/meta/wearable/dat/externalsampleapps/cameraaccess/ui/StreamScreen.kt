@@ -721,11 +721,13 @@ private fun ConfirmSheet(headline: String, actionLabel: String, onAction: () -> 
 }
 
 @Composable
-private fun ContactActionConfirmCard(
+internal fun ContactActionConfirmCard(
     action: PendingContactAction,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
     onPick: (String) -> Unit,
+    /** False off the conversation screen (home), where nothing is listening for "확인". */
+    voice: Boolean = true,
 ) {
     val isCall = action.type == PendingContactActionType.CALL
     val label = if (isCall) "전화 걸기" else "문자 앱 열기"
@@ -740,7 +742,8 @@ private fun ContactActionConfirmCard(
         lines = if (isCall) emptyList() else listOfNotNull(action.message?.takeIf { it.isNotBlank() }),
         hint = when {
             action.needsPick -> "같은 이름이 여러 명이에요. 번호 끝자리를 보고 한 명을 눌러 주세요."
-            else -> "\"확인\"이라고 말하거나 $label 버튼을 누르세요."
+            voice -> "\"확인\"이라고 말하거나 $label 버튼을 누르세요."
+            else -> "$label 버튼을 누르면 실행해요."
         },
         actionEnabled = !action.needsPick,
         // Same-name people are told apart here by the last four digits; the digits stay on this screen.

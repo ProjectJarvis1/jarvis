@@ -88,6 +88,12 @@ class GeminiSessionViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(GeminiUiState())
     val uiState: StateFlow<GeminiUiState> = _uiState.asStateFlow()
 
+    /** The last thing said each way before the conversation was closed, for the home thread. In memory only,
+     * and gone with the account: signing out starts a new activity and so a new view model. */
+    data class LastExchange(val user: String, val jarvis: String, val atMs: Long)
+    private val _lastExchange = MutableStateFlow<LastExchange?>(null)
+    val lastExchange: StateFlow<LastExchange?> = _lastExchange.asStateFlow()
+
     private val geminiService = GeminiLiveService()
     private val openClawBridge = OpenClawBridge()
     private val recordClient = okhttp3.OkHttpClient.Builder().addInterceptor(JarvisAccount.sessionGuard)
@@ -785,6 +791,8 @@ class GeminiSessionViewModel : ViewModel() {
         pendingSpeechJob = null
         pendingSpeechText = null
         usingFallbackAndroidStt = false
+        _uiState.value.let { if (it.userTranscript.isNotBlank() || it.aiTranscript.isNotBlank())
+            _lastExchange.value = LastExchange(it.userTranscript, it.aiTranscript, System.currentTimeMillis()) }
         _uiState.value = GeminiUiState()
     }
 
