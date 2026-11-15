@@ -92,13 +92,56 @@ object ContactCandidates {
      */
     private val PHONE_IN_TEXT = Regex("""(?<![\d])(?:\+?82[-.\s]*\(?0?|\(?0)\d{1,2}\)?[-.\s]*\d{3,4}[-.\s]*\d{4}(?![\d@])""")
 
-    fun redactText(text: String): String = PHONE_IN_TEXT.replace(text, "[전화번호]")
+    /** International numbers written with a leading "+" (e.g. +1-415-555-0123), outside the Korean formats above. */
+    private val INTL_IN_TEXT = Regex("""(?<![\w@])\+\d{1,3}(?:[-.\s]?\(?\d{1,4}\)?){2,5}(?![\d@])""")
+
+    fun redactText(text: String): String = redactText(text, emptySet())
+
+    private fun redactText(text: String, known: Set<String>): String {
+        var out = PHONE_IN_TEXT.replace(text, "[전화번호]")
+        out = INTL_IN_TEXT.replace(out) { m -> if (digits(m.value).length >= 7) "[전화번호]" else m.value }
+        // Numbers this payload carries in phone fields are removed wherever else they appear, in any format.
+        known.forEach { number ->
+            val pattern = number.map { Regex.escape(it.toString()) }.joinToString("""[-.\s()]*""")
+            out = Regex("""(?<![\d@])\+?$pattern(?![\d@])""").replace(out, "[전화번호]")
+        }
+        return out
+    }
 
     /**
      * Removes full phone numbers from anything sent to the AI (tool results, task results). A record's phone field
-     * becomes a one-time candidate_id, so the AI can still ask the device to call that person (D78).
+     * becomes a one-time candidate_id, so the AI can still ask the device to call that person (D78). The numbers
+     * found in phone fields are also struck from every other text in the same payload (notes, evidence lines).
      */
-    fun redact(value: Any?): Any? = when (value) {
+    fun redact(value: Any?): Any? {
+        val known = linkedSetOf<String>()
+        collectPhones(value, known)
+        return redact(value, known)
+    }
+
+    private fun parsedJson(value: String): Any? {
+        val trimmed = value.trimStart()
+        return when {
+            trimmed.startsWith("{") -> runCatching { JSONObject(value) }.getOrNull()
+            trimmed.startsWith("[") -> runCatching { JSONArray(value) }.getOrNull()
+            else -> null
+        }
+    }
+
+    private fun collectPhones(value: Any?, into: MutableSet<String>) {
+        when (value) {
+            is JSONObject -> value.keys().forEach { key ->
+                val v = value.opt(key)
+                if (key.lowercase() in PHONE_KEYS && v is String) {
+                    digits(v).takeIf { it.length >= 7 }?.let(into::add)
+                } else collectPhones(v, into)
+            }
+            is JSONArray -> for (i in 0 until value.length()) collectPhones(value.opt(i), into)
+            is String -> parsedJson(value)?.let { collectPhones(it, into) }
+        }
+    }
+
+    private fun redact(value: Any?, known: Set<String>): Any? = when (value) {
         is JSONObject -> {
             val name = NAME_KEYS.firstNotNullOfOrNull { k -> value.optString(k).takeIf { it.isNotBlank() && it != "null" } }
             val out = JSONObject()
@@ -110,19 +153,14 @@ object ContactCandidates {
                         if (!value.has("candidate_id")) out.put("candidate_id", register(name ?: "이름 없음", v, fromPhoneBook = false))
                     }
                 } else {
-                    out.put(key, redact(v))
+                    out.put(key, redact(v, known))
                 }
             }
             out
         }
-        is JSONArray -> JSONArray().also { arr -> for (i in 0 until value.length()) arr.put(redact(value.opt(i))) }
-        is String -> {
-            // Tool results often carry JSON as a string; redact inside it the same way.
-            val trimmed = value.trimStart()
-            val parsed = if (trimmed.startsWith("{")) runCatching { JSONObject(value) }.getOrNull()
-                else if (trimmed.startsWith("[")) runCatching { JSONArray(value) }.getOrNull() else null
-            parsed?.let { redact(it).toString() } ?: redactText(value)
-        }
+        is JSONArray -> JSONArray().also { arr -> for (i in 0 until value.length()) arr.put(redact(value.opt(i), known)) }
+        // Tool results often carry JSON as a string; redact inside it the same way.
+        is String -> parsedJson(value)?.let { redact(it, known).toString() } ?: redactText(value, known)
         else -> value
     }
 

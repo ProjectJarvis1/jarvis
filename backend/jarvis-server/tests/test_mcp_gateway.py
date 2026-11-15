@@ -514,3 +514,23 @@ def test_call_racing_an_idle_close_reopens_instead_of_reporting_uncertain(tmp_pa
         await gw.stop()
 
     asyncio.run(run())
+
+
+def test_call_waiting_on_a_cancelled_retiring_connection_is_not_cancelled(tmp_path, monkeypatch):
+    """닫히는 연결 작업의 취소가 그 연결을 기다리던 새 요청까지 취소하지 않는다."""
+    monkeypatch.delenv("FAKE_TOKEN", raising=False)
+
+    async def run():
+        gw = g.McpGateway(_per_user_config(tmp_path), _provider)
+        await gw.ensure_user("alice", wait_s=20)
+        conn = gw._user_conns("alice")["fake"]
+        # 정리가 끝나기 전에 요청이 들어오도록, 닫는 중 표시만 한 채 작업을 취소한다.
+        conn._closing = True
+        conn.ready.clear()
+        conn._task.cancel()
+        result = await gw.call("who", {}, user="alice")
+        assert not result.get("is_error"), result
+        assert json.loads(result["content"])["token"] == "tok-alice"
+        await gw.stop()
+
+    asyncio.run(run())

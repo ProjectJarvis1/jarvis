@@ -116,4 +116,13 @@ class ContactCandidatesTest {
         assertEquals("김민수 <01012345678@naver.com>", out.getString("from"))
         assertTrue(out.getString("note").contains("[전화번호]"))
     }
+
+    @Test fun knownAndInternationalNumbersAreRemovedFromNotesToo() {
+        val person = JSONObject().put("name", "Kim").put("phone", "+1-415-555-0123").put("notes_summary", "연락처 +1-415-555-0123, 사무실 1 (415) 555 0123")
+        val out = (ContactCandidates.redact(JSONObject().put("person", person)) as JSONObject).toString()
+        assertFalse(out, out.contains("555"))
+        assertTrue(out.contains("candidate_id"))
+        assertEquals("런던 [전화번호] 대표", ContactCandidates.redactText("런던 +44 20 7946 0958 대표"))
+        assertEquals("2026-11-16 10:30 회의, 수량 1200개", ContactCandidates.redactText("2026-11-16 10:30 회의, 수량 1200개"))
+    }
 }

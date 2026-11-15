@@ -384,8 +384,14 @@ class _Connection:
 
     async def _call_once(self, name: str, arguments: dict[str, Any], admit: Optional[Callable[[], Awaitable[bool]]] = None):
         if self._closing and self._task and not self._task.done():
+            retiring = self._task
             try:  # 닫히는 중인 연결이 다 정리된 뒤 새로 연다
-                await asyncio.wait_for(asyncio.shield(self._task), 10)
+                await asyncio.wait_for(asyncio.shield(retiring), 10)
+            except asyncio.CancelledError:
+                # 닫히는 연결 작업이 취소돼 끝난 것은 이 요청의 취소가 아니다. 요청 자신이 취소된 경우만 넘긴다.
+                current = asyncio.current_task()
+                if current is not None and current.cancelling():
+                    raise
             except Exception:
                 pass
         if self._task is None or self._task.done():
