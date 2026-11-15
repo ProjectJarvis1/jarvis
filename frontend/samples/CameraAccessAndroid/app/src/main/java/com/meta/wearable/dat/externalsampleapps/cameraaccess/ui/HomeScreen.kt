@@ -164,9 +164,9 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
 
     val scheme = MaterialTheme.colorScheme
     Column(modifier.fillMaxSize().background(scheme.background).statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, end = 4.dp),
+        Row(Modifier.fillMaxWidth().heightIn(min = 60.dp).padding(start = 16.dp, end = 4.dp),
             verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            JarvisAvatar(40.dp)
+            JarvisAvatar(36.dp)
             Column(Modifier.weight(1f)) {
                 Text("Jarvis", style = MaterialTheme.typography.titleMedium)
                 // The server is only checked inside a conversation, so home says what it knows for sure:
@@ -182,8 +182,8 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
         }
         HorizontalDivider(color = scheme.outlineVariant)
         LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState,
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
             item(key = "hello") {
                 JarvisBubble(if (entries.isEmpty()) "안녕하세요, 자비스예요. 미팅이나 마감이 다가오면 여기서 먼저 말씀드릴게요."
                     else "안녕하세요, 자비스예요. 오늘 챙길 일을 모아 뒀어요.") {
@@ -199,7 +199,7 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
                     is FeedEntry.Offer -> OfferMessage(entry.offer, now) { now = System.currentTimeMillis() }
                     is FeedEntry.Work -> WorkMessage(entry.task, onOpenList = { showTasks = true }, onOpenConversation = start,
                         cardIsThis = geminiViewModel.pendingSave(tasks)?.let { it.id == entry.task.id && it.revision == entry.task.revision } == true)
-                    is FeedEntry.Exchange -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    is FeedEntry.Exchange -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         ChatMeta("${taskWhen(entry.last.atMs)}, 마지막 대화", Icons.Outlined.ChatBubbleOutline)
                         if (entry.last.user.isNotBlank()) UserBubble(entry.last.user)
                         if (entry.last.jarvis.isNotBlank()) JarvisBubble(entry.last.jarvis)
@@ -211,7 +211,7 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
                     geminiViewModel::cancelPendingContactAction, geminiViewModel::selectContactChoice, voice = false)
             } }
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 12.dp)) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(top = 6.dp, bottom = 10.dp)) {
             if (micOff) Text("마이크가 꺼져 있으면 말로는 대화할 수 없어요. 아래를 누르면 다시 여쭤볼게요.",
                 Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
             TalkBar(start)
@@ -223,13 +223,14 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
 @Composable
 private fun TalkBar(onStart: () -> Unit) {
     val scheme = MaterialTheme.colorScheme
-    Surface(onClick = onStart, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+    // White with a thin line and a small blue mic, as the site's message box.
+    Surface(onClick = onStart, modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
         .semantics(mergeDescendants = true) { contentDescription = "대화 시작" },
-        shape = RoundedCornerShape(50), color = scheme.surfaceVariant) {
-        Row(Modifier.padding(start = 20.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        shape = RoundedCornerShape(50), color = Jarvis.extras.card, border = BorderStroke(1.dp, scheme.outlineVariant)) {
+        Row(Modifier.padding(start = 18.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("자비스, 말씀하세요", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = scheme.onSurfaceVariant)
-            Box(Modifier.size(44.dp).background(Jarvis.extras.userBubble, CircleShape), contentAlignment = Alignment.Center) {
-                Icon(Icons.Filled.Mic, null, Modifier.size(22.dp), tint = Jarvis.extras.onUserBubble)
+            Box(Modifier.size(38.dp).background(Jarvis.extras.blue, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Mic, null, Modifier.size(20.dp), tint = Jarvis.extras.onBlue)
             }
         }
     }
@@ -245,7 +246,7 @@ private fun offerIcon(kind: OfferKind) = when (kind) {
 /** Something Jarvis offered on its own. Tapping the action opens what it gathered, as the notification does. */
 @Composable
 private fun OfferMessage(offer: ProactiveOffer, now: Long, onExpired: () -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         ChatMeta("${taskWhen(offer.createdAtMs)}, ${ProactivePlanner.kindLabel(offer.kind)}", offerIcon(offer.kind))
         JarvisBubble(offer.message) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -268,7 +269,7 @@ private fun WorkMessage(task: TaskRecord, onOpenList: () -> Unit, onOpenConversa
         task.state == TaskState.FAILED -> Triple("하지 못했어요", Icons.Outlined.ErrorOutline, scheme.error)
         else -> Triple("끝났어요", Icons.Outlined.TaskAlt, scheme.primary)
     }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
         ChatMeta(taskWhen(task.updatedAt), icon, tag = label, tagTone = tone)
         JarvisBubble(task.title) {
             taskLine(task)?.let {

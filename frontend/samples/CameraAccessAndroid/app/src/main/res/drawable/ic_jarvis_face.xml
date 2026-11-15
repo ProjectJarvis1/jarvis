@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 화면 속 Jarvis 얼굴: 회사 사이트의 파란 캐릭터(안테나 끝 노란 공, 흰 타원 눈, 웃는 입). 작은 크기에서도 보이게 사이트 휴대폰 화면 머리글의 굵기를 따른다. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="200" android:viewportHeight="200">
+    <group android:translateX="-20" android:translateY="-4">
+        <path android:strokeColor="#FF3B6CF6" android:strokeWidth="9" android:strokeLineCap="round"
+            android:pathData="M120,46 C120,34 124,26 130,20" />
+        <path android:fillColor="#FFFFC85A" android:pathData="M122,16 a9,9 0 1,0 18,0 a9,9 0 1,0 -18,0" />
+        <path android:fillColor="#FF3B6CF6" android:pathData="M120,46c52,0 84,34 84,78s-30,74 -84,74 -84,-30 -84,-74 32,-78 84,-78z" />
+        <path android:fillColor="#FFFFFFFF" android:pathData="M82,122 a12,16 0 1,0 24,0 a12,16 0 1,0 -24,0 M134,122 a12,16 0 1,0 24,0 a12,16 0 1,0 -24,0" />
+        <path android:strokeColor="#FFFFFFFF" android:strokeWidth="6" android:strokeLineCap="round"
+            android:pathData="M108,153c7,7 17,7 24,0" />
+    </group>
+</vector>
