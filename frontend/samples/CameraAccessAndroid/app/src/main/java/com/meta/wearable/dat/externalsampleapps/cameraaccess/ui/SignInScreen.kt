@@ -56,7 +56,8 @@ fun SignInScreen(modifier: Modifier = Modifier) {
         if (busy) return
         busy = true; error = null
         scope.launch {
-            block().onFailure { error = it.message ?: "로그인하지 못했어요. 다시 시도해 주세요." }
+            // Network and sign-in library errors come in English; show one Korean sentence unless the server already wrote one.
+            block().onFailure { error = com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.RecordErrors.text(it, "로그인하지 못했어요", where = "아래 서버 주소") }
             busy = false
         }
     }

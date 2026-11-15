@@ -8,11 +8,12 @@ package com.meta.wearable.dat.externalsampleapps.cameraaccess.memory
 object RecordErrors {
     private val hangul = Regex("[가-힣]")
 
-    fun text(error: Throwable, failed: String): String {
+    /** [where] names the place the user can fix the server address from this screen. */
+    fun text(error: Throwable, failed: String, where: String = "설정의 서버 주소"): String {
         val message = error.message.orEmpty()
         if (hangul.containsMatchIn(message)) return message
         val network = error is java.io.IOException || error.cause is java.io.IOException
-        return if (network) "서버에 연결하지 못해 $failed. 인터넷 연결과 설정의 서버 주소를 확인해 주세요."
+        return if (network) "서버에 연결하지 못해 $failed. 인터넷 연결과 ${where}를 확인해 주세요."
         else "$failed. 잠시 뒤 다시 시도해 주세요."
     }
 }
