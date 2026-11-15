@@ -10,7 +10,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -48,7 +47,7 @@ private fun SideControl(label: String, icon: ImageVector, tint: Color, onClick: 
     }
 }
 
-/** The main button: a blue gradient disc with a halo while listening, a plain mic otherwise. */
+/** The main button: the same solid blue mic as the home talk bar, with a pale halo while listening. */
 @Composable
 private fun TalkControl(active: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val x = Jarvis.extras
@@ -58,11 +57,10 @@ private fun TalkControl(active: Boolean, enabled: Boolean, onClick: () -> Unit) 
             if (active) Box(Modifier.fillMaxSize().clip(CircleShape).background(scheme.primaryContainer))
             Surface(onClick = onClick, enabled = enabled, shape = CircleShape, color = Color.Transparent, modifier = Modifier.size(68.dp)) {
                 Box(Modifier.fillMaxSize().background(
-                    if (enabled) Brush.verticalGradient(listOf(x.gradientStart, x.gradientEnd))
-                    else Brush.verticalGradient(listOf(scheme.surfaceVariant, scheme.surfaceVariant)), CircleShape),
+                    if (enabled) x.userBubble else scheme.surfaceVariant, CircleShape),
                     contentAlignment = Alignment.Center) {
                     Icon(if (active) Icons.Default.GraphicEq else Icons.Default.Mic, if (active) "듣기 멈추기" else "말하기",
-                        Modifier.size(30.dp), tint = if (enabled) x.onGradient else scheme.onSurfaceVariant)
+                        Modifier.size(30.dp), tint = if (enabled) x.onUserBubble else scheme.onSurfaceVariant)
                 }
             }
         }

@@ -589,28 +589,16 @@ fun StreamScreen(
                     onPreviewShown = { shown -> geminiViewModel.setRecordPreviewShown(save.id, save.revision, shown) },
                     visible = isForeground)
             } }
-            if (geminiUiState.userTranscript.isNotBlank()) item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("나", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(geminiUiState.userTranscript, style = MaterialTheme.typography.headlineSmall)
-                }
+            // Before anything is said, Jarvis opens the thread, as on home.
+            if (geminiUiState.userTranscript.isBlank() && geminiUiState.aiTranscript.isBlank() &&
+                geminiUiState.pendingContactAction == null && geminiViewModel.pendingSave(taskRecords) == null) item {
+                JarvisBubble("무엇을 도와 드릴까요? 보이는 것을 묻거나, 기억해 달라고 하거나, 전화와 문자를 부탁해 보세요.")
             }
-            if (geminiUiState.aiTranscript.isNotBlank()) item {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("자비스", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
-                    Text(geminiUiState.aiTranscript, style = MaterialTheme.typography.bodyLarge.copy(lineHeight = 26.sp))
-                }
-            }
+            if (geminiUiState.userTranscript.isNotBlank()) item { UserBubble(geminiUiState.userTranscript) }
+            if (geminiUiState.aiTranscript.isNotBlank()) item { JarvisBubble(geminiUiState.aiTranscript) }
             // Words spoken over Jarvis: outlined (not filled) so they read as "not asked yet".
             if (geminiUiState.queuedTranscript.isNotBlank()) item {
-                Surface(Modifier.fillMaxWidth(), shape = RoundedCornerShape(14.dp), color = MaterialTheme.colorScheme.background,
-                    border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)) {
-                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text(geminiUiState.queuedTranscript.trim(), style = MaterialTheme.typography.bodyLarge)
-                        Text("지금 답이 끝나면 이어서 들을게요", style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                }
+                UserBubble(geminiUiState.queuedTranscript.trim(), pending = true, caption = "지금 답이 끝나면 이어서 들을게요")
             }
             val working = (geminiUiState.toolCallStatus as? ToolCallStatus.Executing)?.displayText
                 ?: (com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListRules.summary(taskRecords) +
@@ -684,10 +672,15 @@ private fun ConfirmSheet(headline: String, actionLabel: String, onAction: () -> 
     lines: List<String> = emptyList(),
     hint: String? = null, error: String? = null, actionEnabled: Boolean = true,
     extra: (@Composable () -> Unit)? = null) {
-    Surface(Modifier.fillMaxWidth(), color = Jarvis.extras.card, shape = RoundedCornerShape(20.dp),
-        border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-        shadowElevation = 2.dp) {
+    Surface(Modifier.fillMaxWidth(), color = Jarvis.extras.card, shape = RoundedCornerShape(22.dp),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Jarvis.extras.userBubble.copy(alpha = .28f)),
+        shadowElevation = 3.dp) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            // Asked by Jarvis, in the same voice as the conversation bubbles.
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                JarvisAvatar(24.dp)
+                Text("Jarvis가 확인할게요", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             if (initial != null) Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(initial, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)

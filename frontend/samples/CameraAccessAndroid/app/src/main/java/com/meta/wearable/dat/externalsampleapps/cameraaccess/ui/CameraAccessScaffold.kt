@@ -74,7 +74,7 @@ fun CameraAccessScaffold(viewModel: WearablesViewModel,
                 state.isStreaming -> StreamScreen(viewModel, isPhoneMode = state.isPhoneMode, isForeground = !state.isMemoryVisible && !state.isSettingsVisible, geminiViewModel = geminiViewModel)
                 !state.isMemoryVisible && !state.isSettingsVisible -> {
                     if (state.isRegistered) NonStreamScreen(viewModel, onRequestWearablesPermission)
-                    else HomeScreen(viewModel)
+                    else HomeScreen(viewModel, geminiViewModel)
                 }
             }
             if (state.isMemoryVisible) Surface(Modifier.fillMaxSize(), color = Jarvis.extras.ground) {

@@ -5,6 +5,10 @@
         <receiver
             android:name=".briefing.ProactiveDebugReceiver"
             android:exported="true" />
+        <!-- Debug builds only: sample offers for looking at the conversation home. -->
+        <receiver
+            android:name=".briefing.HomeDemoReceiver"
+            android:exported="true" />
         <!-- Debug builds only: crash on purpose to check crash reporting. -->
         <receiver
             android:name=".crash.CrashDebugReceiver"

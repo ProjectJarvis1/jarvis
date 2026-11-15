@@ -244,3 +244,8 @@ private fun whenLabel(epochMs: Long): String {
     val at = Instant.ofEpochMilli(epochMs)
     return if (at.atZone(KST).toLocalDate() == LocalDate.now(KST)) "오늘 ${TIME.format(at)}" else DAY_TIME.format(at)
 }
+
+/** For the home feed: the same one line the task list shows, and the same Korean time label. */
+internal fun taskLine(task: TaskRecord): String? = detail(task, runCatching { JSONObject(task.argsJson) }.getOrNull())
+
+internal fun taskWhen(epochMs: Long): String = whenLabel(epochMs)

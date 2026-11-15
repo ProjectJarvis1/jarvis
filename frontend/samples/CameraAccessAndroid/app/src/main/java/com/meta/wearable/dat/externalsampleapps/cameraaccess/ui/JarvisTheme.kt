@@ -65,17 +65,26 @@ data class JarvisExtras(
     val onGradient: Color,
     val stop: Color,
     val onStop: Color,
+    /** Conversation bubbles: what the user said (solid blue) and what Jarvis said or offered (pale blue). */
+    val userBubble: Color,
+    val onUserBubble: Color,
+    val jarvisBubble: Color,
+    val onJarvisBubble: Color,
 )
 
 private val LightExtras = JarvisExtras(
     ground = Color(0xFFF4F5F7), card = Color.White,
     gradientStart = Color(0xFFE8EEFD), gradientEnd = Color(0xFFA9C0F4), onGradient = Color(0xFF1C2E66),
     stop = Color(0xFF191A1E), onStop = Color.White,
+    userBubble = Color(0xFF3B6CF6), onUserBubble = Color.White,
+    jarvisBubble = Color(0xFFEEF2FC), onJarvisBubble = Color(0xFF16181D),
 )
 private val DarkExtras = JarvisExtras(
     ground = Color(0xFF0F1115), card = Color(0xFF1A1D24),
     gradientStart = Color(0xFF2A3A66), gradientEnd = Color(0xFF4A66B0), onGradient = Color(0xFFEFF3FF),
     stop = Color(0xFFECEEF3), onStop = Color(0xFF16181D),
+    userBubble = Color(0xFF3B6CF6), onUserBubble = Color.White,
+    jarvisBubble = Color(0xFF1E2A4A), onJarvisBubble = Color(0xFFECEEF3),
 )
 
 val LocalJarvisExtras = staticCompositionLocalOf { LightExtras }

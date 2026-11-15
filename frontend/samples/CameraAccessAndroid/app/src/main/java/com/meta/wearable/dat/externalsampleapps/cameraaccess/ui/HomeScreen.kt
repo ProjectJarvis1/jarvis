@@ -33,21 +33,74 @@ import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.unit.dp
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.R
 import com.meta.wearable.dat.externalsampleapps.cameraaccess.wearables.WearablesViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.OfferKind
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveOffer
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactivePlanner
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.briefing.ProactiveStore
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.gemini.GeminiSessionViewModel
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.openclaw.OpenClawConnectionState
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListRules
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskListSection
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskRecord
+import com.meta.wearable.dat.externalsampleapps.cameraaccess.tasks.TaskState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.material.icons.automirrored.outlined.FormatListBulleted
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.ErrorOutline
+import androidx.compose.material.icons.outlined.Event
+import androidx.compose.material.icons.outlined.Flag
+import androidx.compose.material.icons.outlined.HourglassEmpty
+import androidx.compose.material.icons.outlined.MailOutline
+import androidx.compose.material.icons.outlined.PendingActions
+import androidx.compose.material.icons.outlined.TaskAlt
+import androidx.compose.material.icons.outlined.WbSunny
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @Composable
-fun HomeScreen(viewModel: WearablesViewModel, modifier: Modifier = Modifier) {
+fun HomeScreen(viewModel: WearablesViewModel, geminiViewModel: GeminiSessionViewModel, modifier: Modifier = Modifier) {
     val activity = LocalActivity.current
     if (!com.meta.wearable.dat.externalsampleapps.cameraaccess.BuildConfig.GLASSES) {
-        PhoneHome(viewModel::navigateToPhoneMode, modifier)
+        PhoneHome(viewModel::navigateToPhoneMode, geminiViewModel, modifier)
         return
     }
     JarvisHome(false, false, { activity?.let(viewModel::startRegistration) }, viewModel::navigateToPhoneMode, modifier)
 }
 
-/** Phone build: no glasses to link, so home is the way into a conversation with the phone camera and mic. */
+/** One thing in the home conversation, ordered by when it happened. */
+private sealed class FeedEntry(val at: Long, val key: String) {
+    class Offer(val offer: ProactiveOffer) : FeedEntry(offer.createdAtMs, "offer-${offer.id}")
+    class Work(val task: TaskRecord) : FeedEntry(task.updatedAt, "task-${task.id}-${task.revision}")
+}
+
+private const val DAY_MS = 24 * 60 * 60 * 1000L
+
+/** Tasks worth a line on home: anything waiting on the user or still running, and what ended in the last day. */
+internal fun homeTasks(tasks: List<TaskRecord>, now: Long): List<TaskRecord> {
+    val recent = { t: TaskRecord -> now - t.updatedAt < DAY_MS }
+    val open = tasks.filter { TaskListRules.section(it) in setOf(TaskListSection.NEEDS_YOU, TaskListSection.RUNNING) }
+    val kept = tasks.filter { it.state == TaskState.COMPLETED && recent(it) }.sortedByDescending { it.updatedAt }.take(3)
+    val failed = tasks.filter { it.state == TaskState.FAILED && recent(it) }.sortedByDescending { it.updatedAt }.take(2)
+    return open + kept + failed
+}
+
+/**
+ * Phone build home, shaped like the company site's phone demo: one conversation with Jarvis. What Jarvis
+ * offered on its own (meetings, deadlines, mail, the morning briefing), work waiting on the user or still
+ * running, and the last exchange sit in one time-ordered thread; the bar at the bottom starts talking.
+ */
 @Composable
-private fun PhoneHome(onStart: () -> Unit, modifier: Modifier = Modifier) {
-    val byWord = LineBreak.Paragraph.copy(wordBreak = LineBreak.WordBreak.Phrase)
+private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewModel, modifier: Modifier = Modifier) {
     val context = androidx.compose.ui.platform.LocalContext.current
     // The conversation needs the microphone (and the camera to show things). Asked here if the first-run guide
     // was skipped or declined; the conversation opens either way, and the permission line says what is off.
@@ -55,32 +108,155 @@ private fun PhoneHome(onStart: () -> Unit, modifier: Modifier = Modifier) {
     fun missing() = needed.filter { context.checkSelfPermission(it) != android.content.pm.PackageManager.PERMISSION_GRANTED }
     // Read from the system each time home comes back, not remembered, so it is right after a trip to settings.
     val screenState by androidx.compose.ui.platform.LocalLifecycleOwner.current.lifecycle.currentStateAsState()
-    val micOff = androidx.compose.runtime.remember(screenState) {
+    val micOff = remember(screenState) {
         context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != android.content.pm.PackageManager.PERMISSION_GRANTED
     }
     val ask = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.RequestMultiplePermissions()) { onStart() }
     val start = { if (missing().isEmpty()) onStart() else ask.launch(missing().toTypedArray()) }
-    Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
-            JarvisWordmark(Modifier.weight(1f))
+
+    LaunchedEffect(Unit) { ProactiveStore.load(context) }
+    val offers by ProactiveStore.offers.collectAsState()
+    val tasks by geminiViewModel.taskRecords.collectAsStateWithLifecycle()
+    val gemini by geminiViewModel.uiState.collectAsStateWithLifecycle()
+    // Re-read the clock every minute so an offer leaves once its event is over.
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(60_000L); now = System.currentTimeMillis() } }
+    val entries = remember(offers, tasks, now) {
+        (offers.filter { ProactivePlanner.isLive(it, now) }.take(6).map { FeedEntry.Offer(it) } +
+            homeTasks(tasks, now).map { FeedEntry.Work(it) }).sortedBy { it.at }
+    }
+    val needsYou = tasks.count { TaskListRules.section(it) == TaskListSection.NEEDS_YOU }
+    var showTasks by rememberSaveable { mutableStateOf(false) }
+    if (showTasks) TaskListSheet(tasks, remember(geminiViewModel) { TaskListHandlers(
+        approvable = geminiViewModel::approvable,
+        approve = geminiViewModel::approveFromList,
+        control = { task, action -> geminiViewModel.controlTask(task.id, task.revision, action) },
+        edit = { task, args -> geminiViewModel.editTask(task.id, task.revision, args) },
+        delete = { task -> geminiViewModel.deleteTask(task.id) },
+    ) }, onDismiss = { showTasks = false })
+
+    val listState = rememberLazyListState()
+    val lastExchange = gemini.userTranscript.isNotBlank() || gemini.aiTranscript.isNotBlank()
+    val itemCount = 1 + entries.size + if (lastExchange) 1 else 0
+    // Newest at the bottom, like any chat: open at the latest message and follow new ones.
+    LaunchedEffect(itemCount) { listState.scrollToItem(itemCount - 1) }
+
+    val scheme = MaterialTheme.colorScheme
+    Column(modifier.fillMaxSize().background(scheme.background).statusBarsPadding()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 16.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            JarvisAvatar(40.dp)
+            Column(Modifier.weight(1f)) {
+                Text("Jarvis", style = MaterialTheme.typography.titleMedium)
+                val (status, tone) = when (gemini.openClawConnectionState) {
+                    OpenClawConnectionState.Connected -> "서버와 연결돼 있어요" to scheme.primary
+                    OpenClawConnectionState.Checking -> "서버를 확인하는 중이에요" to scheme.onSurfaceVariant
+                    is OpenClawConnectionState.Unreachable -> "서버에 연결하지 못했어요" to scheme.error
+                    OpenClawConnectionState.NotConfigured -> "말을 걸면 바로 준비해요" to scheme.onSurfaceVariant
+                }
+                Text(status, style = MaterialTheme.typography.labelMedium, color = tone)
+            }
+            IconButton(onClick = { showTasks = true }, modifier = Modifier.size(48.dp)) {
+                BadgedBox(badge = { if (needsYou > 0) Badge { Text("$needsYou") } }) {
+                    Icon(Icons.AutoMirrored.Outlined.FormatListBulleted, if (needsYou > 0) "작업 목록, 확인할 일 ${needsYou}개" else "작업 목록")
+                }
+            }
         }
-        Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)) {
-            Spacer(Modifier.height(12.dp))
-            Text("자비스에게 말을 걸어 보세요", style = MaterialTheme.typography.headlineLarge.copy(lineBreak = byWord))
-            Spacer(Modifier.height(8.dp))
-            Text("휴대폰 카메라와 마이크로 보고 듣고,\n기억해 둔 미팅과 사람을 찾아 알려 드려요.",
-                style = MaterialTheme.typography.bodyMedium.copy(lineBreak = byWord), color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(24.dp))
-            ProactiveOfferList(Modifier.padding(bottom = 20.dp))
-            TryList()
-            Spacer(Modifier.height(24.dp))
+        HorizontalDivider(color = scheme.outlineVariant)
+        LazyColumn(Modifier.weight(1f).fillMaxWidth(), state = listState,
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            item(key = "hello") {
+                JarvisBubble(if (entries.isEmpty()) "안녕하세요, 자비스예요. 미팅이나 마감이 다가오면 여기서 먼저 말씀드릴게요."
+                    else "안녕하세요, 자비스예요. 오늘 챙길 일을 모아 뒀어요.") {
+                    Text("아래 버튼을 누르거나 \"자비스\"라고 부르고 이렇게 말해 보세요.", style = MaterialTheme.typography.bodyMedium,
+                        color = scheme.onSurfaceVariant)
+                    listOf("이 명함 기억해 줘", "다음 미팅 상대랑 지난번에 무슨 얘기 했지?", "내일 오후 4시 미팅 캘린더에 넣어 줘").forEach {
+                        Text("\"$it\"", style = MaterialTheme.typography.bodyMedium, color = Jarvis.extras.onJarvisBubble)
+                    }
+                }
+            }
+            items(entries, key = { it.key }) { entry ->
+                when (entry) {
+                    is FeedEntry.Offer -> OfferMessage(entry.offer, now) { now = System.currentTimeMillis() }
+                    is FeedEntry.Work -> WorkMessage(entry.task) { showTasks = true }
+                }
+            }
+            if (lastExchange) item(key = "last") {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChatMeta("방금 나눈 대화", Icons.Outlined.ChatBubbleOutline)
+                    if (gemini.userTranscript.isNotBlank()) UserBubble(gemini.userTranscript)
+                    if (gemini.aiTranscript.isNotBlank()) JarvisBubble(gemini.aiTranscript)
+                }
+            }
         }
-        Column(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 12.dp)) {
-            if (micOff) Text("마이크가 꺼져 있으면 말로는 대화할 수 없어요. 대화 시작을 누르면 다시 여쭤볼게요.",
-                Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall.copy(lineBreak = byWord),
-                color = MaterialTheme.colorScheme.onSurfaceVariant)
-            JarvisPrimaryButton("대화 시작", start, Modifier.fillMaxWidth())
+        Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 8.dp, bottom = 12.dp)) {
+            if (micOff) Text("마이크가 꺼져 있으면 말로는 대화할 수 없어요. 아래를 누르면 다시 여쭤볼게요.",
+                Modifier.padding(bottom = 8.dp), style = MaterialTheme.typography.bodySmall, color = scheme.onSurfaceVariant)
+            TalkBar(start)
+        }
+    }
+}
+
+/** The bar at the bottom, like a message box. Talking is the only input, so the whole bar starts it. */
+@Composable
+private fun TalkBar(onStart: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    Surface(onClick = onStart, modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+        .semantics(mergeDescendants = true) { contentDescription = "대화 시작" },
+        shape = RoundedCornerShape(50), color = scheme.surfaceVariant) {
+        Row(Modifier.padding(start = 20.dp, end = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("자비스, 말씀하세요", Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge, color = scheme.onSurfaceVariant)
+            Box(Modifier.size(44.dp).background(Jarvis.extras.userBubble, CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.Mic, null, Modifier.size(22.dp), tint = Jarvis.extras.onUserBubble)
+            }
+        }
+    }
+}
+
+private fun offerIcon(kind: OfferKind) = when (kind) {
+    OfferKind.MEETING -> Icons.Outlined.Event
+    OfferKind.DEADLINE -> Icons.Outlined.Flag
+    OfferKind.MAIL -> Icons.Outlined.MailOutline
+    OfferKind.MORNING -> Icons.Outlined.WbSunny
+}
+
+/** Something Jarvis offered on its own. Tapping the action opens what it gathered, as the notification does. */
+@Composable
+private fun OfferMessage(offer: ProactiveOffer, now: Long, onExpired: () -> Unit) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        ChatMeta("${taskWhen(offer.createdAtMs)}, ${ProactivePlanner.kindLabel(offer.kind)}", offerIcon(offer.kind))
+        JarvisBubble(offer.message) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ChatAction(ProactivePlanner.actionLabel(offer.kind), {
+                    if (ProactivePlanner.isLive(offer, System.currentTimeMillis())) ProactiveStore.open(offer) else onExpired()
+                })
+            }
+        }
+    }
+}
+
+/** A task: waiting on the user (opens the list to approve), still running, or what came of it. */
+@Composable
+private fun WorkMessage(task: TaskRecord, onOpenList: () -> Unit) {
+    val scheme = MaterialTheme.colorScheme
+    val section = TaskListRules.section(task)
+    val (label, icon, tone) = when {
+        section == TaskListSection.NEEDS_YOU -> Triple("확인이 필요해요", Icons.Outlined.PendingActions, scheme.primary)
+        section == TaskListSection.RUNNING -> Triple("하고 있어요", Icons.Outlined.HourglassEmpty, scheme.onSurfaceVariant)
+        task.state == TaskState.FAILED -> Triple("하지 못했어요", Icons.Outlined.ErrorOutline, scheme.error)
+        else -> Triple("끝났어요", Icons.Outlined.TaskAlt, scheme.primary)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        ChatMeta(taskWhen(task.updatedAt), icon, tag = label, tagTone = tone)
+        JarvisBubble(task.title) {
+            taskLine(task)?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = scheme.onSurfaceVariant, maxLines = 4,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            Row { ChatAction(if (section == TaskListSection.NEEDS_YOU) "확인하기" else "작업 기록", onOpenList,
+                main = section == TaskListSection.NEEDS_YOU) }
         }
     }
 }
