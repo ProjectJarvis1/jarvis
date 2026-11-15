@@ -791,8 +791,13 @@ class GeminiSessionViewModel : ViewModel() {
         pendingSpeechJob = null
         pendingSpeechText = null
         usingFallbackAndroidStt = false
-        _uiState.value.let { if (it.userTranscript.isNotBlank() || it.aiTranscript.isNotBlank())
-            _lastExchange.value = LastExchange(it.userTranscript, it.aiTranscript, System.currentTimeMillis()) }
+        // Only real words count: a recognizer status line ("STT: ...") is not something the user said, and a
+        // session closed before anything was said keeps the previous exchange.
+        _uiState.value.let { state ->
+            val said = state.userTranscript.trim().takeUnless { it.startsWith("STT:") }.orEmpty()
+            if (said.isNotBlank() || state.aiTranscript.isNotBlank())
+                _lastExchange.value = LastExchange(said, state.aiTranscript, System.currentTimeMillis())
+        }
         _uiState.value = GeminiUiState()
     }
 

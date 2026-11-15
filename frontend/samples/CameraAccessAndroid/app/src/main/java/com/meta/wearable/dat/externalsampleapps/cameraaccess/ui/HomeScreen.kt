@@ -81,6 +81,7 @@ fun HomeScreen(viewModel: WearablesViewModel, geminiViewModel: GeminiSessionView
 private sealed class FeedEntry(val at: Long, val key: String) {
     class Offer(val offer: ProactiveOffer) : FeedEntry(offer.createdAtMs, "offer-${offer.id}")
     class Work(val task: TaskRecord) : FeedEntry(task.updatedAt, "task-${task.id}-${task.revision}")
+    class Exchange(val last: GeminiSessionViewModel.LastExchange) : FeedEntry(last.atMs, "last-${last.atMs}")
 }
 
 private const val DAY_MS = 24 * 60 * 60 * 1000L
@@ -122,10 +123,7 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
     // Re-read the clock every minute so an offer leaves once its event is over.
     var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
     LaunchedEffect(Unit) { while (true) { kotlinx.coroutines.delay(60_000L); now = System.currentTimeMillis() } }
-    val entries = remember(offers, tasks, now) {
-        (offers.filter { ProactivePlanner.isLive(it, now) }.take(6).map { FeedEntry.Offer(it) } +
-            homeTasks(tasks, now).map { FeedEntry.Work(it) }).sortedBy { it.at }
-    }
+
     val needsYou = tasks.count { TaskListRules.section(it) == TaskListSection.NEEDS_YOU }
     var showTasks by rememberSaveable { mutableStateOf(false) }
     if (showTasks) TaskListSheet(tasks, remember(geminiViewModel) { TaskListHandlers(
@@ -144,12 +142,19 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
         }
     }
     val last by geminiViewModel.lastExchange.collectAsStateWithLifecycle()
+    val entries = remember(offers, tasks, now, last) {
+        (offers.filter { ProactivePlanner.isLive(it, now) }.take(6).map { FeedEntry.Offer(it) } +
+            homeTasks(tasks, now).map { FeedEntry.Work(it) } + listOfNotNull(last?.let { FeedEntry.Exchange(it) }))
+            .sortedBy { it.at }
+    }
     // A call or text approved from the task list waits here for its card, same-name choice included.
     val contact = gemini.pendingContactAction
     val listState = rememberLazyListState()
-    val itemCount = 1 + entries.size + (if (last != null) 1 else 0) + (if (contact != null) 1 else 0)
-    // Newest at the bottom, like any chat: open at the latest message and follow new ones.
-    LaunchedEffect(itemCount) { listState.scrollToItem(itemCount - 1) }
+    val itemCount = 1 + entries.size + (if (contact != null) 1 else 0)
+    // Newest at the bottom, like any chat: open at the latest message and follow new ones, also when an old one
+    // drops off the top as a new one arrives (the count stays, the last key changes).
+    val newest = contact?.id ?: entries.lastOrNull()?.let { "${it.key}@${it.at}" }
+    LaunchedEffect(itemCount, newest) { listState.scrollToItem(itemCount - 1) }
 
     val scheme = MaterialTheme.colorScheme
     Column(modifier.fillMaxSize().background(scheme.background).statusBarsPadding()) {
@@ -190,15 +195,13 @@ private fun PhoneHome(onStart: () -> Unit, geminiViewModel: GeminiSessionViewMod
                 when (entry) {
                     is FeedEntry.Offer -> OfferMessage(entry.offer, now) { now = System.currentTimeMillis() }
                     is FeedEntry.Work -> WorkMessage(entry.task) { showTasks = true }
+                    is FeedEntry.Exchange -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        ChatMeta("${taskWhen(entry.last.atMs)}, 마지막 대화", Icons.Outlined.ChatBubbleOutline)
+                        if (entry.last.user.isNotBlank()) UserBubble(entry.last.user)
+                        if (entry.last.jarvis.isNotBlank()) JarvisBubble(entry.last.jarvis)
+                    }
                 }
             }
-            last?.let { exchange -> item(key = "last") {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ChatMeta("${taskWhen(exchange.atMs)}, 마지막 대화", Icons.Outlined.ChatBubbleOutline)
-                    if (exchange.user.isNotBlank()) UserBubble(exchange.user)
-                    if (exchange.jarvis.isNotBlank()) JarvisBubble(exchange.jarvis)
-                }
-            } }
             contact?.let { action -> item(key = "contact-${action.id}") {
                 ContactActionConfirmCard(action, geminiViewModel::confirmPendingContactAction,
                     geminiViewModel::cancelPendingContactAction, geminiViewModel::selectContactChoice, voice = false)
