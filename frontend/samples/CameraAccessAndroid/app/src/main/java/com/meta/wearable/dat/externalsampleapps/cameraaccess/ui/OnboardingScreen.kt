@@ -118,7 +118,7 @@ fun OnboardingScreen(onDone: () -> Unit, modifier: Modifier = Modifier) {
         }
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             // On the grey ground the grey secondary button would vanish, so "이전" sits on the white card color.
-            if (step > 0) Surface(onClick = { step-- }, shape = RoundedCornerShape(12.dp), color = Jarvis.extras.card,
+            if (step > 0) Surface(onClick = { step-- }, shape = RoundedCornerShape(50), color = Jarvis.extras.card,
                 modifier = Modifier.weight(1f).heightIn(min = 52.dp)) {
                 Box(Modifier.heightIn(min = 52.dp), contentAlignment = Alignment.Center) {
                     Text("이전", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurface)
@@ -201,7 +201,7 @@ private fun Permissions(byWord: LineBreak) {
                     Ask.DENIED -> Text("나중에", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Ask.NOT_YET -> Surface(onClick = {
                         if (activity != null && asking == null) { asking = item.key; launcher.launch(item.permissions.toTypedArray()) }
-                    }, shape = RoundedCornerShape(10.dp), color = MaterialTheme.colorScheme.primaryContainer,
+                    }, shape = RoundedCornerShape(50), color = MaterialTheme.colorScheme.primaryContainer,
                         modifier = Modifier.heightIn(min = 40.dp)) {
                         Box(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), contentAlignment = Alignment.Center) {
                             Text("허용", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onPrimaryContainer)
@@ -220,7 +220,7 @@ private fun FirstWords(byWord: LineBreak) {
         listOf("자비스, 오늘 일정 뭐 있어?", "자비스, 이 명함 기억해 줘", "자비스, 김 팀장님이랑 지난번에 무슨 얘기 했지?").forEach { phrase ->
             Row(Modifier.fillMaxWidth().heightIn(min = 52.dp).padding(horizontal = 14.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically) {
-                Surface(shape = RoundedCornerShape(16.dp, 16.dp, 16.dp, 4.dp), color = MaterialTheme.colorScheme.primaryContainer) {
+                Surface(shape = RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp), color = MaterialTheme.colorScheme.primaryContainer) {
                     Text("“$phrase”", Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer)
                 }

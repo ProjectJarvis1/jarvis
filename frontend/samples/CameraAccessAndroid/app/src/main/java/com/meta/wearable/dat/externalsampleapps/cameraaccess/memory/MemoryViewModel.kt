@@ -53,7 +53,7 @@ class MemoryViewModel : ViewModel() {
                 onSuccess(updated)
                 refreshCurrent()
             } catch (e: Exception) {
-                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to update memory") }
+                _uiState.update { it.copy(errorMessage = RecordErrors.text(e, "기억을 고치지 못했어요")) }
             } finally {
                 _uiState.update { it.copy(isSaving = false) }
             }
@@ -71,7 +71,7 @@ class MemoryViewModel : ViewModel() {
                 onSuccess()
                 refreshCurrent()
             } catch (e: Exception) {
-                _uiState.update { it.copy(errorMessage = e.message ?: "Failed to delete memory") }
+                _uiState.update { it.copy(errorMessage = RecordErrors.text(e, "기억을 지우지 못했어요")) }
             } finally {
                 _uiState.update { it.copy(isSaving = false) }
             }
@@ -88,7 +88,7 @@ class MemoryViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = e.message ?: "Failed to load memories",
+                        errorMessage = RecordErrors.text(e, "기억을 불러오지 못했어요"),
                     )
                 }
             }

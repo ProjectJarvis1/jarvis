@@ -403,13 +403,13 @@ private fun ServiceConnectionsSection(onServer: (Boolean) -> Unit) {
                             }
                         },
                         enabled = busy == null && state != null && state.ready,
-                        shape = RoundedCornerShape(8.dp),
+                        shape = RoundedCornerShape(50),
                         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = if (busy == null && state?.ready == true) 1f else .4f),
                         modifier = Modifier.heightIn(min = 48.dp).padding(vertical = 6.dp),
                     ) {
                         Box(Modifier.padding(horizontal = 14.dp), contentAlignment = Alignment.Center) {
                             Text("연결", style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = if (busy == null && state?.ready == true) 1f else .5f))
+                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = if (busy == null && state?.ready == true) 1f else .5f))
                         }
                     }
                 })

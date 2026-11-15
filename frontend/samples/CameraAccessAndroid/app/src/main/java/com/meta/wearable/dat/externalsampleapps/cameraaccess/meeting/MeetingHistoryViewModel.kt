@@ -26,7 +26,7 @@ class MeetingHistoryViewModel : ViewModel() {
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        errorMessage = e.message ?: "Failed to load meetings",
+                        errorMessage = com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.RecordErrors.text(e, "회의를 불러오지 못했어요"),
                     )
                 }
             }
@@ -51,7 +51,7 @@ class MeetingHistoryViewModel : ViewModel() {
                 loadRecent()
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(errorMessage = e.message ?: "Failed to update meeting")
+                    it.copy(errorMessage = com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.RecordErrors.text(e, "회의를 고치지 못했어요"))
                 }
             } finally {
                 _uiState.update { it.copy(isSaving = false) }
@@ -71,7 +71,7 @@ class MeetingHistoryViewModel : ViewModel() {
                 loadRecent()
             } catch (e: Exception) {
                 _uiState.update {
-                    it.copy(errorMessage = e.message ?: "Failed to delete meeting")
+                    it.copy(errorMessage = com.meta.wearable.dat.externalsampleapps.cameraaccess.memory.RecordErrors.text(e, "회의를 지우지 못했어요"))
                 }
             } finally {
                 _uiState.update { it.copy(isSaving = false) }

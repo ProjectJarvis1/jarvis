@@ -157,15 +157,15 @@ fun MemoryScreen(
                     when {
                         selectedMemory != null -> {
                             IconButton(onClick = { editingMemory = selectedMemory }) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit memory")
+                                Icon(Icons.Default.Edit, contentDescription = "기억 고치기")
                             }
                             IconButton(onClick = { pendingDeleteMemory = selectedMemory }) {
-                                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete memory")
+                                Icon(Icons.Default.DeleteOutline, contentDescription = "기억 삭제")
                             }
                         }
                         selectedMeeting != null -> {
                             IconButton(onClick = { editingMeeting = selectedMeeting }) {
-                                Icon(Icons.Default.Edit, contentDescription = "Edit meeting")
+                                Icon(Icons.Default.Edit, contentDescription = "회의 고치기")
                             }
                             IconButton(onClick = {
                                 selectedMeeting?.let { meeting ->
@@ -177,10 +177,10 @@ fun MemoryScreen(
                                     context.startActivity(Intent.createChooser(intent, "회의 공유"))
                                 }
                             }) {
-                                Icon(Icons.Default.Share, contentDescription = "Share meeting")
+                                Icon(Icons.Default.Share, contentDescription = "회의 공유")
                             }
                             IconButton(onClick = { pendingDeleteMeeting = selectedMeeting }) {
-                                Icon(Icons.Default.DeleteOutline, contentDescription = "Delete meeting")
+                                Icon(Icons.Default.DeleteOutline, contentDescription = "회의 삭제")
                             }
                         }
                         else -> {
@@ -354,7 +354,7 @@ private fun SearchBar(
         } } else null,
         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
         keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = { onSearch() }),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(50),
         placeholder = { Text("어떤 기억을 찾을까요?", maxLines = 1) },
         singleLine = true,
         colors = TextFieldDefaults.colors(
@@ -1038,7 +1038,7 @@ private fun MemoryThumbnail(
     bitmap?.let {
         Image(
             bitmap = it.asImageBitmap(),
-            contentDescription = "Memory image",
+            contentDescription = "기억 사진",
             modifier = Modifier
                 .fillMaxWidth()
                 .aspectRatio(if (large) 4f / 3f else 16f / 9f)

@@ -97,7 +97,7 @@ fun ProactiveOfferSheet() {
             lines.drop(1).forEach { line ->
                 val (head, rest) = line.split(": ", limit = 2).let { if (it.size == 2) it[0] to it[1] else "" to it[0] }
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    if (head.isNotEmpty()) Text(head, style = MaterialTheme.typography.labelMedium, color = scheme.primary)
+                    if (head.isNotEmpty()) Text(head, style = MaterialTheme.typography.labelMedium, color = scheme.onPrimaryContainer)
                     Text(rest, style = MaterialTheme.typography.bodyMedium.copy(lineBreak = byWord))
                 }
             }
